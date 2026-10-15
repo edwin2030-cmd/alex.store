@@ -1,0 +1,2 @@
+Coloca aquí tu archivo de logo oficial con el nombre 'logo.png' o 'logo.svg'.
+La aplicación cargará automáticamente /images/logo.png o /images/logo.svg en la barra de navegación y en el acceso de administrador.

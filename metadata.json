@@ -1,0 +1,6 @@
+{
+  "name": "AlexStore - Catálogo Oficial",
+  "description": "Catálogo digital exclusivo de AlexStore conectado a Supabase con pedidos directos por WhatsApp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

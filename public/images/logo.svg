@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1C1A17"/>
+      <stop offset="85%" stop-color="#0A0908"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </radialGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F7E7B4"/>
+      <stop offset="50%" stop-color="#D4AF37"/>
+      <stop offset="100%" stop-color="#AA7C11"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Outer Gold Rings -->
+  <circle cx="100" cy="100" r="95" fill="none" stroke="url(#goldGrad)" stroke-width="3" stroke-dasharray="6 3"/>
+  <circle cx="100" cy="100" r="88" fill="url(#bgGrad)" stroke="url(#goldGrad)" stroke-width="2"/>
+  
+  <!-- Crown Icon -->
+  <path d="M78 62 L88 72 L100 58 L112 72 L122 62 L118 78 L82 78 Z" fill="url(#goldGrad)" />
+  <circle cx="78" cy="60" r="3" fill="#FFF"/>
+  <circle cx="100" cy="56" r="3.5" fill="#FFF"/>
+  <circle cx="122" cy="60" r="3" fill="#FFF"/>
+  
+  <!-- Monogram ACS -->
+  <text x="100" y="125" text-anchor="middle" fill="url(#goldGrad)" font-size="44" font-weight="900" font-family="'Times New Roman', serif" letter-spacing="2">
+    ACS
+  </text>
+  
+  <!-- Banner Ribbon -->
+  <path d="M55 145 Q100 156 145 145 Q100 165 55 145" fill="url(#goldGrad)"/>
+  <text x="100" y="167" text-anchor="middle" fill="url(#goldGrad)" font-size="12" font-weight="bold" font-family="sans-serif" letter-spacing="3">
+    ALEXSTORE
+  </text>
+</svg>
