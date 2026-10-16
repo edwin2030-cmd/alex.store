@@ -148,13 +148,29 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   };
 
   /**
+   * Helper to convert base64 Data URL to File if needed
+   */
+  const dataUrlToFile = (dataUrl: string, filename: string): File => {
+    const arr = dataUrl.split(',');
+    const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, { type: mime });
+  };
+
+  /**
    * Generates the extensive, detailed single WhatsApp message
-   * NO links and NO base64 strings!
+   * Includes the direct public link to the comprobante image
    */
   const buildExtensiveWhatsAppMessage = (
     pedido: Pedido,
     metodoStr: string,
-    fechaEmision: string
+    fechaEmision: string,
+    comprobanteUrl?: string
   ): string => {
     const lineas: string[] = [];
 
@@ -210,8 +226,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     lineas.push(`• *Costo de Envío:* A coordinar según zona / cobertura`);
     lineas.push(`💰 *TOTAL FINAL PAGADO:* $${pedido.total.toFixed(2)} USD`);
     lineas.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    lineas.push(`📸 *COMPROBANTE DE PAGO:*`);
-    lineas.push(`✅ *Adjunto en este chat de WhatsApp junto con mi pedido.*`);
+    lineas.push(`📸 *COMPROBANTE DE PAGO (FOTO):*`);
+    if (comprobanteUrl && comprobanteUrl.startsWith('http')) {
+      lineas.push(`🔗 *Ver foto del comprobante:* ${comprobanteUrl}`);
+      lineas.push(`✅ *Foto del comprobante subida exitosamente.*`);
+    } else {
+      lineas.push(`✅ *Adjunto en este chat de WhatsApp junto con mi pedido.*`);
+    }
     lineas.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     lineas.push(
       `✨ *Estimado equipo de AlexStore, he realizado el pago y completado los datos de mi orden. Quedo atento a la confirmación de la guía de envío y número de rastreo. ¡Muchas gracias!*`
@@ -259,6 +280,29 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         hour12: true,
       });
 
+    // 1. Subir primero el comprobante a Supabase Storage para obtener la URL pública real
+    let uploadedUrl: string | undefined = undefined;
+    let fileToUpload = comprobanteFile;
+
+    if (!fileToUpload && comprobantePreview && comprobantePreview.startsWith('data:')) {
+      try {
+        fileToUpload = dataUrlToFile(comprobantePreview, `comprobante_${Date.now()}.jpg`);
+      } catch (e) {
+        console.warn('Could not convert preview to file:', e);
+      }
+    }
+
+    if (fileToUpload) {
+      try {
+        const uploadRes = await subirFotoStorage(fileToUpload, 'comprobantes');
+        if (uploadRes.url && uploadRes.url.startsWith('http')) {
+          uploadedUrl = uploadRes.url;
+        }
+      } catch (err) {
+        console.warn('Error subiendo comprobante a Supabase Storage:', err);
+      }
+    }
+
     const nuevoPedido: Pedido = {
       codigo: codigoPedido,
       cliente_nombre: nombre.trim(),
@@ -276,46 +320,28 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         imagen_url: i.producto.imagen_url || undefined,
       })),
       notas: `${nota.trim() ? nota.trim() + ' | ' : ''}Método: ${detalleMetodo}`,
+      comprobante_url: uploadedUrl || comprobantePreview || undefined,
       creado_en: now.toISOString(),
     };
 
-    // Build the full extensive message (NO link, NO base64)
-    const whatsappMessage = buildExtensiveWhatsAppMessage(nuevoPedido, detalleMetodo, fechaEmision);
+    // 2. Guardar en Supabase
+    await crearPedido(nuevoPedido);
+
+    // 3. Construir el mensaje de WhatsApp que incluye el link directo al comprobante
+    const whatsappMessage = buildExtensiveWhatsAppMessage(
+      nuevoPedido,
+      detalleMetodo,
+      fechaEmision,
+      uploadedUrl
+    );
     const targetPhone = '50766212802';
     const waUrl = `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessage)}`;
 
-    // If user uploaded an image, copy it to clipboard so they can paste it directly in WhatsApp
-    if (comprobanteFile && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
-      try {
-        const clipItem = new ClipboardItem({ [comprobanteFile.type]: comprobanteFile });
-        await navigator.clipboard.write([clipItem]);
-      } catch (clipErr) {
-        // Non-blocking clipboard copy
-        console.log('Clipboard auto-copy non-fatal:', clipErr);
-      }
-    }
-
-    // Direct redirection to WhatsApp without delay
+    // 4. Redirección inmediata a WhatsApp
     const openedWindow = window.open(waUrl, '_blank');
     if (!openedWindow || openedWindow.closed || typeof openedWindow.closed === 'undefined') {
       window.location.href = waUrl;
     }
-
-    // In parallel / background: Save order and upload proof to Supabase for the Admin Panel
-    let uploadedUrl: string | undefined = undefined;
-    if (comprobanteFile) {
-      try {
-        const uploadRes = await subirFotoStorage(comprobanteFile, 'comprobantes');
-        if (uploadRes.url) {
-          uploadedUrl = uploadRes.url;
-        }
-      } catch (err) {
-        console.warn('Error subiendo comprobante a Supabase Storage:', err);
-      }
-    }
-
-    nuevoPedido.comprobante_url = uploadedUrl || comprobantePreview || undefined;
-    await crearPedido(nuevoPedido);
 
     setIsSubmitting(false);
     setReciboOficial(nuevoPedido);
@@ -400,7 +426,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       minute: '2-digit',
                       hour12: true,
                     });
-                  const fullMsg = buildExtensiveWhatsAppMessage(reciboOficial, detalleMetodo, fechaStr);
+                  const fullMsg = buildExtensiveWhatsAppMessage(
+                    reciboOficial,
+                    detalleMetodo,
+                    fechaStr,
+                    reciboOficial.comprobante_url
+                  );
                   window.open(`https://wa.me/${targetPhone}?text=${encodeURIComponent(fullMsg)}`, '_blank');
                 }}
                 className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2.5 shadow-xl shadow-emerald-600/25 active:scale-98 transition-all cursor-pointer"
@@ -551,33 +582,65 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
 
                 {/* Previsualización del Comprobante */}
-                {comprobantePreview && (
-                  <div className="p-4 rounded-2xl bg-white border border-[#EAE5DC] flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={comprobantePreview}
-                        alt="Comprobante"
-                        className="w-14 h-14 object-cover rounded-xl border border-[#D5CEC2] shadow-sm cursor-pointer"
-                        onClick={() => setIsZoomingImage(true)}
-                      />
-                      <div>
-                        <span className="text-xs font-bold text-[#1A1918] block">
-                          Comprobante de Pago Adjunto
-                        </span>
-                        <span className="text-[11px] text-emerald-700 font-semibold">
-                          ✅ Listo para enviar por WhatsApp
-                        </span>
+                {(comprobantePreview || reciboOficial.comprobante_url) && (
+                  <div className="space-y-2">
+                    <div className="p-4 rounded-2xl bg-white border border-[#EAE5DC] flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={comprobantePreview || reciboOficial.comprobante_url}
+                          alt="Comprobante"
+                          className="w-14 h-14 object-cover rounded-xl border border-[#D5CEC2] shadow-sm cursor-pointer"
+                          onClick={() => setIsZoomingImage(true)}
+                        />
+                        <div>
+                          <span className="text-xs font-bold text-[#1A1918] block">
+                            Comprobante de Pago
+                          </span>
+                          <span className="text-[11px] text-emerald-700 font-semibold">
+                            ✅ Subido exitosamente al sistema
+                          </span>
+                        </div>
                       </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsZoomingImage(true)}
+                        className="px-3 py-1.5 rounded-xl border border-[#E5DFD5] hover:bg-[#FAF8F5] text-xs font-bold text-[#1A1918] flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Maximize2 className="w-3.5 h-3.5 text-[#C59A4D]" />
+                        <span>Ver en grande</span>
+                      </button>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setIsZoomingImage(true)}
-                      className="px-3 py-1.5 rounded-xl border border-[#E5DFD5] hover:bg-[#FAF8F5] text-xs font-bold text-[#1A1918] flex items-center gap-1.5"
-                    >
-                      <Maximize2 className="w-3.5 h-3.5 text-[#C59A4D]" />
-                      <span>Ver en grande</span>
-                    </button>
+                    {reciboOficial.comprobante_url && reciboOficial.comprobante_url.startsWith('http') && (
+                      <div className="p-3 bg-emerald-50/80 rounded-xl border border-emerald-200/80 text-xs flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[10px] font-black uppercase text-emerald-900 block tracking-wider">
+                            Enlace público del comprobante:
+                          </span>
+                          <a
+                            href={reciboOficial.comprobante_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-emerald-700 hover:text-emerald-900 underline truncate block text-[11px] font-medium"
+                          >
+                            {reciboOficial.comprobante_url}
+                          </a>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(reciboOficial.comprobante_url!, 'receipt_proof_url')}
+                          className="px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-900 text-[10px] font-bold shrink-0 flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          {copiedField === 'receipt_proof_url' ? (
+                            <Check className="w-3 h-3 text-emerald-600" />
+                          ) : (
+                            <Copy className="w-3 h-3" />
+                          )}
+                          <span>Copiar Link</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

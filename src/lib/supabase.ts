@@ -409,20 +409,20 @@ export async function crearVentaManual(venta: {
 // ==========================================
 export async function subirFotoStorage(file: File, bucket = 'productos'): Promise<{ url: string | null; error?: string }> {
   try {
-    const ext = file.name.split('.').pop() || 'jpg';
+    const ext = file.name?.split('.').pop() || 'jpg';
     const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
-    const filePath = `productos/${fileName}`;
+    const filePath = bucket === 'comprobantes' ? `recibos/${fileName}` : `productos/${fileName}`;
 
     const { error: uploadError } = await supabase.storage
       .from(bucket)
       .upload(filePath, file, {
         cacheControl: '3600',
+        contentType: file.type || 'image/jpeg',
         upsert: true,
       });
 
     if (uploadError) {
       console.warn("Storage upload error:", uploadError);
-      // Fallback to data URL so the user's uploaded photo still works 100%
       return new Promise((resolve) => {
         const reader = new FileReader();
         reader.onload = () => resolve({ url: reader.result as string });
