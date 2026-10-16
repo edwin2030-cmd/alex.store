@@ -19,7 +19,10 @@ import {
   User,
   Phone,
   MapPin,
-  FileText
+  FileText,
+  Calendar,
+  ExternalLink,
+  Package
 } from 'lucide-react';
 import { crearPedido, subirFotoStorage } from '../lib/supabase';
 
@@ -144,6 +147,79 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     fileInputRef.current?.click();
   };
 
+  /**
+   * Generates the extensive, detailed single WhatsApp message
+   * NO links and NO base64 strings!
+   */
+  const buildExtensiveWhatsAppMessage = (
+    pedido: Pedido,
+    metodoStr: string,
+    fechaEmision: string
+  ): string => {
+    const lineas: string[] = [];
+
+    lineas.push(`🏛️ *ALEXSTORE LUXURY & ESSENTIALS*`);
+    lineas.push(`📋 *ORDEN OFICIAL DE COMPRA & DESPACHO*`);
+    lineas.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    lineas.push(`🔢 *CÓDIGO DE ORDEN:* ${pedido.codigo}`);
+    lineas.push(`📅 *FECHA & HORA:* ${fechaEmision}`);
+    lineas.push(`⚡ *ESTADO:* PAGO REGISTRADO / LISTO PARA DESPACHO`);
+    lineas.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    lineas.push(`👤 *DATOS DEL CLIENTE:*`);
+    lineas.push(`• *Nombre Completo:* ${pedido.cliente_nombre}`);
+    lineas.push(`• *WhatsApp / Teléfono:* ${pedido.cliente_telefono}`);
+    lineas.push(`• *Dirección de Entrega:* ${pedido.cliente_direccion || 'Por coordinar con el cliente'}`);
+    if (nota.trim()) {
+      lineas.push(`• *Instrucciones especiales:* ${nota.trim()}`);
+    }
+    lineas.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    lineas.push(`💳 *MÉTODO DE PAGO UTILIZADO:*`);
+    lineas.push(`• *Canal:* ${metodoStr}`);
+    if (metodoPago === 'transferencia') {
+      if (bancoSeleccionado === 'banco_general') {
+        lineas.push(`• *Banco:* Banco General (Panamá)`);
+        lineas.push(`• *Cuenta de Ahorros:* 0439000024206`);
+      } else {
+        lineas.push(`• *Banco:* BAC Credomatic`);
+        lineas.push(`• *Cuenta de Ahorros:* 117537266`);
+      }
+    } else {
+      lineas.push(`• *Aplicación:* Yappy Panamá`);
+      lineas.push(`• *Directorio Oficial:* @GRAPHYCALEXPTY`);
+    }
+    lineas.push(`• *Beneficiario / Titular:* AlexStore (Graphycalexpty)`);
+    lineas.push(`• *Verificación:* Pago completado con comprobante`);
+    lineas.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    lineas.push(`🛍️ *DESGLOSE DETALLADO DE ARTÍCULOS:*`);
+
+    pedido.items.forEach((item, idx) => {
+      const tallaStr = item.talla ? ` [Talla: ${item.talla}]` : ' [Estándar]';
+      lineas.push(
+        `\n🔹 *ARTÍCULO ${idx + 1}:* ${item.nombre}\n` +
+          `   • *Especificación:* ${tallaStr}\n` +
+          `   • *Cantidad:* ${item.cantidad} ${item.cantidad === 1 ? 'unidad' : 'unidades'}\n` +
+          `   • *Precio Unitario:* $${item.precio.toFixed(2)} USD\n` +
+          `   • *Subtotal Artículo:* $${(item.cantidad * item.precio).toFixed(2)} USD`
+      );
+    });
+
+    lineas.push(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    lineas.push(`📊 *RESUMEN DE CUENTA & TOTAL:*`);
+    lineas.push(`• *Total de Artículos:* ${totalArticulos} ${totalArticulos === 1 ? 'artículo' : 'artículos'}`);
+    lineas.push(`• *Subtotal de Compra:* $${total.toFixed(2)} USD`);
+    lineas.push(`• *Costo de Envío:* A coordinar según zona / cobertura`);
+    lineas.push(`💰 *TOTAL FINAL PAGADO:* $${pedido.total.toFixed(2)} USD`);
+    lineas.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    lineas.push(`📸 *COMPROBANTE DE PAGO:*`);
+    lineas.push(`✅ *Adjunto en este chat de WhatsApp junto con mi pedido.*`);
+    lineas.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    lineas.push(
+      `✨ *Estimado equipo de AlexStore, he realizado el pago y completado los datos de mi orden. Quedo atento a la confirmación de la guía de envío y número de rastreo. ¡Muchas gracias!*`
+    );
+
+    return lineas.join('\n');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -162,24 +238,26 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setIsSubmitting(true);
     const codigoPedido = `ALX-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    let uploadedUrl = comprobantePreview || undefined;
-    if (comprobanteFile) {
-      try {
-        const uploadRes = await subirFotoStorage(comprobanteFile, 'comprobantes');
-        if (uploadRes.url) {
-          uploadedUrl = uploadRes.url;
-        }
-      } catch (err) {
-        console.warn('Error subiendo comprobante:', err);
-      }
-    }
-
     const detalleMetodo =
       metodoPago === 'transferencia'
         ? bancoSeleccionado === 'banco_general'
           ? 'Transferencia - Banco General (0439000024206)'
-          : 'Transferencia - BAC (117537266)'
+          : 'Transferencia - BAC Credomatic (117537266)'
         : 'Yappy (@GRAPHYCALEXPTY)';
+
+    const now = new Date();
+    const fechaEmision =
+      now.toLocaleDateString('es-PA', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }) +
+      ' ' +
+      now.toLocaleTimeString('es-PA', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
 
     const nuevoPedido: Pedido = {
       codigo: codigoPedido,
@@ -198,53 +276,50 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         imagen_url: i.producto.imagen_url || undefined,
       })),
       notas: `${nota.trim() ? nota.trim() + ' | ' : ''}Método: ${detalleMetodo}`,
-      comprobante_url: uploadedUrl,
-      creado_en: new Date().toISOString(),
+      creado_en: now.toISOString(),
     };
 
-    // Guardar en Supabase
+    // Build the full extensive message (NO link, NO base64)
+    const whatsappMessage = buildExtensiveWhatsAppMessage(nuevoPedido, detalleMetodo, fechaEmision);
+    const targetPhone = '50766212802';
+    const waUrl = `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessage)}`;
+
+    // If user uploaded an image, copy it to clipboard so they can paste it directly in WhatsApp
+    if (comprobanteFile && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+      try {
+        const clipItem = new ClipboardItem({ [comprobanteFile.type]: comprobanteFile });
+        await navigator.clipboard.write([clipItem]);
+      } catch (clipErr) {
+        // Non-blocking clipboard copy
+        console.log('Clipboard auto-copy non-fatal:', clipErr);
+      }
+    }
+
+    // Direct redirection to WhatsApp without delay
+    const openedWindow = window.open(waUrl, '_blank');
+    if (!openedWindow || openedWindow.closed || typeof openedWindow.closed === 'undefined') {
+      window.location.href = waUrl;
+    }
+
+    // In parallel / background: Save order and upload proof to Supabase for the Admin Panel
+    let uploadedUrl: string | undefined = undefined;
+    if (comprobanteFile) {
+      try {
+        const uploadRes = await subirFotoStorage(comprobanteFile, 'comprobantes');
+        if (uploadRes.url) {
+          uploadedUrl = uploadRes.url;
+        }
+      } catch (err) {
+        console.warn('Error subiendo comprobante a Supabase Storage:', err);
+      }
+    }
+
+    nuevoPedido.comprobante_url = uploadedUrl || comprobantePreview || undefined;
     await crearPedido(nuevoPedido);
 
     setIsSubmitting(false);
     setReciboOficial(nuevoPedido);
     onOrderCompleted();
-
-    // Redirección directa al WhatsApp oficial 66212802
-    sendOrderToWhatsApp(nuevoPedido, detalleMetodo, uploadedUrl);
-  };
-
-  const sendOrderToWhatsApp = (pedido: Pedido, detalleMetodo: string, proofUrl?: string) => {
-    const targetPhone = '50766212802'; // Número oficial de WhatsApp de AlexStore
-    let msg = `🧾 *NUEVO PEDIDO OFICIAL - ALEXSTORE* 🧾\n`;
-    msg += `*Código de Compra:* ${pedido.codigo}\n`;
-    msg += `------------------------------------\n`;
-    msg += `👤 *Cliente:* ${pedido.cliente_nombre}\n`;
-    if (pedido.cliente_telefono && pedido.cliente_telefono !== 'No especificado') {
-      msg += `📱 *Teléfono:* ${pedido.cliente_telefono}\n`;
-    }
-    if (pedido.cliente_direccion) {
-      msg += `📍 *Dirección de Entrega:* ${pedido.cliente_direccion}\n`;
-    }
-    msg += `💳 *Método de Pago:* ${detalleMetodo}\n`;
-    msg += `------------------------------------\n`;
-    msg += `📦 *PRODUCTOS:* \n`;
-
-    pedido.items.forEach((item, idx) => {
-      const tallaStr = item.talla ? ` [Talla: ${item.talla}]` : '';
-      msg += `${idx + 1}. ${item.nombre}${tallaStr}\n   ${item.cantidad}x $${item.precio} = $${(item.cantidad * item.precio).toFixed(2)}\n`;
-    });
-
-    msg += `------------------------------------\n`;
-    msg += `💰 *TOTAL A PAGAR:* $${pedido.total.toFixed(2)}\n`;
-    if (nota.trim()) {
-      msg += `📝 *Nota:* ${nota.trim()}\n`;
-    }
-    if (proofUrl) {
-      msg += `\n📎 *Comprobante cargado en la web:* ${proofUrl}\n`;
-    }
-    msg += `\nAdjunto la captura del comprobante de pago para procesar mi despacho. ¡Muchas gracias!`;
-
-    window.open(`https://wa.me/${targetPhone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   return (
@@ -258,7 +333,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <div className="flex items-center gap-2 mb-1">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
                 <span className="text-[10px] font-black tracking-widest uppercase text-[#9C9488]">
-                  ALEXSTORE OFICIAL
+                  ALEXSTORE OFICIAL • WHATSAPP 66212802
                 </span>
               </div>
               <h2 className="text-xl sm:text-2xl font-black text-[#1A1918] font-heading leading-tight">
@@ -266,8 +341,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </h2>
               <p className="text-xs sm:text-sm text-[#7A7368] mt-1">
                 {reciboOficial
-                  ? 'Tu compra ha sido registrada en el sistema de AlexStore'
-                  : 'Completa tus datos, elige el método de pago y adjunta tu comprobante.'}
+                  ? 'Tu orden y comprobante han sido preparados y registrados en el sistema.'
+                  : 'Ingresa tus datos, selecciona tu forma de pago y adjunta tu comprobante.'}
               </p>
             </div>
 
@@ -283,66 +358,175 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           {/* Modal Content */}
           {reciboOficial ? (
             /* ============================================================ */
-            /* RECIBO OFICIAL DE PEDIDO                                     */
+            /* RECIBO OFICIAL DE PEDIDO (EXTENSO Y DETALLADO)               */
             /* ============================================================ */
-            <div className="p-6 sm:p-8 space-y-6">
-              <div className="bg-[#FAF8F5] border border-[#E8E2D8] rounded-3xl p-6 sm:p-8 space-y-5">
-                {/* Receipt Header */}
-                <div className="flex items-center justify-between pb-4 border-b border-[#E5DFD5]">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-10 h-10 rounded-full bg-[#141312] text-[#E6C687] flex items-center justify-center font-black text-sm">
+            <div className="p-4 sm:p-8 space-y-6">
+              {/* Notificación de envío a WhatsApp */}
+              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                <div className="text-xs leading-relaxed">
+                  <strong className="block font-bold text-sm text-emerald-950 mb-0.5">
+                    ¡Redireccionando a WhatsApp (66212802)!
+                  </strong>
+                  Se abrió WhatsApp con el detalle completo de tu pedido en un solo mensaje oficial listo para enviar.
+                  {comprobanteFile && (
+                    <span className="block mt-1 font-semibold text-emerald-800">
+                      💡 El comprobante se copió a tu portapapeles. Puedes pegarlo con <strong>Ctrl+V</strong> o mantener presionado y <strong>Pegar</strong> en el chat.
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Botón principal de WhatsApp de redirección inmediata */}
+              <button
+                onClick={() => {
+                  const targetPhone = '50766212802';
+                  const detalleMetodo =
+                    metodoPago === 'transferencia'
+                      ? bancoSeleccionado === 'banco_general'
+                        ? 'Transferencia - Banco General (0439000024206)'
+                        : 'Transferencia - BAC Credomatic (117537266)'
+                      : 'Yappy (@GRAPHYCALEXPTY)';
+                  const now = new Date();
+                  const fechaStr =
+                    now.toLocaleDateString('es-PA', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                    }) +
+                    ' ' +
+                    now.toLocaleTimeString('es-PA', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: true,
+                    });
+                  const fullMsg = buildExtensiveWhatsAppMessage(reciboOficial, detalleMetodo, fechaStr);
+                  window.open(`https://wa.me/${targetPhone}?text=${encodeURIComponent(fullMsg)}`, '_blank');
+                }}
+                className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2.5 shadow-xl shadow-emerald-600/25 active:scale-98 transition-all cursor-pointer"
+              >
+                <MessageCircle className="w-5 h-5 fill-current" />
+                <span>ABRIR EN WHATSAPP (66212802)</span>
+                <ExternalLink className="w-4 h-4 ml-1" />
+              </button>
+
+              {/* Tarjeta de Recibo Oficial Completo */}
+              <div className="bg-[#FAF8F5] border border-[#E8E2D8] rounded-3xl p-5 sm:p-7 space-y-6">
+                {/* Header del Recibo */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#E5DFD5] gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-2xl bg-[#141312] text-[#E6C687] flex items-center justify-center font-black text-base shadow-sm">
                       AS
                     </div>
                     <div>
-                      <h3 className="font-extrabold text-base text-[#1A1918]">AlexStore Oficial</h3>
-                      <span className="text-[10px] text-[#7A7368] uppercase font-bold tracking-widest">
-                        RECIBO DIGITAL #{reciboOficial.codigo}
+                      <h3 className="font-black text-base text-[#1A1918]">AlexStore Luxury & Essentials</h3>
+                      <span className="text-[10px] text-[#7A7368] uppercase font-black tracking-widest block">
+                        RECIBO OFICIAL DE COMPRA • #{reciboOficial.codigo}
                       </span>
                     </div>
                   </div>
 
-                  <div className="text-right">
-                    <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Registrado
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black">
+                      <CheckCircle2 className="w-4 h-4" />
+                      PAGO REGISTRADO
                     </span>
                   </div>
                 </div>
 
-                {/* Receipt Details Grid */}
-                <div className="grid grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <span className="text-[#9C9488] uppercase font-semibold text-[10px] block">Cliente</span>
-                    <span className="font-bold text-[#1A1918] text-sm">{reciboOficial.cliente_nombre}</span>
-                    <span className="text-[#7A7368] block">{reciboOficial.cliente_telefono}</span>
-                    {reciboOficial.cliente_direccion && (
-                      <span className="text-[#7A7368] block mt-0.5">{reciboOficial.cliente_direccion}</span>
+                {/* Grid con Datos del Cliente y Método de Pago */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                  {/* Datos del Cliente */}
+                  <div className="p-4 rounded-2xl bg-white border border-[#EAE5DC] space-y-1.5">
+                    <span className="text-[#9C9488] uppercase font-black text-[10px] tracking-wider block">
+                      DATOS DEL CLIENTE
+                    </span>
+                    <p className="font-extrabold text-sm text-[#1A1918]">{reciboOficial.cliente_nombre}</p>
+                    <p className="text-[#5A554D] flex items-center gap-1.5 font-medium">
+                      <Phone className="w-3.5 h-3.5 text-[#C59A4D]" />
+                      <span>{reciboOficial.cliente_telefono}</span>
+                    </p>
+                    <p className="text-[#5A554D] flex items-center gap-1.5 font-medium">
+                      <MapPin className="w-3.5 h-3.5 text-[#C59A4D]" />
+                      <span>{reciboOficial.cliente_direccion || 'Dirección por coordinar'}</span>
+                    </p>
+                    {nota.trim() && (
+                      <p className="text-[#7A7368] text-[11px] pt-1 italic border-t border-[#F0EAE1]">
+                        Nota: {nota.trim()}
+                      </p>
                     )}
                   </div>
 
-                  <div>
-                    <span className="text-[#9C9488] uppercase font-semibold text-[10px] block">Método de Pago</span>
-                    <span className="font-bold text-[#1A1918] text-sm">
+                  {/* Datos del Pago */}
+                  <div className="p-4 rounded-2xl bg-white border border-[#EAE5DC] space-y-1.5">
+                    <span className="text-[#9C9488] uppercase font-black text-[10px] tracking-wider block">
+                      INFORMACIÓN DEL PAGO
+                    </span>
+                    <p className="font-extrabold text-sm text-[#1A1918]">
                       {metodoPago === 'transferencia'
                         ? bancoSeleccionado === 'banco_general'
                           ? 'Banco General (0439000024206)'
                           : 'BAC Credomatic (117537266)'
                         : 'Yappy (@GRAPHYCALEXPTY)'}
-                    </span>
-                    <span className="text-emerald-700 font-bold block mt-0.5">Enviado por WhatsApp</span>
+                    </p>
+                    <p className="text-[#5A554D] font-medium text-[11px]">
+                      Titular: AlexStore (Graphycalexpty)
+                    </p>
+                    <p className="text-emerald-700 font-bold text-[11px] flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Comprobante adjuntado para despacho
+                    </p>
+                    <p className="text-[#7A7368] text-[10px] flex items-center gap-1 pt-0.5">
+                      <Calendar className="w-3 h-3" />
+                      <span>{new Date().toLocaleString('es-PA')}</span>
+                    </p>
                   </div>
                 </div>
 
-                {/* Items Table */}
-                <div className="pt-2">
-                  <span className="text-[#9C9488] uppercase font-semibold text-[10px] block mb-2">Artículos</span>
-                  <div className="space-y-2 border-t border-b border-[#EAE5DC] py-3">
+                {/* Desglose Extenso de Artículos */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#9C9488] uppercase font-black text-[10px] tracking-wider block">
+                      DESGLOSE DETALLADO DE ARTÍCULOS ({reciboOficial.items.length})
+                    </span>
+                    <span className="text-[11px] font-bold text-[#7A7368]">
+                      {totalArticulos} {totalArticulos === 1 ? 'unidad' : 'unidades'} en total
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 bg-white rounded-2xl border border-[#EAE5DC] p-3 sm:p-4 divide-y divide-[#F2EDE4]">
                     {reciboOficial.items.map((it, idx) => (
-                      <div key={idx} className="flex items-center justify-between text-xs">
-                        <span className="font-medium text-[#1A1918] truncate pr-2">
-                          {it.cantidad}x {it.nombre} {it.talla ? `[Talla: ${it.talla}]` : ''}
-                        </span>
-                        <span className="font-bold text-[#1A1918] shrink-0">
+                      <div key={idx} className="pt-2 first:pt-0 flex items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-3 min-w-0">
+                          {it.imagen_url ? (
+                            <img
+                              src={it.imagen_url}
+                              alt=""
+                              className="w-10 h-12 object-cover rounded-lg border border-[#EAE5DC] shrink-0"
+                            />
+                          ) : (
+                            <div className="w-10 h-12 rounded-lg bg-[#FAF8F5] border border-[#EAE5DC] flex items-center justify-center shrink-0 text-[#9C9488]">
+                              <Package className="w-4 h-4" />
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <span className="font-extrabold text-[#1A1918] block truncate">
+                              {it.nombre}
+                            </span>
+                            <div className="flex items-center gap-2 text-[11px] text-[#7A7368] mt-0.5">
+                              {it.talla && (
+                                <span className="bg-[#FAF8F5] border border-[#E5DFD5] px-1.5 py-0.2 rounded font-bold text-[#1A1918]">
+                                  Talla: {it.talla}
+                                </span>
+                              )}
+                              <span>
+                                {it.cantidad}x ${it.precio.toFixed(2)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <span className="font-black text-[#1A1918] text-sm shrink-0">
                           ${(it.precio * it.cantidad).toFixed(2)}
                         </span>
                       </div>
@@ -350,15 +534,25 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   </div>
                 </div>
 
-                {/* Total Row */}
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-xs uppercase font-extrabold text-[#7A7368]">Total Oficial</span>
-                  <span className="text-2xl font-black text-[#1A1918]">${reciboOficial.total.toFixed(2)}</span>
+                {/* Resumen Económico */}
+                <div className="p-4 rounded-2xl bg-white border border-[#EAE5DC] space-y-2">
+                  <div className="flex items-center justify-between text-xs text-[#7A7368]">
+                    <span>Subtotal de Artículos:</span>
+                    <span className="font-bold text-[#1A1918]">${reciboOficial.total.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-[#7A7368]">
+                    <span>Despacho / Envío:</span>
+                    <span className="font-semibold text-emerald-700">Por coordinar vía WhatsApp</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-2 border-t border-[#EAE5DC]">
+                    <span className="text-xs uppercase font-black text-[#1A1918]">TOTAL OFICIAL PAGADO:</span>
+                    <span className="text-2xl font-black text-[#1A1918]">${reciboOficial.total.toFixed(2)} USD</span>
+                  </div>
                 </div>
 
-                {/* Comprobante preview thumbnail in receipt */}
+                {/* Previsualización del Comprobante */}
                 {comprobantePreview && (
-                  <div className="pt-3 border-t border-[#EAE5DC] flex items-center justify-between gap-3">
+                  <div className="p-4 rounded-2xl bg-white border border-[#EAE5DC] flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <img
                         src={comprobantePreview}
@@ -367,58 +561,43 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         onClick={() => setIsZoomingImage(true)}
                       />
                       <div>
-                        <span className="text-xs font-bold text-[#1A1918] block">Comprobante Adjunto</span>
+                        <span className="text-xs font-bold text-[#1A1918] block">
+                          Comprobante de Pago Adjunto
+                        </span>
                         <span className="text-[11px] text-emerald-700 font-semibold">
-                          Listo para enviar por WhatsApp
+                          ✅ Listo para enviar por WhatsApp
                         </span>
                       </div>
                     </div>
+
                     <button
                       type="button"
                       onClick={() => setIsZoomingImage(true)}
-                      className="text-xs text-[#C59A4D] hover:underline font-bold flex items-center gap-1"
+                      className="px-3 py-1.5 rounded-xl border border-[#E5DFD5] hover:bg-[#FAF8F5] text-xs font-bold text-[#1A1918] flex items-center gap-1.5"
                     >
-                      <Maximize2 className="w-3.5 h-3.5" />
-                      Ver
+                      <Maximize2 className="w-3.5 h-3.5 text-[#C59A4D]" />
+                      <span>Ver en grande</span>
                     </button>
                   </div>
                 )}
               </div>
 
-              {/* Actions for Receipt */}
-              <div className="space-y-3">
+              {/* Botones inferiores del recibo */}
+              <div className="flex items-center justify-between gap-3">
                 <button
-                  onClick={() => {
-                    const targetPhone = '50766212802';
-                    window.open(
-                      `https://wa.me/${targetPhone}?text=${encodeURIComponent(
-                        `¡Hola AlexStore! Te reenvío el comprobante y detalle de mi pedido #${reciboOficial.codigo} por total de $${reciboOficial.total.toFixed(2)}.`
-                      )}`,
-                      '_blank'
-                    );
-                  }}
-                  className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2.5 shadow-xl shadow-emerald-600/20 active:scale-98 transition-all"
+                  onClick={() => window.print()}
+                  className="flex-1 py-3 rounded-xl border border-[#E5DFD5] hover:bg-[#FAF8F5] text-[#1A1918] text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
                 >
-                  <MessageCircle className="w-5 h-5 fill-current" />
-                  <span>REENVIAR A WHATSAPP (66212802)</span>
+                  <Printer className="w-4 h-4 text-[#7A7368]" />
+                  <span>Imprimir Recibo</span>
                 </button>
 
-                <div className="flex items-center justify-between gap-3">
-                  <button
-                    onClick={() => window.print()}
-                    className="flex-1 py-2.5 rounded-xl border border-[#E5DFD5] hover:bg-[#FAF8F5] text-[#1A1918] text-xs font-bold flex items-center justify-center gap-2 transition-colors"
-                  >
-                    <Printer className="w-4 h-4 text-[#7A7368]" />
-                    <span>Imprimir Recibo</span>
-                  </button>
-
-                  <button
-                    onClick={onClose}
-                    className="flex-1 py-2.5 rounded-xl bg-[#141312] hover:bg-black text-[#F5E6BE] text-xs font-bold uppercase tracking-wider flex items-center justify-center transition-colors"
-                  >
-                    <span>Cerrar</span>
-                  </button>
-                </div>
+                <button
+                  onClick={onClose}
+                  className="flex-1 py-3 rounded-xl bg-[#141312] hover:bg-black text-[#F5E6BE] text-xs font-bold uppercase tracking-wider flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <span>Finalizar y Salir</span>
+                </button>
               </div>
             </div>
           ) : (
@@ -647,7 +826,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         <button
                           type="button"
                           onClick={() => handleCopy('GRAPHYCALEXPTY', 'yappy_dir')}
-                          className="p-1 rounded-md text-[#0284C7] hover:bg-[#E0F2FE] transition-colors"
+                          className="p-1 rounded-md text-[#0284C7] hover:bg-[#E0F2FE] transition-colors cursor-pointer"
                           title="Copiar Directorio Yappy"
                         >
                           {copiedField === 'yappy_dir' ? (
@@ -765,7 +944,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                             <button
                               type="button"
                               onClick={() => handleCopy('0439000024206', 'cta_bg')}
-                              className="p-1.5 rounded-lg text-[#7A7368] hover:bg-[#FAF8F5] hover:text-[#1A1918] transition-colors"
+                              className="p-1.5 rounded-lg text-[#7A7368] hover:bg-[#FAF8F5] hover:text-[#1A1918] transition-colors cursor-pointer"
                               title="Copiar número de cuenta"
                             >
                               {copiedField === 'cta_bg' ? (
@@ -804,7 +983,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                             <button
                               type="button"
                               onClick={() => handleCopy('117537266', 'cta_bac')}
-                              className="p-1.5 rounded-lg text-[#7A7368] hover:bg-[#FAF8F5] hover:text-[#1A1918] transition-colors"
+                              className="p-1.5 rounded-lg text-[#7A7368] hover:bg-[#FAF8F5] hover:text-[#1A1918] transition-colors cursor-pointer"
                               title="Copiar número de cuenta"
                             >
                               {copiedField === 'cta_bac' ? (
@@ -899,7 +1078,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       <button
                         type="button"
                         onClick={() => setIsZoomingImage(true)}
-                        className="absolute bottom-3 right-3 px-3 py-1.5 rounded-lg bg-black/70 hover:bg-black text-white text-[11px] font-bold flex items-center gap-1.5 backdrop-blur-sm transition-all"
+                        className="absolute bottom-3 right-3 px-3 py-1.5 rounded-lg bg-black/70 hover:bg-black text-white text-[11px] font-bold flex items-center gap-1.5 backdrop-blur-sm transition-all cursor-pointer"
                       >
                         <Maximize2 className="w-3.5 h-3.5" />
                         <span>Ver en grande</span>
@@ -907,7 +1086,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     </div>
 
                     <p className="text-[11px] text-[#7A7368] text-center">
-                      Esta foto se enviará automáticamente con tu pedido al WhatsApp oficial <strong>66212802</strong>.
+                      El comprobante y el pedido detallado se enviarán juntos en el chat oficial de WhatsApp <strong>66212802</strong>.
                     </p>
                   </div>
                 ) : (
@@ -960,7 +1139,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="w-full sm:w-auto text-xs font-black uppercase tracking-wider text-[#7A7368] hover:text-[#1A1918] px-5 py-3 transition-colors text-center"
+                  className="w-full sm:w-auto text-xs font-black uppercase tracking-wider text-[#7A7368] hover:text-[#1A1918] px-5 py-3 transition-colors text-center cursor-pointer"
                 >
                   CANCELAR
                 </button>
@@ -993,7 +1172,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center">
             <button
               onClick={() => setIsZoomingImage(false)}
-              className="absolute -top-12 right-0 text-white hover:text-[#C59A4D] p-2"
+              className="absolute -top-12 right-0 text-white hover:text-[#C59A4D] p-2 cursor-pointer"
               title="Cerrar vista grande"
             >
               <X className="w-7 h-7" />
