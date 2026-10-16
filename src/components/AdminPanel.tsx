@@ -151,8 +151,67 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   return (
     <div className="min-h-screen bg-[#F4F6F8] text-[#1A1918] flex flex-col md:flex-row font-sans">
-      {/* Sidebar (Left Column - Images 2, 3, 4, 5, 6, 7) */}
-      <aside className="w-full md:w-64 bg-[#0F0E0D] text-white flex flex-col justify-between p-5 border-r border-[#26221E] shrink-0">
+      {/* Mobile Top Navigation (for phones and small tablets) */}
+      <div className="md:hidden bg-[#0F0E0D] text-white border-b border-[#26221E] sticky top-0 z-30">
+        <div className="p-3.5 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <AlexStoreLogo size="sm" />
+            <div>
+              <span className="font-extrabold text-base text-white leading-none block">
+                Alex<span className="text-[#C59A4D]">Store</span>
+              </span>
+              <span className="text-[9px] uppercase font-bold tracking-widest text-[#8C8375]">
+                PANEL ADMIN
+              </span>
+            </div>
+          </div>
+
+          <button
+            onClick={onExitAdmin}
+            className="px-3 py-1.5 rounded-xl bg-[#26221E] text-white text-xs font-bold flex items-center gap-1.5"
+          >
+            <Globe className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Tienda</span>
+          </button>
+        </div>
+
+        {/* Scrollable menu tabs on mobile */}
+        <div className="flex items-center gap-1.5 px-3 pb-2.5 overflow-x-auto no-scrollbar">
+          {[
+            { id: 'dashboard' as const, label: 'Dashboard', icon: LayoutDashboard, badge: 0 },
+            { id: 'pedidos' as const, label: 'Pedidos', icon: Receipt, badge: pedidosPendientes },
+            { id: 'ventas' as const, label: 'Ventas', icon: TrendingUp, badge: 0 },
+            { id: 'productos' as const, label: 'Productos', icon: Package, badge: 0 },
+            { id: 'categorias' as const, label: 'Categorías', icon: Layers, badge: 0 },
+            { id: 'inventario' as const, label: 'Inventario', icon: Boxes, badge: 0 },
+          ].map((item) => {
+            const Icon = item.icon;
+            const isSelected = activeSection === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveSection(item.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all shrink-0 cursor-pointer ${
+                  isSelected
+                    ? 'bg-[#C59A4D] text-[#141312] shadow-sm'
+                    : 'bg-[#1C1A17] text-[#A69F93] hover:text-white'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span>{item.label}</span>
+                {item.badge > 0 ? (
+                  <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[9px] font-black">
+                    {item.badge}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Desktop/Tablet Sidebar (Left Column - Images 2, 3, 4, 5, 6, 7) */}
+      <aside className="hidden md:flex w-64 bg-[#0F0E0D] text-white flex-col justify-between p-5 border-r border-[#26221E] shrink-0 sticky top-0 h-screen overflow-y-auto">
         <div className="space-y-6">
           {/* Logo Brand Header */}
           <div className="flex items-center gap-3">
@@ -191,7 +250,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             <button
               onClick={() => setActiveSection('dashboard')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all ${
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
                 activeSection === 'dashboard'
                   ? 'bg-[#1C1A17] text-white border border-[#C59A4D]/40 shadow-sm'
                   : 'text-[#8C8375] hover:text-white hover:bg-[#1A1816]'
@@ -203,7 +262,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             <button
               onClick={() => setActiveSection('pedidos')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all ${
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
                 activeSection === 'pedidos'
                   ? 'bg-[#1C1A17] text-white border border-[#C59A4D]/40 shadow-sm'
                   : 'text-[#8C8375] hover:text-white hover:bg-[#1A1816]'
@@ -222,7 +281,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             <button
               onClick={() => setActiveSection('ventas')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all ${
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
                 activeSection === 'ventas'
                   ? 'bg-[#1C1A17] text-white border border-[#C59A4D]/40 shadow-sm'
                   : 'text-[#8C8375] hover:text-white hover:bg-[#1A1816]'
@@ -234,7 +293,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             <button
               onClick={() => setActiveSection('productos')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all ${
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
                 activeSection === 'productos'
                   ? 'bg-[#1C1A17] text-white border border-[#C59A4D]/40 shadow-sm'
                   : 'text-[#8C8375] hover:text-white hover:bg-[#1A1816]'
@@ -246,7 +305,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             <button
               onClick={() => setActiveSection('categorias')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all ${
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
                 activeSection === 'categorias'
                   ? 'bg-[#1C1A17] text-white border border-[#C59A4D]/40 shadow-sm'
                   : 'text-[#8C8375] hover:text-white hover:bg-[#1A1816]'
@@ -258,7 +317,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             <button
               onClick={() => setActiveSection('inventario')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all ${
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
                 activeSection === 'inventario'
                   ? 'bg-[#1C1A17] text-white border border-[#C59A4D]/40 shadow-sm'
                   : 'text-[#8C8375] hover:text-white hover:bg-[#1A1816]'
@@ -271,10 +330,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
 
         {/* Sidebar Footer */}
-        <div className="pt-6 border-t border-[#26221E] space-y-3">
+        <div className="pt-6 border-t border-[#26221E] space-y-2">
           <button
             onClick={onExitAdmin}
-            className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-[#A69F93] hover:text-white transition-colors"
+            className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-[#A69F93] hover:text-white transition-colors cursor-pointer"
           >
             <span className="flex items-center gap-2">
               <Globe className="w-4 h-4 text-emerald-400" />
@@ -287,7 +346,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
           <button
             onClick={onExitAdmin}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-400 hover:text-rose-300 transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-400 hover:text-rose-300 transition-colors cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
             <span>Cerrar Sesión</span>

@@ -250,10 +250,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-md">
       {/* Centering wrapper that allows natural top-to-bottom scroll without clipping inputs */}
-      <div className="min-h-full flex items-start justify-center p-3 sm:p-6 py-6 sm:py-10">
-        <div className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-[#E5DFD5] overflow-hidden my-auto animate-fade-in">
+      <div className="min-h-full flex items-start justify-center p-2.5 sm:p-6 py-4 sm:py-10">
+        <div className="relative w-full max-w-2xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-[#E5DFD5] overflow-hidden my-auto animate-fade-in">
           {/* Modal Header */}
-          <div className="p-5 sm:p-7 border-b border-[#F0EAE1] flex items-start justify-between gap-4 bg-[#FCFAF7]">
+          <div className="p-4 sm:p-7 border-b border-[#F0EAE1] flex items-start justify-between gap-3 bg-[#FCFAF7]">
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -425,7 +425,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             /* ============================================================ */
             /* CHECKOUT FORM VIEW                                           */
             /* ============================================================ */
-            <form onSubmit={handleSubmit} className="p-5 sm:p-7 space-y-6">
+            <form onSubmit={handleSubmit} className="p-4 sm:p-7 space-y-4 sm:space-y-6">
               {/* Hidden file input controlled by buttons */}
               <input
                 ref={fileInputRef}

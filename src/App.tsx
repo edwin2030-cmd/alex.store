@@ -240,18 +240,18 @@ export default function App() {
             />
 
             {/* Sub-bar: Mostrando X artículos & Ordenar por (Image 1) */}
-            <div className="mx-4 sm:mx-6 lg:mx-8 mb-6 flex items-center justify-between text-xs sm:text-sm text-[#7A7368] pt-1">
+            <div className="mx-3 sm:mx-6 lg:mx-8 mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs sm:text-sm text-[#7A7368] pt-1">
               <div>
                 Mostrando <strong className="text-[#1A1918] font-black">{filteredProductos.length}</strong> artículos disponibles
               </div>
 
-              <div className="flex items-center gap-1.5 cursor-pointer">
+              <div className="flex items-center gap-1.5 self-start sm:self-auto">
                 <ArrowUpDown className="w-3.5 h-3.5 text-[#9C9488]" />
-                <span>Ordenar por:</span>
+                <span className="text-xs">Ordenar por:</span>
                 <select
                   value={orden}
                   onChange={(e) => setOrden(e.target.value as any)}
-                  className="bg-transparent font-extrabold text-[#1A1918] cursor-pointer focus:outline-none"
+                  className="bg-transparent font-extrabold text-xs text-[#1A1918] cursor-pointer focus:outline-none"
                 >
                   <option value="recientes">Más recientes</option>
                   <option value="precio-asc">Menor precio</option>
@@ -261,7 +261,7 @@ export default function App() {
             </div>
 
             {/* Product Grid */}
-            <div className="mx-4 sm:mx-6 lg:mx-8">
+            <div className="mx-3 sm:mx-6 lg:mx-8">
               {isLoading ? (
                 <div className="py-24 text-center space-y-3">
                   <div className="w-8 h-8 border-2 border-[#C59A4D] border-t-transparent rounded-full animate-spin mx-auto" />
@@ -269,12 +269,12 @@ export default function App() {
                 </div>
               ) : filteredProductos.length === 0 ? (
                 /* Empty state when 0 products exist (from scratch) */
-                <div className="py-20 text-center space-y-4 bg-white rounded-3xl border border-[#EAE5DC] p-8 shadow-xs">
-                  <div className="w-16 h-16 rounded-3xl bg-[#FAF8F5] text-[#C59A4D] flex items-center justify-center mx-auto border border-[#EAE5DC]">
-                    <PackageOpen className="w-8 h-8 stroke-[1.5]" />
+                <div className="py-14 sm:py-20 text-center space-y-4 bg-white rounded-3xl border border-[#EAE5DC] p-5 sm:p-8 shadow-xs">
+                  <div className="w-14 sm:w-16 h-14 sm:h-16 rounded-3xl bg-[#FAF8F5] text-[#C59A4D] flex items-center justify-center mx-auto border border-[#EAE5DC]">
+                    <PackageOpen className="w-7 sm:w-8 h-7 sm:h-8 stroke-[1.5]" />
                   </div>
                   <div className="space-y-1">
-                    <h3 className="text-xl font-extrabold text-[#1A1918]">Catálogo listo para cargar</h3>
+                    <h3 className="text-lg sm:text-xl font-extrabold text-[#1A1918]">Catálogo listo para cargar</h3>
                     <p className="text-xs sm:text-sm text-[#7A7368] max-w-md mx-auto leading-relaxed">
                       El catálogo está en 0 para que agregues tus propios productos e inventario.
                     </p>
@@ -283,7 +283,7 @@ export default function App() {
                   <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
                     <button
                       onClick={() => setIsAdminLoginOpen(true)}
-                      className="px-6 py-3 rounded-full bg-[#141312] hover:bg-black text-[#F5E6BE] font-black text-xs uppercase tracking-widest flex items-center gap-2 shadow-md transition-all active:scale-95"
+                      className="w-full sm:w-auto px-6 py-3 rounded-full bg-[#141312] hover:bg-black text-[#F5E6BE] font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer"
                     >
                       <Plus className="w-4 h-4 text-[#C59A4D]" />
                       <span>Ingresar al Modo Administrador</span>
@@ -294,7 +294,7 @@ export default function App() {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-3.5 sm:gap-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6">
                   {filteredProductos.map((producto) => (
                     <ProductCard
                       key={producto.id}

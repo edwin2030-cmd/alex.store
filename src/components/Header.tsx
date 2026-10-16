@@ -24,25 +24,25 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleFilters,
 }) => {
   return (
-    <header className="sticky top-0 z-40 bg-[#FAF8F5]/95 backdrop-blur-md border-b border-[#EAE5DC]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-4">
+    <header className="sticky top-0 z-40 bg-[#FAF8F5]/95 backdrop-blur-md border-b border-[#EAE5DC] w-full">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
         {/* Brand - Logo with 5 quick clicks to open admin */}
-        <div className="flex items-center gap-3 select-none">
+        <div className="flex items-center gap-2 sm:gap-3 select-none shrink-0">
           <AlexStoreLogo size="md" onFiveClicks={onOpenAdminLogin} />
           <div
             onClick={() => onViewChange('catalogo')}
             className="flex flex-col cursor-pointer group"
           >
-            <span className="font-extrabold text-2xl tracking-tight leading-none text-[#1A1918]">
+            <span className="font-extrabold text-lg sm:text-2xl tracking-tight leading-none text-[#1A1918]">
               Alex<span className="text-[#C59A4D]">Store</span>
             </span>
-            <span className="text-[10px] uppercase font-bold tracking-[0.2em] text-[#7A7368] mt-0.5">
+            <span className="text-[8px] sm:text-[10px] uppercase font-bold tracking-[0.18em] text-[#7A7368] mt-0.5 hidden xs:block">
               CATÁLOGO OFICIAL
             </span>
           </div>
         </div>
 
-        {/* Search Bar */}
+        {/* Desktop & Tablet Search Bar */}
         <div className="flex-1 max-w-md mx-2 hidden md:block">
           <div className="relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9C9488]" />
@@ -56,7 +56,7 @@ export const Header: React.FC<HeaderProps> = ({
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-[#9C9488] hover:text-[#1A1918]"
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-[#9C9488] hover:text-[#1A1918] cursor-pointer"
               >
                 ✕
               </button>
@@ -65,13 +65,13 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Navigation Tabs & Actions */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
           {/* Catalogo Tab */}
           <button
             onClick={() => onViewChange('catalogo')}
-            className={`px-4 py-2 rounded-full text-xs font-bold tracking-wider uppercase transition-all ${
+            className={`px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all cursor-pointer ${
               currentView === 'catalogo'
-                ? 'bg-white border-2 border-[#1A1918] text-[#1A1918] shadow-sm'
+                ? 'bg-white border sm:border-2 border-[#1A1918] text-[#1A1918] shadow-sm'
                 : 'text-[#6B655C] hover:text-[#1A1918]'
             }`}
           >
@@ -81,19 +81,20 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Colecciones Tab */}
           <button
             onClick={() => onViewChange('colecciones')}
-            className={`px-4 py-2 rounded-full text-xs font-bold tracking-wider uppercase transition-all ${
+            className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all cursor-pointer ${
               currentView === 'colecciones'
-                ? 'bg-white border-2 border-[#1A1918] text-[#1A1918] shadow-sm'
+                ? 'bg-white border sm:border-2 border-[#1A1918] text-[#1A1918] shadow-sm'
                 : 'text-[#6B655C] hover:text-[#1A1918]'
             }`}
           >
-            COLECCIONES
+            <span className="hidden sm:inline">COLECCIONES</span>
+            <span className="sm:hidden">COLEC.</span>
           </button>
 
           {/* BOLSA Button */}
           <button
             onClick={onOpenCart}
-            className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#141312] hover:bg-black text-white text-xs font-extrabold tracking-wider uppercase transition-all shadow-md active:scale-95"
+            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full bg-[#141312] hover:bg-black text-white text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
             aria-label="Abrir bolsa de pedidos"
           >
             <ShoppingBag className="w-3.5 h-3.5 text-[#E6C687]" />
@@ -105,11 +106,11 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
-          {/* Filter icon */}
+          {/* Filter icon for desktop */}
           {onToggleFilters && (
             <button
               onClick={onToggleFilters}
-              className="p-2 rounded-full text-[#6B655C] hover:text-[#1A1918] hover:bg-[#EAE5DC]/60 transition-colors hidden sm:block"
+              className="p-2 rounded-full text-[#6B655C] hover:text-[#1A1918] hover:bg-[#EAE5DC]/60 transition-colors hidden lg:block cursor-pointer"
               title="Filtrar catálogo"
             >
               <SlidersHorizontal className="w-4 h-4" />
@@ -119,20 +120,20 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Mobile Search Bar */}
-      <div className="px-4 pb-3 md:hidden">
+      <div className="px-3 sm:px-4 pb-2.5 pt-0.5 md:hidden">
         <div className="relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9C9488]" />
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9C9488]" />
           <input
             type="text"
-            placeholder="Buscar en AlexStore..."
+            placeholder="Buscar camiseta, club o jugador..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-white text-sm text-[#1A1918] placeholder-[#9C9488] pl-11 pr-8 py-2 rounded-full border border-[#E5E0D8] focus:outline-none focus:border-[#C59A4D] shadow-sm"
+            className="w-full bg-white text-xs sm:text-sm text-[#1A1918] placeholder-[#9C9488] pl-9 pr-8 py-2 rounded-full border border-[#E5E0D8] focus:outline-none focus:border-[#C59A4D] shadow-xs"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-[#9C9488] hover:text-[#1A1918]"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#9C9488] hover:text-[#1A1918] p-1"
             >
               ✕
             </button>

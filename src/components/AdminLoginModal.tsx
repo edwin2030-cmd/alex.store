@@ -60,15 +60,16 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
-      <div className="relative w-full max-w-md bg-[#131211] border border-[#26221E] rounded-3xl p-8 sm:p-10 shadow-2xl space-y-6">
-        {/* Close Button */}
-        <button
-          onClick={onClose}
-          className="absolute top-5 right-5 p-1.5 rounded-full text-[#7A7368] hover:text-white hover:bg-[#221F1B] transition-colors"
-        >
-          <X className="w-5 h-5" />
-        </button>
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/90 backdrop-blur-md">
+      <div className="min-h-full flex items-center justify-center p-3 sm:p-4 py-8">
+        <div className="relative w-full max-w-md bg-[#131211] border border-[#26221E] rounded-3xl p-6 sm:p-10 shadow-2xl space-y-6 my-auto animate-fade-in">
+          {/* Close Button */}
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 p-1.5 rounded-full text-[#7A7368] hover:text-white hover:bg-[#221F1B] transition-colors cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
 
         {/* Brand Logo & Heading (Image 1) */}
         <div className="flex flex-col items-center text-center space-y-2">
@@ -162,5 +163,6 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
         </p>
       </div>
     </div>
+  </div>
   );
 };
