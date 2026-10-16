@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlexStoreLogo } from './AlexStoreLogo';
-import { Truck, ShieldCheck, CreditCard, MessageCircle } from 'lucide-react';
+import { Truck, ShieldCheck, Landmark, MessageCircle } from 'lucide-react';
 
 interface FooterProps {
   onWhatsAppContact: () => void;
@@ -46,18 +46,18 @@ export const Footer: React.FC<FooterProps> = ({ onWhatsAppContact }) => {
           {/* Métodos de Pago */}
           <div className="space-y-2.5">
             <h4 className="text-xs font-black uppercase tracking-wider text-[#1A1918] flex items-center gap-1.5">
-              <CreditCard className="w-4 h-4 text-[#C59A4D]" />
+              <Landmark className="w-4 h-4 text-[#C59A4D]" />
               Métodos de Pago
             </h4>
             <div className="flex flex-wrap gap-2 pt-1">
               <span className="px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-[11px] font-bold">
-                Yappy B. General
+                Yappy (@GRAPHYCALEXPTY)
               </span>
               <span className="px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-bold">
-                Transferencia ACH
+                Banco General
               </span>
-              <span className="px-2.5 py-1 rounded-lg bg-purple-50 border border-purple-200 text-purple-700 text-[11px] font-bold">
-                Tarjetas
+              <span className="px-2.5 py-1 rounded-lg bg-red-50 border border-red-200 text-red-700 text-[11px] font-bold">
+                BAC Credomatic
               </span>
             </div>
           </div>
@@ -84,7 +84,7 @@ export const Footer: React.FC<FooterProps> = ({ onWhatsAppContact }) => {
         <div className="mt-12 pt-6 border-t border-[#F0EAE1] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#9C9488]">
           <p>© {new Date().getFullYear()} AlexStore. Todos los derechos reservados.</p>
           <p className="flex items-center gap-1">
-            Catálogo digital oficial • Conectado a Supabase
+            Catálogo digital oficial • Conectado a Supabase • WhatsApp 66212802
           </p>
         </div>
       </div>

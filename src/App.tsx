@@ -35,6 +35,7 @@ export default function App() {
   const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [checkoutMethod, setCheckoutMethod] = useState<'transferencia' | 'yappy'>('transferencia');
 
   // Toast notification (Image 4 bottom)
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -324,7 +325,8 @@ export default function App() {
         onUpdateCantidad={handleUpdateCantidad}
         onRemoveItem={handleRemoveItem}
         onClearCart={handleClearCart}
-        onProceedToCheckout={() => {
+        onProceedToCheckout={(method) => {
+          if (method) setCheckoutMethod(method);
           setIsCartOpen(false);
           setIsCheckoutOpen(true);
         }}
@@ -336,6 +338,7 @@ export default function App() {
         onClose={() => setIsCheckoutOpen(false)}
         items={cartItems}
         onOrderCompleted={handleClearCart}
+        initialMethod={checkoutMethod}
       />
 
       {/* Admin Login Modal (Image 1 - triggered by 5 fast clicks on logo) */}

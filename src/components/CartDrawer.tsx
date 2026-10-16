@@ -1,6 +1,6 @@
 import React from 'react';
 import { ItemCarrito } from '../types';
-import { X, Trash2, Plus, Minus, ShoppingBag, Landmark, Smartphone } from 'lucide-react';
+import { X, Trash2, Plus, Minus, ShoppingBag, Landmark, Smartphone, Phone, ArrowRight } from 'lucide-react';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -9,7 +9,7 @@ interface CartDrawerProps {
   onUpdateCantidad: (index: number, delta: number) => void;
   onRemoveItem: (index: number) => void;
   onClearCart: () => void;
-  onProceedToCheckout: () => void;
+  onProceedToCheckout: (method?: 'transferencia' | 'yappy') => void;
 }
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({
@@ -52,14 +52,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               {items.length > 0 && (
                 <button
                   onClick={onClearCart}
-                  className="text-xs text-[#9C9488] hover:text-[#1A1918] font-semibold transition-colors"
+                  className="text-xs text-[#9C9488] hover:text-[#1A1918] font-semibold transition-colors cursor-pointer"
                 >
                   Vaciar
                 </button>
               )}
               <button
                 onClick={onClose}
-                className="p-1.5 rounded-full hover:bg-[#F2ECE1] text-[#7A7368] hover:text-[#1A1918] transition-colors"
+                className="p-1.5 rounded-full hover:bg-[#F2ECE1] text-[#7A7368] hover:text-[#1A1918] transition-colors cursor-pointer"
                 aria-label="Cerrar bolsa"
               >
                 <X className="w-5 h-5" />
@@ -69,7 +69,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
           {/* Body */}
           {items.length === 0 ? (
-            /* Empty state matching Image 2 */
+            /* Empty state matching user's reference */
             <div className="flex-1 p-8 flex flex-col items-center justify-center text-center space-y-5">
               <div className="w-24 h-24 rounded-3xl bg-[#FAF6EE] border border-[#EFE5D3] flex items-center justify-center text-[#C59A4D] shadow-inner">
                 <ShoppingBag className="w-12 h-12 stroke-[1.4]" />
@@ -84,7 +84,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               </div>
               <button
                 onClick={onClose}
-                className="px-8 py-3.5 rounded-full bg-[#141312] hover:bg-black text-[#F5E6BE] font-black text-xs uppercase tracking-widest transition-all shadow-md active:scale-95"
+                className="px-8 py-3.5 rounded-full bg-[#141312] hover:bg-black text-[#F5E6BE] font-black text-xs uppercase tracking-widest transition-all shadow-md active:scale-95 cursor-pointer"
               >
                 VER CATÁLOGO
               </button>
@@ -115,14 +115,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         </span>
                       )}
                       <p className="text-sm font-black text-[#C59A4D] mt-1">
-                        $ {item.producto.precio}
+                        ${(item.producto.precio * item.cantidad).toFixed(2)}
                       </p>
 
                       {/* Quantity counter pill */}
                       <div className="mt-2 inline-flex items-center gap-3 px-3 py-1 rounded-full bg-[#FAF8F5] border border-[#EAE5DC]">
                         <button
                           onClick={() => onUpdateCantidad(index, -1)}
-                          className="text-[#7A7368] hover:text-[#1A1918] text-xs font-bold"
+                          className="text-[#7A7368] hover:text-[#1A1918] text-xs font-bold cursor-pointer"
                         >
                           <Minus className="w-3 h-3" />
                         </button>
@@ -131,7 +131,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         </span>
                         <button
                           onClick={() => onUpdateCantidad(index, 1)}
-                          className="text-[#7A7368] hover:text-[#1A1918] text-xs font-bold"
+                          className="text-[#7A7368] hover:text-[#1A1918] text-xs font-bold cursor-pointer"
                         >
                           <Plus className="w-3 h-3" />
                         </button>
@@ -141,7 +141,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     {/* Trash icon */}
                     <button
                       onClick={() => onRemoveItem(index)}
-                      className="p-2 text-[#A69F93] hover:text-rose-600 transition-colors"
+                      className="p-2 text-[#A69F93] hover:text-rose-600 transition-colors cursor-pointer"
                       title="Eliminar de la bolsa"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -150,35 +150,53 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 ))}
               </div>
 
-              {/* Opciones de Pago card (Transferencia y Yappy) */}
+              {/* Opciones de Transferencia y Yappy interactivas */}
               <div className="p-4 rounded-3xl bg-[#FAF8F5] border border-[#EBE6DD] space-y-3">
                 <span className="text-xs font-black tracking-wider uppercase text-[#1A1918] block">
-                  OPCIONES DE TRANSFERENCIA DIRECTA:
+                  ELIGE TU MÉTODO DE PAGO DIRECTO:
                 </span>
 
                 <div className="grid grid-cols-2 gap-2.5">
-                  <div className="bg-white p-3 rounded-2xl border border-[#E5DFD5] text-center space-y-1">
-                    <Landmark className="w-5 h-5 mx-auto text-[#C59A4D]" />
+                  <button
+                    onClick={() => onProceedToCheckout('transferencia')}
+                    className="bg-white p-3.5 rounded-2xl border border-[#E5DFD5] hover:border-[#C59A4D] hover:bg-[#FFFDF9] text-center space-y-1 transition-all cursor-pointer shadow-xs hover:shadow-md text-left group"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <Landmark className="w-5 h-5 text-[#C59A4D]" />
+                      <ArrowRight className="w-3.5 h-3.5 text-[#A69F93] group-hover:translate-x-0.5 transition-transform" />
+                    </div>
                     <p className="text-xs font-extrabold text-[#1A1918] leading-tight">Transferencia</p>
-                    <p className="text-[10px] text-[#7A7368]">Banco General / ACH</p>
-                  </div>
+                    <p className="text-[10px] text-[#7A7368]">Banco General • BAC</p>
+                  </button>
 
-                  <div className="bg-white p-3 rounded-2xl border border-[#E5DFD5] text-center space-y-1">
-                    <Smartphone className="w-5 h-5 mx-auto text-blue-500" />
-                    <p className="text-xs font-extrabold text-[#1A1918] leading-tight">Yappy</p>
-                    <p className="text-[10px] text-[#7A7368]">Móvil B. General</p>
-                  </div>
+                  <button
+                    onClick={() => onProceedToCheckout('yappy')}
+                    className="bg-white p-3.5 rounded-2xl border border-[#E5DFD5] hover:border-[#0284C7] hover:bg-[#F0F8FF] text-center space-y-1 transition-all cursor-pointer shadow-xs hover:shadow-md text-left group"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <Smartphone className="w-5 h-5 text-[#0284C7]" />
+                      <ArrowRight className="w-3.5 h-3.5 text-[#A69F93] group-hover:translate-x-0.5 transition-transform" />
+                    </div>
+                    <p className="text-xs font-extrabold text-[#1A1918] leading-tight">Pagar con Yappy</p>
+                    <p className="text-[10px] text-[#7A7368]">Directorio Oficial</p>
+                  </button>
                 </div>
 
                 <p className="text-[11px] text-[#7A7368] leading-relaxed pt-1">
-                  Al confirmar el pago obtendrás tu <strong className="text-[#1A1918]">Recibo Oficial</strong> y podrás enviarlo con el comprobante adjunto directamente a WhatsApp.
+                  Al confirmar el pago obtendrás tu <strong className="text-[#1A1918]">Recibo Oficial</strong> y podrás enviarlo con el comprobante adjunto directamente al WhatsApp oficial <strong className="text-[#1A1918]">66212802</strong>.
                 </p>
               </div>
 
               {/* WhatsApp pedidos phone tag */}
-              <div className="text-xs text-[#7A7368] flex items-center gap-1.5 pt-1">
-                <span>📞 WhatsApp pedidos:</span>
-                <strong className="text-[#1A1918]">66212802</strong>
+              <div className="text-xs text-[#7A7368] flex items-center justify-between p-3 rounded-2xl bg-[#FAF8F5] border border-[#E5DFD5]">
+                <div className="flex items-center gap-2">
+                  <Phone className="w-4 h-4 text-emerald-600" />
+                  <span>WhatsApp de Pedidos:</span>
+                  <strong className="text-[#1A1918]">66212802</strong>
+                </div>
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                  Oficial
+                </span>
               </div>
             </div>
           )}
@@ -191,16 +209,16 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   TOTAL DEL PEDIDO
                 </span>
                 <span className="text-3xl font-black text-[#1A1918]">
-                  $ {total}
+                  ${total.toFixed(2)}
                 </span>
               </div>
 
               <button
-                onClick={onProceedToCheckout}
-                className="w-full py-4 rounded-2xl bg-[#141312] hover:bg-black text-white font-extrabold text-xs tracking-wider uppercase flex items-center justify-center gap-2 shadow-xl transition-all active:scale-98"
+                onClick={() => onProceedToCheckout()}
+                className="w-full py-4 rounded-2xl bg-[#141312] hover:bg-black text-white font-extrabold text-xs tracking-wider uppercase flex items-center justify-center gap-2 shadow-xl transition-all active:scale-98 cursor-pointer"
               >
                 <Landmark className="w-4 h-4 text-[#E6C687]" />
-                <span>PROCEDER AL PAGO (TRANSFERENCIA • YAPPY)</span>
+                <span>FINALIZAR PEDIDO (TRANSFERENCIA / YAPPY)</span>
               </button>
             </div>
           )}
