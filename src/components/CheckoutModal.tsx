@@ -57,6 +57,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // Comprobante upload and preview
   const [comprobanteFile, setComprobanteFile] = useState<File | null>(null);
   const [comprobantePreview, setComprobantePreview] = useState<string | null>(null);
+  const [comprobantePublicUrl, setComprobantePublicUrl] = useState<string | null>(null);
+  const [isUploadingProof, setIsUploadingProof] = useState(false);
   const [isZoomingImage, setIsZoomingImage] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -97,13 +99,28 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
-  const processFile = (file: File) => {
+  const processFile = async (file: File) => {
     setComprobanteFile(file);
+    setComprobantePublicUrl(null);
+    setIsUploadingProof(true);
+
     const reader = new FileReader();
     reader.onload = (ev) => {
       setComprobantePreview(ev.target?.result as string);
     };
     reader.readAsDataURL(file);
+
+    // Immediate background upload to generate public link ahead of time
+    try {
+      const res = await subirFotoStorage(file, 'comprobantes');
+      if (res.url && res.url.startsWith('http')) {
+        setComprobantePublicUrl(res.url);
+      }
+    } catch (e) {
+      console.warn('Error subiendo imagen anticipada:', e);
+    } finally {
+      setIsUploadingProof(false);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -137,6 +154,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     if (e) e.stopPropagation();
     setComprobanteFile(null);
     setComprobantePreview(null);
+    setComprobantePublicUrl(null);
+    setIsUploadingProof(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -280,26 +299,33 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         hour12: true,
       });
 
-    // 1. Subir primero el comprobante a Supabase Storage para obtener la URL pública real
-    let uploadedUrl: string | undefined = undefined;
-    let fileToUpload = comprobanteFile;
+    // 1. Obtener la URL pública real del comprobante (ya subida o subir ahora)
+    let uploadedUrl: string | undefined = comprobantePublicUrl || undefined;
 
-    if (!fileToUpload && comprobantePreview && comprobantePreview.startsWith('data:')) {
-      try {
-        fileToUpload = dataUrlToFile(comprobantePreview, `comprobante_${Date.now()}.jpg`);
-      } catch (e) {
-        console.warn('Could not convert preview to file:', e);
-      }
-    }
+    if (!uploadedUrl) {
+      let fileToUpload = comprobanteFile;
 
-    if (fileToUpload) {
-      try {
-        const uploadRes = await subirFotoStorage(fileToUpload, 'comprobantes');
-        if (uploadRes.url && uploadRes.url.startsWith('http')) {
-          uploadedUrl = uploadRes.url;
+      if (!fileToUpload && comprobantePreview && comprobantePreview.startsWith('data:')) {
+        try {
+          fileToUpload = dataUrlToFile(comprobantePreview, `comprobante_${Date.now()}.jpg`);
+        } catch (e) {
+          console.warn('Could not convert preview to file:', e);
         }
-      } catch (err) {
-        console.warn('Error subiendo comprobante a Supabase Storage:', err);
+      }
+
+      if (fileToUpload) {
+        setIsUploadingProof(true);
+        try {
+          const uploadRes = await subirFotoStorage(fileToUpload, 'comprobantes');
+          if (uploadRes.url && uploadRes.url.startsWith('http')) {
+            uploadedUrl = uploadRes.url;
+            setComprobantePublicUrl(uploadRes.url);
+          }
+        } catch (err) {
+          console.warn('Error subiendo comprobante a Supabase Storage:', err);
+        } finally {
+          setIsUploadingProof(false);
+        }
       }
     }
 
@@ -1148,8 +1174,45 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       </button>
                     </div>
 
+                    {/* Public link status badge & copy */}
+                    {isUploadingProof ? (
+                      <div className="flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold animate-pulse">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                        <span>Subiendo foto a la nube y generando link público...</span>
+                      </div>
+                    ) : comprobantePublicUrl ? (
+                      <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-emerald-950 flex items-center gap-1.5 text-[11px]">
+                            <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
+                            Enlace público listo para WhatsApp:
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopy(comprobantePublicUrl, 'comprobante_ready_link')}
+                            className="px-2 py-0.5 rounded-lg bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 font-bold text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
+                          >
+                            {copiedField === 'comprobante_ready_link' ? (
+                              <Check className="w-3 h-3 text-emerald-600" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                            <span>Copiar</span>
+                          </button>
+                        </div>
+                        <a
+                          href={comprobantePublicUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-emerald-700 underline text-[11px] font-mono break-all block hover:text-emerald-900"
+                        >
+                          {comprobantePublicUrl}
+                        </a>
+                      </div>
+                    ) : null}
+
                     <p className="text-[11px] text-[#7A7368] text-center">
-                      El comprobante y el pedido detallado se enviarán juntos en el chat oficial de WhatsApp <strong>66212802</strong>.
+                      El comprobante como enlace web y el pedido detallado se enviarán juntos en el chat oficial de WhatsApp <strong>66212802</strong>.
                     </p>
                   </div>
                 ) : (
