@@ -9,19 +9,43 @@ export interface Categoria {
   actualizado_en?: string;
 }
 
+// ==========================================
+// VARIANTES Y OPCIONES DE PRODUCTO
+// ==========================================
+export interface AtributoOpcion {
+  nombre: string; // Ej: "Talla", "Color", "Modelo", "Presentación"
+  valores: string[]; // Ej: ["S", "M", "L", "XL"] o ["Negro", "Blanco"]
+}
+
+export interface VarianteProducto {
+  id: string;
+  sku?: string;
+  titulo: string; // Ej: "Talla: M / Color: Negro"
+  opciones: Record<string, string>; // Ej: { "Talla": "M", "Color": "Negro" }
+  precio?: number; // Precio unitario si difiere del precio base
+  stock: number;
+  activo: boolean;
+}
+
 export interface Producto {
   id: string;
   nombre: string;
   descripcion?: string | null;
   precio: number;
+  costo?: number;
   categoria_id?: string | null;
   imagen_url?: string | null;
   imagenes?: string[];
   activo: boolean;
-  creado_en?: string;
-  actualizado_en?: string;
+  sku?: string;
   stock?: number;
   stock_minimo?: number;
+  // Variantes personalizables
+  tiene_variantes?: boolean;
+  atributos?: AtributoOpcion[];
+  variantes?: VarianteProducto[];
+  creado_en?: string;
+  actualizado_en?: string;
 }
 
 export interface InventarioItem {
@@ -35,7 +59,41 @@ export interface InventarioItem {
 export interface ItemCarrito {
   producto: Producto;
   cantidad: number;
+  // Soporte completo para variantes y opciones seleccionadas
+  varianteSeleccionada?: VarianteProducto;
+  opcionesSeleccionadas?: Record<string, string>;
+  precioUnitario: number;
+  // Compatibilidad hacia atrás
   tallaSeleccionada?: string;
+}
+
+// ==========================================
+// ESTADOS DE PEDIDOS
+// ==========================================
+export type EstadoPedido =
+  | 'recibido' // 1. Pedido recibido
+  | 'pendiente' // 2. Pendiente de revisión
+  | 'aceptado' // 3. Aceptado
+  | 'aprobado' // 4. Aprobado
+  | 'preparacion' // 5. En preparación
+  | 'listo' // 6. Listo para entregar
+  | 'en_camino' // 7. En camino
+  | 'entregado' // 8. Entregado
+  | 'cancelado' // 9. Cancelado
+  | 'rechazado'; // 10. Rechazado
+
+export interface PedidoItem {
+  id: string;
+  producto_id?: string;
+  nombre: string;
+  precio: number;
+  cantidad: number;
+  subtotal?: number;
+  variante_id?: string;
+  variante_titulo?: string;
+  opciones?: Record<string, string>;
+  talla?: string;
+  imagen_url?: string;
 }
 
 export interface Pedido {
@@ -45,19 +103,20 @@ export interface Pedido {
   cliente_telefono: string;
   cliente_direccion?: string;
   metodo_pago: 'transferencia' | 'yappy' | 'efectivo';
-  comprobante_url?: string;
+  comprobante_url?: string | null;
+  comprobante_path?: string | null;
   total: number;
-  estado: 'pendiente' | 'aprobado' | 'entregado' | 'cancelado';
-  items: Array<{
-    id: string;
-    nombre: string;
-    precio: number;
-    cantidad: number;
-    talla?: string;
-    imagen_url?: string;
-  }>;
-  notas?: string;
+  subtotal?: number;
+  descuento?: number;
+  costo_envio?: number;
+  estado: EstadoPedido;
+  estado_pago?: 'pendiente_revision' | 'verificado' | 'rechazado';
+  items: PedidoItem[];
+  notas?: string | null;
+  revisado_por?: string | null;
+  revisado_en?: string | null;
   creado_en?: string;
+  actualizado_en?: string;
 }
 
 export interface Venta {
@@ -73,3 +132,60 @@ export interface Venta {
   notas?: string | null;
   creado_en?: string;
 }
+
+export interface Gasto {
+  id?: string;
+  concepto: string;
+  monto: number;
+  categoria: string;
+  fecha?: string;
+  notas?: string | null;
+  creado_por?: string | null;
+  creado_en?: string;
+}
+
+// ==========================================
+// ROLES Y PERMISOS DE USUARIOS
+// Roles: 'dueno' (dueño con acceso total), 'administrador' (gestor operativo y financiero), 'cajero' (trabajador operativo)
+// ==========================================
+export type UserRole = 'dueno' | 'cajero' | 'administrador';
+export type RolUsuario = UserRole;
+
+export interface UsuarioPanel {
+  id: string;
+  email: string;
+  nombre: string;
+  rol: UserRole;
+  activo: boolean;
+  creado_en: string;
+  actualizado_en?: string;
+  creado_por?: string | null;
+  actualizado_por?: string | null;
+  ultimo_acceso?: string | null;
+}
+
+export interface ClienteResumen {
+  nombre: string;
+  telefono: string;
+  direccion?: string;
+  totalPedidos: number;
+  totalGastado: number;
+  ultimoPedidoFecha?: string;
+}
+
+// ==========================================
+// REGISTRO DE MOVIMIENTOS Y AUDITORÍA DE TRABAJADORES
+// ==========================================
+export interface MovimientoTrabajador {
+  id: string;
+  usuario_id?: string | null;
+  usuario_nombre: string;
+  usuario_email: string;
+  rol: UserRole | string;
+  accion: string; // Ej: 'Inicio de Turno', 'Aprobó Pedido', 'Ajustó Stock', etc.
+  modulo?: string | null; // 'auth', 'pedidos', 'inventario', 'productos', 'ventas', 'gastos'
+  detalles?: string | null;
+  ip_address?: string | null;
+  creado_en: string;
+}
+

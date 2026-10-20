@@ -24,9 +24,19 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const isAgotado = stock <= 0;
   const isStockBajo = stock > 0 && stock < 5;
 
+  const hasVariants = Boolean(
+    producto.tiene_variantes ||
+    (producto.atributos && producto.atributos.length > 0) ||
+    (producto.variantes && producto.variantes.length > 0)
+  );
+
   const handleAdd = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (isAgotado) return;
+    if (hasVariants) {
+      onOpenDetail(producto);
+      return;
+    }
     onAddToCart(producto);
     setJustAdded(true);
     setTimeout(() => setJustAdded(false), 1200);
@@ -135,6 +145,20 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               {producto.descripcion}
             </p>
           )}
+
+          {producto.atributos && producto.atributos.length > 0 && (
+            <div className="flex flex-wrap gap-1 pt-1.5">
+              {producto.atributos.map((attr, aIdx) => (
+                <span
+                  key={aIdx}
+                  className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] bg-[#FAF8F5] border border-[#EAE5DC] text-[#5A554D] px-2 py-0.5 rounded-lg font-medium"
+                >
+                  <strong className="font-extrabold text-[#1A1918]">{attr.nombre}:</strong>
+                  <span>{attr.valores?.slice(0, 3).join(', ')}{attr.valores && attr.valores.length > 3 ? ` +${attr.valores.length - 3}` : ''}</span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="pt-2 sm:pt-3 border-t border-[#F2ECE1] flex items-center justify-between gap-1 sm:gap-2">
@@ -162,6 +186,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               <>
                 <Check className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                 <span className="hidden xs:inline">Agregado</span>
+              </>
+            ) : hasVariants ? (
+              <>
+                <ShoppingBag className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#E6C687]" />
+                <span>Opciones</span>
               </>
             ) : (
               <>

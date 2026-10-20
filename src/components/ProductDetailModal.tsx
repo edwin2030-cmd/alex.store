@@ -1,11 +1,30 @@
-import React, { useState } from 'react';
-import { Producto } from '../types';
-import { X, ShoppingBag, MessageCircle, Check, ChevronLeft, ChevronRight, PackageCheck, AlertTriangle, XCircle, ShieldCheck } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Producto, VarianteProducto } from '../types';
+import {
+  X,
+  ShoppingBag,
+  MessageCircle,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  PackageCheck,
+  AlertTriangle,
+  XCircle,
+  ShieldCheck,
+  Layers,
+  Sparkles,
+} from 'lucide-react';
 
 interface ProductDetailModalProps {
   producto: Producto | null;
   onClose: () => void;
-  onAddToCart: (producto: Producto, cantidad: number, talla?: string) => void;
+  onAddToCart: (
+    producto: Producto,
+    cantidad: number,
+    talla?: string,
+    opcionesSeleccionadas?: Record<string, string>,
+    varianteSeleccionada?: VarianteProducto
+  ) => void;
 }
 
 export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
@@ -15,35 +34,87 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 }) => {
   if (!producto) return null;
 
-  const images = producto.imagenes && producto.imagenes.length > 0
-    ? producto.imagenes
-    : [producto.imagen_url || 'https://images.unsplash.com/photo-1577212017184-80cc0da11082?auto=format&fit=crop&w=600&q=80'];
+  const images =
+    producto.imagenes && producto.imagenes.length > 0
+      ? producto.imagenes
+      : [
+          producto.imagen_url ||
+            'https://images.unsplash.com/photo-1577212017184-80cc0da11082?auto=format&fit=crop&w=600&q=80',
+        ];
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [cantidad, setCantidad] = useState(1);
-  const [selectedTalla, setSelectedTalla] = useState<string>('');
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [added, setAdded] = useState(false);
 
-  // Extract possible sizes from description if present
-  const availableSizes: string[] = [];
-  if (producto.descripcion) {
-    const descLower = producto.descripcion.toLowerCase();
-    const commonSizes = ['s', 'm', 'l', 'xl', '2xl', '3xl', '4xl'];
+  // Atributos disponibles
+  const atributos = useMemo(() => {
+    if (producto.atributos && producto.atributos.length > 0) {
+      return producto.atributos;
+    }
+
+    // Si no tiene atributos configurados explícitamente, extraer tallas o usar estándar
+    const descLower = (producto.descripcion || '').toLowerCase();
+    const commonSizes = ['s', 'm', 'l', 'xl', '2xl', '3xl'];
+    const detected: string[] = [];
     commonSizes.forEach((sz) => {
       const regex = new RegExp(`\\b${sz}\\b`, 'i');
       if (regex.test(descLower) || descLower.includes(`talla ${sz}`) || descLower.includes(`${sz}:`)) {
-        availableSizes.push(sz.toUpperCase());
+        detected.push(sz.toUpperCase());
       }
     });
-  }
 
-  const stock = producto.stock ?? 0;
-  const isAgotado = stock <= 0;
-  const isStockBajo = stock > 0 && stock < 5;
+    const tallasFinales = detected.length > 0 ? detected : ['S', 'M', 'L', 'XL', '2XL'];
+    return [
+      {
+        nombre: 'Talla',
+        valores: tallasFinales,
+      },
+    ];
+  }, [producto]);
+
+  // Buscar variante que coincide exactamente con las opciones seleccionadas
+  const matchingVariant = useMemo<VarianteProducto | undefined>(() => {
+    if (!producto.variantes || producto.variantes.length === 0) return undefined;
+    return producto.variantes.find((v) => {
+      if (!v.opciones) return false;
+      return Object.entries(selectedOptions).every(([attr, val]) => v.opciones[attr] === val);
+    });
+  }, [producto.variantes, selectedOptions]);
+
+  // Precio final según variante o producto base
+  const precioUnitario = matchingVariant?.precio !== undefined && matchingVariant.precio > 0
+    ? matchingVariant.precio
+    : producto.precio;
+
+  // Stock según variante o producto base
+  const stockDisponible = matchingVariant?.stock !== undefined ? matchingVariant.stock : (producto.stock ?? 0);
+  const isAgotado = stockDisponible <= 0;
+  const isStockBajo = stockDisponible > 0 && stockDisponible <= 3;
+
+  const handleSelectOption = (attrName: string, value: string) => {
+    setValidationError(null);
+    setSelectedOptions((prev) => ({
+      ...prev,
+      [attrName]: value,
+    }));
+  };
 
   const handleAdd = () => {
     if (isAgotado) return;
-    onAddToCart(producto, cantidad, selectedTalla || undefined);
+
+    // Validar que todas las opciones obligatorias estén seleccionadas
+    for (const attr of atributos) {
+      if (!selectedOptions[attr.nombre]) {
+        setValidationError(`Por favor selecciona tu ${attr.nombre} antes de agregar a la bolsa.`);
+        return;
+      }
+    }
+
+    const tallaValue = selectedOptions['Talla'] || selectedOptions['talla'] || Object.values(selectedOptions)[0];
+
+    onAddToCart(producto, cantidad, tallaValue, selectedOptions, matchingVariant);
     setAdded(true);
     setTimeout(() => {
       setAdded(false);
@@ -53,8 +124,11 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
   const handleWhatsAppDirect = () => {
     const phone = '50766212802';
-    const tallaText = selectedTalla ? ` (Talla: ${selectedTalla})` : '';
-    const text = `¡Hola AlexStore! 👋 Estoy interesado en el producto: *${producto.nombre}*${tallaText} - Precio: $${producto.precio}. ¿Tienen disponibilidad para entrega inmediata?`;
+    const optText = Object.entries(selectedOptions)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(', ');
+    const variantInfo = optText ? ` (Opciones: ${optText})` : '';
+    const text = `¡Hola AlexStore! 👋 Estoy interesado en el producto: *${producto.nombre}*${variantInfo} - Precio: $${precioUnitario.toFixed(2)}. ¿Tienen disponibilidad para entrega inmediata?`;
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
   };
 
@@ -82,7 +156,8 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
                     if (!target.src.includes('unsplash')) {
-                      target.src = 'https://images.unsplash.com/photo-1577212017184-80cc0da11082?auto=format&fit=crop&w=600&q=80';
+                      target.src =
+                        'https://images.unsplash.com/photo-1577212017184-80cc0da11082?auto=format&fit=crop&w=600&q=80';
                     }
                   }}
                 />
@@ -90,7 +165,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 {images.length > 1 && (
                   <>
                     <button
-                      onClick={() => setActiveImageIndex((prev) => (prev - 1 + images.length) % images.length)}
+                      onClick={() =>
+                        setActiveImageIndex((prev) => (prev - 1 + images.length) % images.length)
+                      }
                       className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black backdrop-blur-sm z-10"
                     >
                       <ChevronLeft className="w-4 h-4" />
@@ -113,7 +190,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                       key={i}
                       onClick={() => setActiveImageIndex(i)}
                       className={`relative w-14 sm:w-16 h-16 sm:h-20 rounded-xl overflow-hidden border-2 transition-all shrink-0 cursor-pointer ${
-                        i === activeImageIndex ? 'border-[#C59A4D] scale-95 shadow-xs' : 'border-[#EAE6DF] opacity-60 hover:opacity-100'
+                        i === activeImageIndex
+                          ? 'border-[#C59A4D] scale-95 shadow-xs'
+                          : 'border-[#EAE6DF] opacity-60 hover:opacity-100'
                       }`}
                     >
                       <img src={img} alt="" className="w-full h-full object-cover" />
@@ -124,7 +203,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
             </div>
 
             {/* Details Column */}
-            <div className="flex flex-col justify-between space-y-4 sm:space-y-6">
+            <div className="flex flex-col justify-between space-y-4 sm:space-y-5">
               <div className="space-y-3">
                 <div className="flex items-center gap-2 flex-wrap">
                   {isAgotado ? (
@@ -135,12 +214,12 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   ) : isStockBajo ? (
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-xs font-bold">
                       <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                      Stock Bajo ({stock} unids.)
+                      Stock Bajo ({stockDisponible} unids.)
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
                       <PackageCheck className="w-3.5 h-3.5 text-emerald-600" />
-                      Disponible ({stock} unids.)
+                      Disponible ({stockDisponible} unids.)
                     </span>
                   )}
                   <span className="text-xs text-[#7A7368] font-bold">AlexStore Oficial</span>
@@ -152,49 +231,112 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
                 <div className="flex items-baseline gap-2">
                   <span className="text-2xl sm:text-3xl font-black text-[#C59A4D]">
-                    ${producto.precio.toFixed(2)}
+                    ${precioUnitario.toFixed(2)}
                   </span>
                   <span className="text-xs text-[#7A7368] font-semibold">USD</span>
+                  {matchingVariant?.sku && (
+                    <span className="text-[10px] text-[#7A7368] font-mono ml-auto">
+                      SKU: {matchingVariant.sku}
+                    </span>
+                  )}
                 </div>
 
                 {producto.descripcion && (
-                  <div className="p-3.5 rounded-2xl bg-[#FCFAF7] border border-[#EFEAE2] text-xs text-[#5A554D] leading-relaxed max-h-36 overflow-y-auto">
+                  <div className="p-3 rounded-2xl bg-[#FCFAF7] border border-[#EFEAE2] text-xs text-[#5A554D] leading-relaxed max-h-28 overflow-y-auto">
                     {producto.descripcion}
                   </div>
                 )}
 
-                {/* Size Selector (if sizes detected or available) */}
-                {availableSizes.length > 0 && (
-                  <div className="space-y-1.5 pt-1">
-                    <span className="text-xs font-bold text-[#1A1918] block">Selecciona tu talla:</span>
-                    <div className="flex flex-wrap gap-2">
-                      {availableSizes.map((sz) => (
-                        <button
-                          key={sz}
-                          type="button"
-                          onClick={() => setSelectedTalla(sz)}
-                          className={`w-9 h-9 rounded-xl font-black text-xs transition-all cursor-pointer ${
-                            selectedTalla === sz
-                              ? 'bg-[#141312] text-white shadow-md'
-                              : 'bg-white text-[#1A1918] border border-[#DDD7CC] hover:border-[#141312]'
-                          }`}
-                        >
-                          {sz}
-                        </button>
-                      ))}
-                    </div>
+                {/* SELECTORES DE OPCIONES Y VARIANTES */}
+                <div className="space-y-3 pt-1">
+                  {atributos.map((attr) => {
+                    const selectedVal = selectedOptions[attr.nombre];
+                    return (
+                      <div key={attr.nombre} className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-extrabold text-[#1A1918]">
+                            Selecciona tu {attr.nombre}:
+                          </span>
+                          {selectedVal && (
+                            <span className="font-black text-[#C59A4D]">{selectedVal}</span>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          {attr.valores.map((val) => {
+                            const isSelected = selectedVal === val;
+                            return (
+                              <button
+                                key={val}
+                                type="button"
+                                onClick={() => handleSelectOption(attr.nombre, val)}
+                                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-[#141312] text-[#F5E6BE] border-2 border-[#141312] shadow-sm scale-98'
+                                    : 'bg-white text-[#1A1918] border border-[#DDD7CC] hover:border-[#141312]'
+                                }`}
+                              >
+                                {val}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Alerta de validación si faltan opciones */}
+                {validationError && (
+                  <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-bold flex items-center gap-2 animate-fade-in">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>{validationError}</span>
                   </div>
                 )}
 
+                {/* Cantidad */}
+                <div className="flex items-center justify-between pt-1 text-xs">
+                  <span className="font-bold text-[#1A1918]">Cantidad a ordenar:</span>
+                  <div className="flex items-center gap-2 bg-[#FAF8F5] border border-[#E5DFD5] rounded-xl px-2 py-1">
+                    <button
+                      type="button"
+                      disabled={cantidad <= 1}
+                      onClick={() => setCantidad((c) => Math.max(1, c - 1))}
+                      className="w-6 h-6 flex items-center justify-center font-black text-sm text-[#7A7368] hover:text-[#1A1918] disabled:opacity-30 cursor-pointer"
+                    >
+                      -
+                    </button>
+                    <span className="font-black text-xs min-w-5 text-center text-[#1A1918]">
+                      {cantidad}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={cantidad >= stockDisponible}
+                      onClick={() => setCantidad((c) => Math.min(stockDisponible, c + 1))}
+                      className="w-6 h-6 flex items-center justify-center font-black text-sm text-[#7A7368] hover:text-[#1A1918] disabled:opacity-30 cursor-pointer"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                {/* Subtotal preview */}
+                <div className="p-2.5 rounded-xl bg-[#F7F5F0] border border-[#EAE5DC] flex items-center justify-between text-xs">
+                  <span className="text-[#7A7368] font-bold">Subtotal de este producto:</span>
+                  <span className="font-black text-sm text-[#1A1918]">
+                    ${(precioUnitario * cantidad).toFixed(2)} USD
+                  </span>
+                </div>
+
                 {/* Guarantee badge */}
-                <div className="flex items-center gap-2 text-xs text-[#7A7368] pt-1">
+                <div className="flex items-center gap-2 text-xs text-[#7A7368] pt-0.5">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
                   <span>Calidad Premium 1:1 verificada • Entrega garantizada</span>
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div className="space-y-2.5 pt-2">
+              <div className="space-y-2.5 pt-1">
                 <button
                   onClick={handleAdd}
                   disabled={isAgotado}

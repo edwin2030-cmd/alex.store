@@ -43,8 +43,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
+  const getItemUnitPrice = (item: ItemCarrito): number => {
+    return Number(item.precioUnitario) || Number(item.varianteSeleccionada?.precio) || Number(item.producto.precio) || 0;
+  };
+
   const totalArticulos = items.reduce((acc, curr) => acc + curr.cantidad, 0);
-  const total = items.reduce((acc, curr) => acc + curr.producto.precio * curr.cantidad, 0);
+  const subtotal = items.reduce((acc, curr) => acc + getItemUnitPrice(curr) * curr.cantidad, 0);
+  const descuento = 0;
+  const costoEnvio = 0;
+  const total = Math.max(0, subtotal - descuento + costoEnvio);
 
   // Form states
   const [nombre, setNombre] = useState('');
@@ -58,6 +65,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [comprobanteFile, setComprobanteFile] = useState<File | null>(null);
   const [comprobantePreview, setComprobantePreview] = useState<string | null>(null);
   const [comprobantePublicUrl, setComprobantePublicUrl] = useState<string | null>(null);
+  const [comprobantePath, setComprobantePath] = useState<string | null>(null);
   const [isUploadingProof, setIsUploadingProof] = useState(false);
   const [isZoomingImage, setIsZoomingImage] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -70,6 +78,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nombreInputRef = useRef<HTMLInputElement>(null);
+  const pendingUploadRef = useRef<Promise<string | null> | null>(null);
 
   // Sync initial method when modal opens
   useEffect(() => {
@@ -99,9 +108,77 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
+  /**
+   * Fast client-side image compression to ensure camera photos (5-20MB)
+   * shrink to ~150-250KB in under 50ms, uploading instantly on any connection.
+   */
+  const compressImage = async (file: File, maxWidth = 1200, quality = 0.85): Promise<File> => {
+    return new Promise((resolve) => {
+      if (
+        !file.type ||
+        !file.type.startsWith('image/') ||
+        file.type.includes('svg') ||
+        file.type.includes('gif')
+      ) {
+        resolve(file);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let { width, height } = img;
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(file);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                const newFile = new File([blob], `comprobante_${Date.now()}.jpg`, {
+                  type: 'image/jpeg',
+                  lastModified: Date.now(),
+                });
+                resolve(newFile);
+              } else {
+                resolve(file);
+              }
+            },
+            'image/jpeg',
+            quality
+          );
+        };
+        img.onerror = () => resolve(file);
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => resolve(file);
+      reader.readAsDataURL(file);
+    });
+  };
+
   const processFile = async (file: File) => {
     setComprobanteFile(file);
-    setComprobantePublicUrl(null);
+    if (validationError) setValidationError(null);
+
+    // Generate deterministic public link immediately so the link is available right away
+    const rawExt = file.name?.split('.').pop() || 'jpg';
+    const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+    const cleanExt = ext === 'png' || ext === 'webp' ? ext : 'jpg';
+    const fileName = `comprobante_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${cleanExt}`;
+    const filePath = `recibos/${fileName}`;
+    const publicUrl = `https://hbfhuwsizuhdqhyojmzk.supabase.co/storage/v1/object/public/comprobantes/${filePath}`;
+    setComprobantePublicUrl(publicUrl);
+    setComprobantePath(filePath);
     setIsUploadingProof(true);
 
     const reader = new FileReader();
@@ -110,17 +187,25 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     };
     reader.readAsDataURL(file);
 
-    // Immediate background upload to generate public link ahead of time
-    try {
-      const res = await subirFotoStorage(file, 'comprobantes');
-      if (res.url && res.url.startsWith('http')) {
-        setComprobantePublicUrl(res.url);
+    // Fast compress and upload in background
+    const uploadTask = (async (): Promise<string | null> => {
+      try {
+        const compressed = await compressImage(file);
+        const res = await subirFotoStorage(compressed, 'comprobantes', fileName);
+        if (res.url && res.url.startsWith('http')) {
+          setComprobantePublicUrl(res.url);
+          return res.url;
+        }
+        return publicUrl;
+      } catch (e) {
+        console.warn('Error subiendo imagen:', e);
+        return publicUrl;
+      } finally {
+        setIsUploadingProof(false);
       }
-    } catch (e) {
-      console.warn('Error subiendo imagen anticipada:', e);
-    } finally {
-      setIsUploadingProof(false);
-    }
+    })();
+
+    pendingUploadRef.current = uploadTask;
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -156,6 +241,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setComprobantePreview(null);
     setComprobantePublicUrl(null);
     setIsUploadingProof(false);
+    pendingUploadRef.current = null;
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -183,13 +269,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   /**
    * Generates the extensive, detailed single WhatsApp message
-   * Includes the direct public link to the comprobante image
+   * Includes direct public links to the comprobante photo and product photos
    */
   const buildExtensiveWhatsAppMessage = (
     pedido: Pedido,
     metodoStr: string,
     fechaEmision: string,
-    comprobanteUrl?: string
+    comprobanteUrl?: string | null
   ): string => {
     const lineas: string[] = [];
 
@@ -228,29 +314,34 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     lineas.push(`🛍️ *DESGLOSE DETALLADO DE ARTÍCULOS:*`);
 
     pedido.items.forEach((item, idx) => {
-      const tallaStr = item.talla ? ` [Talla: ${item.talla}]` : ' [Estándar]';
-      lineas.push(
+      const varInfo = item.variante_titulo || (item.opciones ? Object.entries(item.opciones).map(([k, v]) => `${k}: ${v}`).join(', ') : item.talla ? `Talla: ${item.talla}` : 'Estándar');
+      let itemBlock =
         `\n🔹 *ARTÍCULO ${idx + 1}:* ${item.nombre}\n` +
-          `   • *Especificación:* ${tallaStr}\n` +
-          `   • *Cantidad:* ${item.cantidad} ${item.cantidad === 1 ? 'unidad' : 'unidades'}\n` +
-          `   • *Precio Unitario:* $${item.precio.toFixed(2)} USD\n` +
-          `   • *Subtotal Artículo:* $${(item.cantidad * item.precio).toFixed(2)} USD`
-      );
+        `   • *Variante / Opción:* [${varInfo}]\n` +
+        `   • *Cantidad:* ${item.cantidad} ${item.cantidad === 1 ? 'unidad' : 'unidades'}\n` +
+        `   • *Precio Unitario:* $${item.precio.toFixed(2)} USD\n` +
+        `   • *Subtotal Artículo:* $${(item.cantidad * item.precio).toFixed(2)} USD`;
+      if (item.imagen_url && item.imagen_url.startsWith('http')) {
+        itemBlock += `\n   • *Foto del producto:* ${item.imagen_url}`;
+      }
+      lineas.push(itemBlock);
     });
 
     lineas.push(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     lineas.push(`📊 *RESUMEN DE CUENTA & TOTAL:*`);
     lineas.push(`• *Total de Artículos:* ${totalArticulos} ${totalArticulos === 1 ? 'artículo' : 'artículos'}`);
-    lineas.push(`• *Subtotal de Compra:* $${total.toFixed(2)} USD`);
-    lineas.push(`• *Costo de Envío:* A coordinar según zona / cobertura`);
+    lineas.push(`• *Subtotal de Compra:* $${subtotal.toFixed(2)} USD`);
+    lineas.push(`• *Descuento:* $${descuento.toFixed(2)} USD`);
+    lineas.push(`• *Costo de Envío:* ${costoEnvio > 0 ? `$${costoEnvio.toFixed(2)} USD` : 'Coordinado / Sin costo adicional'}`);
     lineas.push(`💰 *TOTAL FINAL PAGADO:* $${pedido.total.toFixed(2)} USD`);
     lineas.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     lineas.push(`📸 *COMPROBANTE DE PAGO (FOTO):*`);
     if (comprobanteUrl && comprobanteUrl.startsWith('http')) {
-      lineas.push(`🔗 *Ver foto del comprobante:* ${comprobanteUrl}`);
-      lineas.push(`✅ *Foto del comprobante subida exitosamente.*`);
+      lineas.push(`🔗 *LINK DE LA FOTO DEL COMPROBANTE:*`);
+      lineas.push(`${comprobanteUrl}`);
+      lineas.push(`👆 *(Toca el link para abrir la foto del comprobante en alta resolución)*`);
     } else {
-      lineas.push(`✅ *Adjunto en este chat de WhatsApp junto con mi pedido.*`);
+      lineas.push(`⚠️ *Foto del comprobante:* Se enviará directamente por este chat.`);
     }
     lineas.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     lineas.push(
@@ -271,6 +362,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
     if (!telefono.trim()) {
       setValidationError('Por favor ingresa tu número de WhatsApp / teléfono de contacto.');
+      return;
+    }
+
+    // Require payment receipt photo for Yappy and Transferencia to ensure the link is sent
+    if (!comprobanteFile && !comprobantePreview && !comprobantePublicUrl) {
+      setValidationError(
+        '📸 Por favor selecciona o sube la foto del comprobante de tu pago para poder generar y enviar el link a WhatsApp.'
+      );
       return;
     }
 
@@ -299,8 +398,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         hour12: true,
       });
 
-    // 1. Obtener la URL pública real del comprobante (ya subida o subir ahora)
+    // 1. Obtener la URL pública real del comprobante (esperar si la subida está en curso)
     let uploadedUrl: string | undefined = comprobantePublicUrl || undefined;
+
+    if (pendingUploadRef.current) {
+      try {
+        const finishedUrl = await pendingUploadRef.current;
+        if (finishedUrl) {
+          uploadedUrl = finishedUrl;
+        }
+      } catch (err) {
+        console.warn('Error esperando uploadTask:', err);
+      }
+    }
 
     if (!uploadedUrl) {
       let fileToUpload = comprobanteFile;
@@ -316,10 +426,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       if (fileToUpload) {
         setIsUploadingProof(true);
         try {
-          const uploadRes = await subirFotoStorage(fileToUpload, 'comprobantes');
+          const compressed = await compressImage(fileToUpload);
+          const uploadRes = await subirFotoStorage(compressed, 'comprobantes');
           if (uploadRes.url && uploadRes.url.startsWith('http')) {
             uploadedUrl = uploadRes.url;
             setComprobantePublicUrl(uploadRes.url);
+            if (uploadRes.path) setComprobantePath(uploadRes.path);
           }
         } catch (err) {
           console.warn('Error subiendo comprobante a Supabase Storage:', err);
@@ -336,17 +448,38 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       cliente_direccion: direccion.trim(),
       metodo_pago: metodoPago,
       total,
+      subtotal,
+      descuento,
+      costo_envio: costoEnvio,
       estado: 'pendiente',
-      items: items.map((i) => ({
-        id: i.producto.id,
-        nombre: i.producto.nombre,
-        precio: i.producto.precio,
-        cantidad: i.cantidad,
-        talla: i.tallaSeleccionada,
-        imagen_url: i.producto.imagen_url || undefined,
-      })),
+      estado_pago: 'pendiente_revision',
+      items: items.map((i) => {
+        const uPrice = getItemUnitPrice(i);
+        const varTitle =
+          i.varianteSeleccionada?.titulo ||
+          (i.opcionesSeleccionadas
+            ? Object.entries(i.opcionesSeleccionadas)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join(' / ')
+            : i.tallaSeleccionada);
+
+        return {
+          id: i.producto.id,
+          producto_id: i.producto.id,
+          nombre: i.producto.nombre,
+          precio: uPrice,
+          cantidad: i.cantidad,
+          subtotal: uPrice * i.cantidad,
+          variante_id: i.varianteSeleccionada?.id,
+          variante_titulo: varTitle,
+          opciones: i.opcionesSeleccionadas,
+          talla: i.tallaSeleccionada || (i.opcionesSeleccionadas ? Object.values(i.opcionesSeleccionadas).join(' / ') : undefined),
+          imagen_url: i.producto.imagen_url || (i.producto.imagenes && i.producto.imagenes[0]) || undefined,
+        };
+      }),
       notas: `${nota.trim() ? nota.trim() + ' | ' : ''}Método: ${detalleMetodo}`,
-      comprobante_url: uploadedUrl || comprobantePreview || undefined,
+      comprobante_url: uploadedUrl || comprobantePublicUrl || undefined,
+      comprobante_path: comprobantePath || undefined,
       creado_en: now.toISOString(),
     };
 
@@ -358,20 +491,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       nuevoPedido,
       detalleMetodo,
       fechaEmision,
-      uploadedUrl
+      uploadedUrl || comprobantePublicUrl || undefined
     );
     const targetPhone = '50766212802';
     const waUrl = `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessage)}`;
 
-    // 4. Redirección inmediata a WhatsApp
-    const openedWindow = window.open(waUrl, '_blank');
-    if (!openedWindow || openedWindow.closed || typeof openedWindow.closed === 'undefined') {
-      window.location.href = waUrl;
-    }
-
+    // 4. Redirección directa e inmediata a WhatsApp (sin pestañas intermedias ni menús molestos de compartir)
     setIsSubmitting(false);
     setReciboOficial(nuevoPedido);
     onOrderCompleted();
+
+    // Redirigir de una vez al chat oficial de WhatsApp
+    window.location.href = waUrl;
   };
 
   return (
@@ -613,7 +744,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     <div className="p-4 rounded-2xl bg-white border border-[#EAE5DC] flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <img
-                          src={comprobantePreview || reciboOficial.comprobante_url}
+                          src={comprobantePreview || reciboOficial.comprobante_url || ''}
                           alt="Comprobante"
                           className="w-14 h-14 object-cover rounded-xl border border-[#D5CEC2] shadow-sm cursor-pointer"
                           onClick={() => setIsZoomingImage(true)}
@@ -1260,6 +1391,153 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
               </div>
 
+              {/* SECCIÓN 5: RESUMEN DETALLADO ANTES DE FINALIZAR */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-[#1A1918] flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-[#1A1918] text-white text-[10px] font-black flex items-center justify-center">
+                      5
+                    </span>
+                    RESUMEN DETALLADO DE TU COMPRA
+                  </h3>
+                  <span className="text-[11px] text-[#7A7368] font-bold">
+                    Revisa antes de confirmar
+                  </span>
+                </div>
+
+                <div className="p-4 sm:p-5 rounded-2xl bg-[#FCFAF5] border border-[#EFE5D3] space-y-4">
+                  {/* Desglose de cada producto con variante, cantidad, precio unitario y subtotal */}
+                  <div className="space-y-2.5">
+                    <span className="text-[10px] font-black uppercase text-[#8C8375] tracking-wider block">
+                      ARTÍCULOS SELECCIONADOS ({items.length})
+                    </span>
+
+                    <div className="space-y-2 bg-white rounded-xl border border-[#EAE3D5] p-3 divide-y divide-[#F2EDE4]">
+                      {items.map((it, idx) => {
+                        const uPrice = getItemUnitPrice(it);
+                        const varTitle =
+                          it.varianteSeleccionada?.titulo ||
+                          (it.opcionesSeleccionadas
+                            ? Object.entries(it.opcionesSeleccionadas)
+                                .map(([k, v]) => `${k}: ${v}`)
+                                .join(' • ')
+                            : it.tallaSeleccionada
+                            ? `Talla: ${it.tallaSeleccionada}`
+                            : 'Estándar');
+
+                        return (
+                          <div key={idx} className="pt-2 first:pt-0 flex items-center justify-between gap-3 text-xs">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <img
+                                src={it.producto.imagen_url || (it.producto.imagenes && it.producto.imagenes[0]) || ''}
+                                alt={it.producto.nombre}
+                                className="w-10 h-12 object-cover rounded-lg bg-[#FAF8F5] border border-[#EAE5DC] shrink-0"
+                              />
+                              <div className="min-w-0">
+                                <h4 className="font-extrabold text-[#1A1918] truncate block">
+                                  {it.producto.nombre}
+                                </h4>
+                                <span className="text-[11px] text-[#C59A4D] font-bold block truncate">
+                                  {varTitle}
+                                </span>
+                                <span className="text-[10px] text-[#7A7368]">
+                                  {it.cantidad} {it.cantidad === 1 ? 'unidad' : 'unidades'} × ${uPrice.toFixed(2)} c/u
+                                </span>
+                              </div>
+                            </div>
+
+                            <span className="font-black text-sm text-[#1A1918] shrink-0">
+                              ${(uPrice * it.cantidad).toFixed(2)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Cálculos económicos */}
+                  <div className="bg-white rounded-xl border border-[#EAE3D5] p-3.5 space-y-2 text-xs">
+                    <div className="flex justify-between items-center text-[#7A7368]">
+                      <span>Subtotal de Productos:</span>
+                      <strong className="text-[#1A1918]">${subtotal.toFixed(2)}</strong>
+                    </div>
+
+                    <div className="flex justify-between items-center text-[#7A7368]">
+                      <span>Descuentos aplicados:</span>
+                      <span className="text-emerald-700 font-bold">$0.00 (Precio oficial)</span>
+                    </div>
+
+                    <div className="flex justify-between items-center text-[#7A7368]">
+                      <span>Costo de Envío:</span>
+                      <span className="text-[#1A1918] font-bold">
+                        {costoEnvio > 0 ? `$${costoEnvio.toFixed(2)}` : '$0.00 (Coordinado vía WhatsApp)'}
+                      </span>
+                    </div>
+
+                    <div className="pt-2 border-t border-[#EAE3D5] flex justify-between items-center">
+                      <span className="font-black text-sm text-[#1A1918] uppercase">
+                        TOTAL A PAGAR:
+                      </span>
+                      <span className="text-2xl font-black text-[#C59A4D]">
+                        ${total.toFixed(2)} USD
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Datos del Cliente y Método en Vivo */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                    <div className="p-3 bg-white rounded-xl border border-[#EAE3D5] space-y-1">
+                      <span className="text-[10px] font-black uppercase text-[#8C8375] block">
+                        DATOS DE ENTREGA
+                      </span>
+                      <p className="font-bold text-[#1A1918] truncate">
+                        {nombre.trim() ? nombre.trim() : '⚠️ Nombre por completar'}
+                      </p>
+                      <p className="text-[#7A7368] font-medium text-[11px] truncate">
+                        📞 {telefono.trim() ? telefono.trim() : 'Teléfono por completar'}
+                      </p>
+                      {direccion.trim() && (
+                        <p className="text-[#7A7368] text-[11px] truncate">
+                          📍 {direccion.trim()}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="p-3 bg-white rounded-xl border border-[#EAE3D5] space-y-1">
+                      <span className="text-[10px] font-black uppercase text-[#8C8375] block">
+                        MÉTODO & COMPROBANTE
+                      </span>
+                      <p className="font-bold text-[#1A1918]">
+                        {metodoPago === 'transferencia'
+                          ? bancoSeleccionado === 'banco_general'
+                            ? 'Banco General (Panamá)'
+                            : 'BAC Credomatic'
+                          : 'Yappy (@GRAPHYCALEXPTY)'}
+                      </p>
+                      <p className="text-[11px] font-semibold flex items-center gap-1">
+                        {comprobantePreview ? (
+                          <span className="text-emerald-700 flex items-center gap-1">
+                            <Check className="w-3 h-3 text-emerald-600 stroke-[3]" /> Comprobante adjuntado
+                          </span>
+                        ) : (
+                          <span className="text-amber-700">
+                            ⚠️ Comprobante por adjuntar
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Error de validación visible junto al botón */}
+              {validationError && (
+                <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2.5 animate-shake">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span className="font-semibold">{validationError}</span>
+                </div>
+              )}
+
               {/* Botones de acción inferiores */}
               <div className="pt-4 border-t border-[#F0EAE1] flex flex-col-reverse sm:flex-row items-center justify-between gap-3">
                 <button
@@ -1278,7 +1556,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <MessageCircle className="w-4 h-4 fill-current shrink-0" />
                   <span>
                     {isSubmitting
-                      ? 'PROCESANDO...'
+                      ? 'PROCESANDO PEDIDO...'
+                      : isUploadingProof
+                      ? 'SUBIENDO FOTO DEL COMPROBANTE...'
                       : 'CONFIRMAR Y ENVIAR A WHATSAPP (66212802)'}
                   </span>
                   <ArrowRight className="w-4 h-4 shrink-0" />

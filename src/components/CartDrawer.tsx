@@ -23,8 +23,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 }) => {
   if (!isOpen) return null;
 
+  const itemPrice = (item: ItemCarrito) =>
+    Number(item.precioUnitario) || Number(item.varianteSeleccionada?.precio) || Number(item.producto.precio) || 0;
+
   const totalArticulos = items.reduce((acc, curr) => acc + curr.cantidad, 0);
-  const total = items.reduce((acc, curr) => acc + curr.producto.precio * curr.cantidad, 0);
+  const total = items.reduce((acc, curr) => acc + itemPrice(curr) * curr.cantidad, 0);
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-black/60 backdrop-blur-sm animate-fade-in">
@@ -94,49 +97,71 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-5">
               {/* Items List */}
               <div className="space-y-2.5 sm:space-y-3">
-                {items.map((item, index) => (
-                  <div
-                    key={`${item.producto.id}-${item.tallaSeleccionada || index}`}
-                    className="p-3 sm:p-3.5 rounded-2xl border border-[#EAE5DC] bg-white flex items-center justify-between gap-3 shadow-xs"
-                  >
-                    <img
-                      src={item.producto.imagen_url || (item.producto.imagenes && item.producto.imagenes[0]) || ''}
-                      alt={item.producto.nombre}
-                      className="w-14 h-16 sm:w-16 sm:h-18 object-cover rounded-xl bg-[#F7F5F0] border border-[#EAE5DC] shrink-0"
-                    />
+                {items.map((item, index) => {
+                  const price = itemPrice(item);
+                  return (
+                    <div
+                      key={`${item.producto.id}-${index}-${item.varianteSeleccionada?.id || item.tallaSeleccionada || ''}`}
+                      className="p-3 sm:p-3.5 rounded-2xl border border-[#EAE5DC] bg-white flex items-center justify-between gap-3 shadow-xs"
+                    >
+                      <img
+                        src={item.producto.imagen_url || (item.producto.imagenes && item.producto.imagenes[0]) || ''}
+                        alt={item.producto.nombre}
+                        className="w-14 h-16 sm:w-16 sm:h-18 object-cover rounded-xl bg-[#F7F5F0] border border-[#EAE5DC] shrink-0"
+                      />
 
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-extrabold text-xs sm:text-sm text-[#1A1918] truncate">
-                        {item.producto.nombre}
-                      </h4>
-                      {item.tallaSeleccionada && (
-                        <span className="text-[10px] sm:text-[11px] text-[#7A7368] font-medium block">
-                          Talla: {item.tallaSeleccionada}
-                        </span>
-                      )}
-                      <p className="text-xs sm:text-sm font-black text-[#C59A4D] mt-0.5">
-                        ${(item.producto.precio * item.cantidad).toFixed(2)}
-                      </p>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-extrabold text-xs sm:text-sm text-[#1A1918] truncate">
+                          {item.producto.nombre}
+                        </h4>
 
-                      {/* Quantity counter pill */}
-                      <div className="mt-1.5 inline-flex items-center gap-2 sm:gap-3 px-2.5 py-0.5 sm:py-1 rounded-full bg-[#FAF8F5] border border-[#EAE5DC]">
-                        <button
-                          onClick={() => onUpdateCantidad(index, -1)}
-                          className="text-[#7A7368] hover:text-[#1A1918] text-xs font-bold p-0.5 cursor-pointer"
-                        >
-                          <Minus className="w-3 h-3" />
-                        </button>
-                        <span className="text-xs font-black text-[#1A1918] min-w-3 text-center">
-                          {item.cantidad}
-                        </span>
-                        <button
-                          onClick={() => onUpdateCantidad(index, 1)}
-                          className="text-[#7A7368] hover:text-[#1A1918] text-xs font-bold p-0.5 cursor-pointer"
-                        >
-                          <Plus className="w-3 h-3" />
-                        </button>
+                        {/* Variantes y opciones */}
+                        {item.varianteSeleccionada?.titulo ? (
+                          <span className="text-[10px] sm:text-[11px] text-[#C59A4D] font-bold block truncate">
+                            {item.varianteSeleccionada.titulo}
+                          </span>
+                        ) : item.opcionesSeleccionadas && Object.keys(item.opcionesSeleccionadas).length > 0 ? (
+                          <span className="text-[10px] sm:text-[11px] text-[#7A7368] font-medium block truncate">
+                            {Object.entries(item.opcionesSeleccionadas)
+                              .map(([k, v]) => `${k}: ${v}`)
+                              .join(' • ')}
+                          </span>
+                        ) : item.tallaSeleccionada ? (
+                          <span className="text-[10px] sm:text-[11px] text-[#7A7368] font-medium block">
+                            Talla: {item.tallaSeleccionada}
+                          </span>
+                        ) : null}
+
+                        <div className="flex items-baseline gap-1.5 mt-0.5">
+                          <span className="text-xs sm:text-sm font-black text-[#C59A4D]">
+                            ${(price * item.cantidad).toFixed(2)}
+                          </span>
+                          {item.cantidad > 1 && (
+                            <span className="text-[10px] text-[#7A7368]">
+                              (${price.toFixed(2)} c/u)
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Quantity counter pill */}
+                        <div className="mt-1.5 inline-flex items-center gap-2 sm:gap-3 px-2.5 py-0.5 sm:py-1 rounded-full bg-[#FAF8F5] border border-[#EAE5DC]">
+                          <button
+                            onClick={() => onUpdateCantidad(index, -1)}
+                            className="text-[#7A7368] hover:text-[#1A1918] text-xs font-bold p-0.5 cursor-pointer"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <span className="text-xs font-black text-[#1A1918] min-w-3 text-center">
+                            {item.cantidad}
+                          </span>
+                          <button
+                            onClick={() => onUpdateCantidad(index, 1)}
+                            className="text-[#7A7368] hover:text-[#1A1918] text-xs font-bold p-0.5 cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
 
                     {/* Trash icon */}
                     <button
@@ -147,7 +172,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
-                ))}
+                );
+              })}
               </div>
 
               {/* Opciones de Transferencia y Yappy interactivas */}

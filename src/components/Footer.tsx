@@ -4,9 +4,10 @@ import { Truck, ShieldCheck, Landmark, MessageCircle } from 'lucide-react';
 
 interface FooterProps {
   onWhatsAppContact: () => void;
+  onOpenAdminLogin?: () => void;
 }
 
-export const Footer: React.FC<FooterProps> = ({ onWhatsAppContact }) => {
+export const Footer: React.FC<FooterProps> = ({ onWhatsAppContact, onOpenAdminLogin }) => {
   return (
     <footer className="mt-20 border-t border-[#EAE5DC] bg-white text-[#7A7368]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">
@@ -83,9 +84,20 @@ export const Footer: React.FC<FooterProps> = ({ onWhatsAppContact }) => {
 
         <div className="mt-12 pt-6 border-t border-[#F0EAE1] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#9C9488]">
           <p>© {new Date().getFullYear()} AlexStore. Todos los derechos reservados.</p>
-          <p className="flex items-center gap-1">
-            Catálogo digital oficial • Conectado a Supabase • WhatsApp 66212802
-          </p>
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1">
+              Catálogo digital oficial • Conectado a Supabase
+            </span>
+            {onOpenAdminLogin && (
+              <button
+                onClick={onOpenAdminLogin}
+                className="text-[#7A7368] hover:text-[#C59A4D] transition-colors font-medium underline underline-offset-2 cursor-pointer"
+                title="Acceso para Dueño, Administradores y Cajeros"
+              >
+                Panel Administrativo
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </footer>

@@ -1,19 +1,46 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { AlexStoreLogo } from './AlexStoreLogo';
-import { Categoria, Producto, Pedido, Venta } from '../types';
+import { Categoria, Producto, Pedido, Venta, Gasto, UsuarioPanel, UserRole, ClienteResumen, MovimientoTrabajador } from '../types';
 import {
   getProductos,
   getCategorias,
   getPedidos,
   getVentas,
+  getGastos,
+  crearGasto,
+  eliminarGasto,
+  aprobarPedidoYDescontarStock,
   eliminarProducto,
   eliminarCategoria,
   actualizarStockRapido,
   actualizarEstadoPedido,
+  actualizarEstadoPagoPedido,
+  vincularComprobanteAPedido,
+  descargarArchivo,
+  subirFotoStorage,
   crearVentaManual,
+  eliminarPedido,
+  eliminarVenta,
+  eliminarCliente,
+  getMovimientosTrabajadores,
+  registrarMovimiento,
+  eliminarMovimiento,
+  limpiarHistorialMovimientos,
 } from '../lib/supabase';
+import {
+  ROLE_PERMISSIONS,
+  canAccessSection,
+  canModifyUser,
+  getUsuariosList,
+  actualizarUsuario,
+  eliminarUsuario,
+  guardarRolUsuarioAuth,
+} from '../lib/auth';
 import { ModalNuevoProducto } from './ModalNuevoProducto';
 import { ModalNuevaCategoria } from './ModalNuevaCategoria';
+import { ModalNuevoUsuario } from './ModalNuevoUsuario';
+import { ModalEditarRol } from './ModalEditarRol';
+import { ModalSqlAuth } from './ModalSqlAuth';
 import {
   LayoutDashboard,
   Receipt,
@@ -39,30 +66,67 @@ import {
   Database,
   ExternalLink,
   X,
+  Users,
+  UserCheck,
+  UserX,
+  Lock,
+  UserPlus,
+  ShieldAlert,
+  Calendar,
+  Sparkles,
+  Download,
+  FileCheck,
+  FileX,
+  Clock,
+  UploadCloud,
+  ZoomIn,
+  Check,
+  Wallet,
+  ArrowDownRight,
+  ArrowUpRight,
+  Copy,
+  KeyRound,
+  Activity,
+  ClipboardList,
 } from 'lucide-react';
 
 interface AdminPanelProps {
   onExitAdmin: () => void;
-  adminEmail: string;
+  currentUser: UsuarioPanel | null;
+  onLogout: () => void;
 }
 
-type AdminSection =
+export type AdminSection =
   | 'dashboard'
   | 'pedidos'
   | 'ventas'
+  | 'gastos'
+  | 'movimientos'
   | 'productos'
   | 'categorias'
-  | 'inventario';
+  | 'inventario'
+  | 'clientes'
+  | 'usuarios';
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
   onExitAdmin,
-  adminEmail,
+  currentUser,
+  onLogout,
 }) => {
-  const [activeSection, setActiveSection] = useState<AdminSection>('dashboard');
+  const userRole: UserRole = currentUser?.rol || 'cajero';
+
+  // El cajero empieza directamente en 'pedidos', el administrador y dueño en 'dashboard'
+  const [activeSection, setActiveSection] = useState<AdminSection>(() => {
+    return userRole === 'cajero' ? 'pedidos' : 'dashboard';
+  });
+
   const [productos, setProductos] = useState<Producto[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [ventas, setVentas] = useState<Venta[]>([]);
+  const [gastos, setGastos] = useState<Gasto[]>([]);
+  const [usuarios, setUsuarios] = useState<UsuarioPanel[]>([]);
+  const [movimientos, setMovimientos] = useState<MovimientoTrabajador[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Modals state
@@ -72,27 +136,70 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [isModalCategoriaOpen, setIsModalCategoriaOpen] = useState(false);
   const [categoriaToEdit, setCategoriaToEdit] = useState<Categoria | null>(null);
 
+  const [isModalUsuarioOpen, setIsModalUsuarioOpen] = useState(false);
+  const [isModalSqlAuthOpen, setIsModalSqlAuthOpen] = useState(false);
+  const [usuarioToEditRole, setUsuarioToEditRole] = useState<UsuarioPanel | null>(null);
+
+  const [isModalGastoOpen, setIsModalGastoOpen] = useState(false);
+  const [nuevoGastoConcepto, setNuevoGastoConcepto] = useState('');
+  const [nuevoGastoMonto, setNuevoGastoMonto] = useState('');
+  const [nuevoGastoCategoria, setNuevoGastoCategoria] = useState('Mercancía e Inventario');
+  const [nuevoGastoNotas, setNuevoGastoNotas] = useState('');
+  const [submittingGasto, setSubmittingGasto] = useState(false);
+
   const [viewingProofUrl, setViewingProofUrl] = useState<string | null>(null);
+  const [selectedOrderForProof, setSelectedOrderForProof] = useState<Pedido | null>(null);
+  const [comprobanteToast, setComprobanteToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const [uploadingProofOrderId, setUploadingProofOrderId] = useState<string | null>(null);
+  const [copiedLinkOrderId, setCopiedLinkOrderId] = useState<string | null>(null);
+  const [orderActionLoadingId, setOrderActionLoadingId] = useState<string | null>(null);
 
   // Filters inside sections
   const [searchQuery, setSearchQuery] = useState('');
   const [categoriaFilter, setCategoriaFilter] = useState('todas');
   const [pedidoFilter, setPedidoFilter] = useState<'todos' | 'pendientes' | 'aprobados' | 'entregados' | 'cancelados'>('todos');
   const [inventarioFilter, setInventarioFilter] = useState<'todos' | 'disponibles' | 'stock-bajo' | 'agotados'>('todos');
+  const [gastoFilter, setGastoFilter] = useState('todas');
+
+  // Filtros de Auditoría y Movimientos
+  const [movimientosSearch, setMovimientosSearch] = useState('');
+  const [movimientosModuloFilter, setMovimientosModuloFilter] = useState('todos');
+  const [movimientosRolFilter, setMovimientosRolFilter] = useState('todos');
+
+  // User management filters and feedback
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState<'todos' | UserRole>('todos');
+  const [userStatusFilter, setUserStatusFilter] = useState<'todos' | 'activos' | 'inactivos'>('todos');
+  const [userFeedback, setUserFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+
+  // Estados para vincular usuario de Authentication
+  const [authEmailInput, setAuthEmailInput] = useState('');
+  const [authNombreInput, setAuthNombreInput] = useState('');
+  const [authRolSelected, setAuthRolSelected] = useState<UserRole>('dueno');
+  const [savingAuthRole, setSavingAuthRole] = useState(false);
+
+  // Clientes filter
+  const [clienteSearch, setClienteSearch] = useState('');
 
   const reloadAllData = async () => {
     setLoading(true);
     try {
-      const [prods, cats, peds, vnts] = await Promise.all([
+      const [prods, cats, peds, vnts, usrs, gsts, movs] = await Promise.all([
         getProductos(),
         getCategorias(),
         getPedidos(),
         getVentas(),
+        getUsuariosList(),
+        getGastos(),
+        getMovimientosTrabajadores(),
       ]);
       setProductos(prods);
       setCategorias(cats);
       setPedidos(peds);
       setVentas(vnts);
+      setUsuarios(usrs);
+      setGastos(gsts);
+      setMovimientos(movs);
     } catch (e) {
       console.error("Error cargando panel admin:", e);
     } finally {
@@ -104,6 +211,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     reloadAllData();
   }, []);
 
+  // Asegurar que si el rol del usuario cambia, no permanezca en una sección restringida
+  useEffect(() => {
+    if (!canAccessSection(userRole, activeSection)) {
+      setActiveSection(userRole === 'cajero' ? 'pedidos' : 'dashboard');
+    }
+  }, [userRole, activeSection]);
+
   // Stats calculation
   const totalProductos = productos.length;
   const activosVisibles = productos.filter((p) => p.activo).length;
@@ -112,9 +226,90 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const agotadosCount = productos.filter((p) => (p.stock ?? 0) <= 0).length;
 
   const ingresosTotales = ventas.reduce((acc, v) => acc + (v.total || 0), 0);
+  const totalVentasGanado = useMemo(() => {
+    return ventas.reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+  }, [ventas]);
+  const totalGastosMonto = useMemo(() => {
+    return gastos.reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
+  }, [gastos]);
+  const totalNetoGanancia = useMemo(() => {
+    return totalVentasGanado - totalGastosMonto;
+  }, [totalVentasGanado, totalGastosMonto]);
+
+  // Métricas de Espacio de Almacenamiento & Base de Datos (Supabase Free Tier Quota)
+  const metricasEspacio = useMemo(() => {
+    const totalFotosProductos = productos.reduce(
+      (acc, p) => acc + (p.imagenes && p.imagenes.length > 0 ? p.imagenes.length : p.imagen_url ? 1 : 0),
+      0
+    );
+    const totalComprobantes = pedidos.filter((p) => p.comprobante_url).length;
+    const mbFotosProductos = Math.round(totalFotosProductos * 0.25 * 10) / 10;
+    const mbComprobantes = Math.round(totalComprobantes * 0.35 * 10) / 10;
+    const mbStorageUsado = Math.round((mbFotosProductos + mbComprobantes) * 10) / 10;
+    const mbStorageTotal = 1024; // 1 GB en tier gratuito de Supabase
+    const mbStorageLibre = Math.max(0, Math.round((mbStorageTotal - mbStorageUsado) * 10) / 10);
+    const porcentajeStorageUsado = Math.min(100, Math.round((mbStorageUsado / mbStorageTotal) * 100));
+
+    // Capacidad restante estimada:
+    const fotosRestantesEstimadas = Math.floor(mbStorageLibre / 0.3); // ~300KB por foto
+    const productosRestantesEstimados = Math.floor(mbStorageLibre / 0.6); // ~2 fotos por producto
+
+    // Estimación Base de Datos (Tablas): 500 MB en tier gratuito de Supabase
+    const totalFilasTablas =
+      pedidos.length + ventas.length + gastos.length + productos.length + categorias.length + usuarios.length;
+    const mbBaseDatosUsado = Math.round((totalFilasTablas * 0.005 + 1.2) * 10) / 10; // ~1.2MB overhead inicial
+    const mbBaseDatosTotal = 500;
+    const mbBaseDatosLibre = Math.max(0, Math.round((mbBaseDatosTotal - mbBaseDatosUsado) * 10) / 10);
+    const porcentajeBaseDatosUsado = Math.min(100, Math.round((mbBaseDatosUsado / mbBaseDatosTotal) * 100));
+
+    return {
+      totalFotosProductos,
+      totalComprobantes,
+      mbFotosProductos,
+      mbComprobantes,
+      mbStorageUsado,
+      mbStorageTotal,
+      mbStorageLibre,
+      porcentajeStorageUsado,
+      fotosRestantesEstimadas,
+      productosRestantesEstimados,
+      totalFilasTablas,
+      mbBaseDatosUsado,
+      mbBaseDatosTotal,
+      mbBaseDatosLibre,
+      porcentajeBaseDatosUsado,
+    };
+  }, [productos, pedidos, ventas, gastos, categorias, usuarios]);
+
   const pedidosPendientes = pedidos.filter((p) => p.estado === 'pendiente').length;
   const pedidosAprobados = pedidos.filter((p) => p.estado === 'aprobado' || p.estado === 'entregado').length;
   const volumenTotalPedidos = pedidos.reduce((acc, p) => acc + (p.total || 0), 0);
+
+  // Extracción de clientes desde el registro de pedidos
+  const clientesList: ClienteResumen[] = useMemo(() => {
+    const map: Record<string, ClienteResumen> = {};
+    pedidos.forEach((p) => {
+      const cleanPhone = (p.cliente_telefono || '').trim();
+      const key = cleanPhone || p.cliente_nombre.toLowerCase().trim();
+      if (!key) return;
+      if (!map[key]) {
+        map[key] = {
+          nombre: p.cliente_nombre,
+          telefono: p.cliente_telefono,
+          direccion: p.cliente_direccion,
+          totalPedidos: 0,
+          totalGastado: 0,
+          ultimoPedidoFecha: p.creado_en,
+        };
+      }
+      map[key].totalPedidos += 1;
+      map[key].totalGastado += p.total || 0;
+      if (p.cliente_direccion && !map[key].direccion) {
+        map[key].direccion = p.cliente_direccion;
+      }
+    });
+    return Object.values(map);
+  }, [pedidos]);
 
   // Handlers
   const handleDeleteProducto = async (id: string, nombre: string) => {
@@ -133,21 +328,460 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleStockDelta = async (prodId: string, currentStock: number, delta: number) => {
     const nextStock = Math.max(0, currentStock + delta);
+    const targetProd = productos.find((p) => p.id === prodId);
     await actualizarStockRapido(prodId, nextStock);
     setProductos((prev) =>
       prev.map((p) => (p.id === prodId ? { ...p, stock: nextStock } : p))
     );
+    registrarMovimiento({
+      usuario_id: currentUser?.id,
+      usuario_nombre: currentUser?.nombre || 'Usuario',
+      usuario_email: currentUser?.email || '',
+      rol: currentUser?.rol || 'cajero',
+      accion: 'Ajustó Stock',
+      modulo: 'inventario',
+      detalles: `Ajustó stock de "${targetProd?.nombre || 'Producto'}" a ${nextStock} unidades (${delta > 0 ? '+' : ''}${delta}).`,
+    }).then(() => getMovimientosTrabajadores().then(setMovimientos));
   };
 
   const handleUpdateOrderStatus = async (
     orderId: string,
-    newStatus: 'pendiente' | 'aprobado' | 'entregado' | 'cancelado'
+    newStatus: string
   ) => {
-    await actualizarEstadoPedido(orderId, newStatus);
+    const targetPed = pedidos.find((p) => p.id === orderId || p.codigo === orderId);
+    await actualizarEstadoPedido(orderId, newStatus as any);
     setPedidos((prev) =>
-      prev.map((p) => (p.id === orderId ? { ...p, estado: newStatus } : p))
+      prev.map((p) => (p.id === orderId ? { ...p, estado: newStatus as any } : p))
     );
+    registrarMovimiento({
+      usuario_id: currentUser?.id,
+      usuario_nombre: currentUser?.nombre || 'Usuario',
+      usuario_email: currentUser?.email || '',
+      rol: currentUser?.rol || 'cajero',
+      accion: 'Cambió Estado Pedido',
+      modulo: 'pedidos',
+      detalles: `Cambió estado del pedido ${targetPed?.codigo || orderId} a "${newStatus.toUpperCase()}".`,
+    }).then(() => getMovimientosTrabajadores().then(setMovimientos));
   };
+
+  const handleUpdatePaymentProofStatus = async (
+    orderId: string,
+    orderCode: string,
+    newProofStatus: 'pendiente_revision' | 'verificado' | 'rechazado'
+  ) => {
+    const res = await actualizarEstadoPagoPedido(
+      orderId,
+      newProofStatus,
+      currentUser?.nombre || currentUser?.email
+    );
+    if (res.success) {
+      setPedidos((prev) =>
+        prev.map((p) => (p.id === orderId ? { ...p, estado_pago: newProofStatus } : p))
+      );
+      if (selectedOrderForProof && (selectedOrderForProof.id === orderId || selectedOrderForProof.codigo === orderCode)) {
+        setSelectedOrderForProof((prev) => (prev ? { ...prev, estado_pago: newProofStatus } : null));
+      }
+      const label =
+        newProofStatus === 'verificado'
+          ? 'VERIFICADO Y APROBADO'
+          : newProofStatus === 'rechazado'
+          ? 'RECHAZADO'
+          : 'PENDIENTE DE REVISIÓN';
+      setComprobanteToast({
+        msg: `Comprobante de orden ${orderCode} marcado como: ${label}`,
+        type: 'success',
+      });
+      setTimeout(() => setComprobanteToast(null), 3500);
+
+      registrarMovimiento({
+        usuario_id: currentUser?.id,
+        usuario_nombre: currentUser?.nombre || 'Usuario',
+        usuario_email: currentUser?.email || '',
+        rol: currentUser?.rol || 'cajero',
+        accion: `Comprobante: ${newProofStatus.toUpperCase()}`,
+        modulo: 'pedidos',
+        detalles: `Marcó comprobante de pago de la orden ${orderCode} como "${label}".`,
+      }).then(() => getMovimientosTrabajadores().then(setMovimientos));
+    } else {
+      setComprobanteToast({
+        msg: res.error || 'Error al actualizar estado del comprobante.',
+        type: 'error',
+      });
+      setTimeout(() => setComprobanteToast(null), 3500);
+    }
+  };
+
+  const handleAttachReceiptToOrder = async (order: Pedido, file: File) => {
+    setUploadingProofOrderId(order.id || order.codigo);
+    try {
+      const res = await subirFotoStorage(file, 'comprobantes', `recibo_${order.codigo}_${Date.now()}.jpg`);
+      if (res.url) {
+        await vincularComprobanteAPedido(order.id || '', res.url, res.path);
+        setPedidos((prev) =>
+          prev.map((p) =>
+            (p.id === order.id || p.codigo === order.codigo)
+              ? { ...p, comprobante_url: res.url, comprobante_path: res.path, estado_pago: 'pendiente_revision' }
+              : p
+          )
+        );
+        setComprobanteToast({
+          msg: `Comprobante subido y vinculado exitosamente a la orden ${order.codigo}.`,
+          type: 'success',
+        });
+        setTimeout(() => setComprobanteToast(null), 3500);
+      } else {
+        alert(res.error || 'No se pudo subir la foto del comprobante.');
+      }
+    } catch (e: any) {
+      alert('Error al subir: ' + e?.message);
+    } finally {
+      setUploadingProofOrderId(null);
+    }
+  };
+
+  const handleToggleUserActive = async (targetUser: UsuarioPanel) => {
+    if (!currentUser) return;
+    setUserFeedback(null);
+    const newStatus = !targetUser.activo;
+    const res = await actualizarUsuario(targetUser.id, { activo: newStatus }, currentUser.email, currentUser.rol);
+    if (res.success) {
+      setUserFeedback({
+        type: 'success',
+        msg: `El usuario "${targetUser.nombre}" ahora está ${newStatus ? 'ACTIVO' : 'INACTIVO'}.`,
+      });
+      const updated = await getUsuariosList();
+      setUsuarios(updated);
+    } else {
+      setUserFeedback({ type: 'error', msg: res.error || 'Error al actualizar estado.' });
+    }
+  };
+
+  const handleDeleteUser = async (targetUser: UsuarioPanel) => {
+    if (!currentUser) return;
+    setUserFeedback(null);
+    if (!confirm(`¿Estás seguro de eliminar permanentemente a "${targetUser.nombre}" (${targetUser.email})?`)) {
+      return;
+    }
+    const res = await eliminarUsuario(targetUser.id, currentUser.email, currentUser.rol);
+    if (res.success) {
+      setUserFeedback({ type: 'success', msg: `Usuario "${targetUser.nombre}" eliminado correctamente.` });
+      const updated = await getUsuariosList();
+      setUsuarios(updated);
+    } else {
+      setUserFeedback({ type: 'error', msg: res.error || 'Error al eliminar usuario.' });
+    }
+  };
+
+  const handleGuardarUsuarioAuthDirecto = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = authEmailInput.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      alert('Ingresa un correo electrónico válido de Supabase Authentication.');
+      return;
+    }
+    setSavingAuthRole(true);
+    try {
+      const res = await guardarRolUsuarioAuth(cleanEmail, authRolSelected, authNombreInput);
+      if (res.success) {
+        setUserFeedback({
+          type: 'success',
+          msg: `¡Usuario ${cleanEmail} guardado exitosamente como ${authRolSelected === 'dueno' ? '👑 DUEÑO' : '💼 TRABAJADOR'}!`,
+        });
+        setAuthEmailInput('');
+        setAuthNombreInput('');
+        await reloadAllData();
+        setTimeout(() => setUserFeedback(null), 4000);
+      } else {
+        alert(res.error || 'Error al guardar rol.');
+      }
+    } finally {
+      setSavingAuthRole(false);
+    }
+  };
+
+  const handleCambiarRolDirecto = async (u: UsuarioPanel, nuevoRol: UserRole) => {
+    const res = await guardarRolUsuarioAuth(u.email, nuevoRol, u.nombre);
+    if (res.success) {
+      setUserFeedback({
+        type: 'success',
+        msg: `Rol de ${u.email} cambiado exitosamente a ${nuevoRol === 'dueno' ? '👑 DUEÑO' : '💼 TRABAJADOR'}.`,
+      });
+      await reloadAllData();
+      setTimeout(() => setUserFeedback(null), 3500);
+    } else {
+      alert(res.error || 'Error al cambiar rol.');
+    }
+  };
+
+  const handleAprobarPedido = async (pedido: Pedido) => {
+    const orderId = pedido.id || pedido.codigo;
+    setOrderActionLoadingId(orderId);
+    try {
+      const reviewer = currentUser?.nombre || currentUser?.email || 'Administrador';
+      const res = await aprobarPedidoYDescontarStock(orderId, pedido, reviewer);
+      if (res.success) {
+        // Descontar inventario localmente en tiempo real para respuesta inmediata en la UI
+        if (pedido.items && pedido.items.length > 0) {
+          setProductos((prev) =>
+            prev.map((prod) => {
+              const itemMatch = pedido.items.find(
+                (it) => it.producto_id === prod.id || it.id === prod.id
+              );
+              if (!itemMatch) return prod;
+              const nextStock = Math.max(0, (prod.stock ?? 0) - itemMatch.cantidad);
+              let nextVars = prod.variantes;
+              if (Array.isArray(nextVars) && (itemMatch.variante_id || itemMatch.variante_titulo)) {
+                nextVars = nextVars.map((v) => {
+                  if (
+                    (itemMatch.variante_id && v.id === itemMatch.variante_id) ||
+                    (itemMatch.variante_titulo && v.titulo === itemMatch.variante_titulo)
+                  ) {
+                    return { ...v, stock: Math.max(0, (v.stock ?? 0) - itemMatch.cantidad) };
+                  }
+                  return v;
+                });
+              }
+              return { ...prod, stock: nextStock, variantes: nextVars };
+            })
+          );
+        }
+
+        // Marcar pedido como aprobado y verificado
+        const now = new Date().toISOString();
+        setPedidos((prev) =>
+          prev.map((p) =>
+            p.id === pedido.id || p.codigo === pedido.codigo
+              ? {
+                  ...p,
+                  estado: 'aprobado',
+                  estado_pago: 'verificado',
+                  revisado_por: reviewer,
+                  revisado_en: now,
+                }
+              : p
+          )
+        );
+
+        // Registrar venta en tiempo real en la lista de ventas
+        const codigoVenta = `VNT-${(pedido.codigo || '').replace(/[^0-9]/g, '') || Math.floor(1000 + Math.random() * 9000)}`;
+        const nuevaVenta: Venta = {
+          codigo: codigoVenta,
+          pedido_id: pedido.id || null,
+          cliente_nombre: pedido.cliente_nombre,
+          cliente_telefono: pedido.cliente_telefono || null,
+          metodo_pago: pedido.metodo_pago,
+          total: pedido.total,
+          items: pedido.items,
+          tipo: 'web',
+          notas: `Venta generada automáticamente al aprobar pedido ${pedido.codigo}.`,
+          creado_en: now,
+        };
+        setVentas((prev) => [nuevaVenta, ...prev]);
+
+        setComprobanteToast({
+          msg: `✅ ¡Pedido ${pedido.codigo} aceptado con éxito! Se descontó del inventario y se registró automáticamente en Ventas.`,
+          type: 'success',
+        });
+        setTimeout(() => setComprobanteToast(null), 5000);
+
+        registrarMovimiento({
+          usuario_id: currentUser?.id,
+          usuario_nombre: reviewer,
+          usuario_email: currentUser?.email || '',
+          rol: currentUser?.rol || 'cajero',
+          accion: 'Aprobó Pedido',
+          modulo: 'pedidos',
+          detalles: `Aprobó pedido ${pedido.codigo} (Cliente: ${pedido.cliente_nombre}) por $${pedido.total.toFixed(2)}, descontó inventario y registró en Ventas.`,
+        }).then(() => getMovimientosTrabajadores().then(setMovimientos));
+      } else {
+        alert(res.error || 'Error al aprobar pedido.');
+      }
+    } catch (err: any) {
+      alert('Error: ' + err?.message);
+    } finally {
+      setOrderActionLoadingId(null);
+    }
+  };
+
+  const handleRechazarPedido = async (pedido: Pedido) => {
+    if (!confirm(`¿Estás seguro de rechazar el pedido ${pedido.codigo}?`)) return;
+    const orderId = pedido.id || pedido.codigo;
+    setOrderActionLoadingId(orderId);
+    try {
+      const reviewer = currentUser?.nombre || currentUser?.email || 'Administrador';
+      await actualizarEstadoPedido(orderId, 'rechazado');
+      await actualizarEstadoPagoPedido(orderId, 'rechazado', reviewer);
+      const now = new Date().toISOString();
+      setPedidos((prev) =>
+        prev.map((p) =>
+          p.id === pedido.id || p.codigo === pedido.codigo
+            ? {
+                ...p,
+                estado: 'rechazado',
+                estado_pago: 'rechazado',
+                revisado_por: reviewer,
+                revisado_en: now,
+              }
+            : p
+        )
+      );
+      setComprobanteToast({
+        msg: `Pedido ${pedido.codigo} marcado como RECHAZADO.`,
+        type: 'error',
+      });
+      setTimeout(() => setComprobanteToast(null), 4000);
+
+      registrarMovimiento({
+        usuario_id: currentUser?.id,
+        usuario_nombre: reviewer,
+        usuario_email: currentUser?.email || '',
+        rol: currentUser?.rol || 'cajero',
+        accion: 'Rechazó Pedido',
+        modulo: 'pedidos',
+        detalles: `Rechazó pedido ${pedido.codigo} (Cliente: ${pedido.cliente_nombre}).`,
+      }).then(() => getMovimientosTrabajadores().then(setMovimientos));
+    } finally {
+      setOrderActionLoadingId(null);
+    }
+  };
+
+  const handleCrearGastoSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const montoNum = parseFloat(nuevoGastoMonto);
+    if (!nuevoGastoConcepto.trim() || isNaN(montoNum) || montoNum <= 0) {
+      alert('Por favor ingresa un concepto válido y un monto mayor a $0.');
+      return;
+    }
+    setSubmittingGasto(true);
+    try {
+      const res = await crearGasto({
+        concepto: nuevoGastoConcepto.trim(),
+        monto: montoNum,
+        categoria: nuevoGastoCategoria,
+        notas: nuevoGastoNotas.trim() || undefined,
+        creado_por: currentUser?.nombre || currentUser?.email || 'Admin',
+      });
+      if (res.success && res.data) {
+        setGastos((prev) => [res.data, ...prev]);
+        setNuevoGastoConcepto('');
+        setNuevoGastoMonto('');
+        setNuevoGastoNotas('');
+        setIsModalGastoOpen(false);
+        setUserFeedback({
+          type: 'success',
+          msg: `Gasto registrado por $${montoNum.toFixed(2)}. Se ha descontado automáticamente de los ingresos brutos reflejando la ganancia neta.`,
+        });
+        setTimeout(() => setUserFeedback(null), 4500);
+      } else {
+        alert(res.error || 'Error al registrar el gasto.');
+      }
+    } finally {
+      setSubmittingGasto(false);
+    }
+  };
+
+  const handleEliminarGasto = async (id: string, concepto: string) => {
+    if (!confirm(`¿Estás seguro de eliminar el registro de gasto "${concepto}"?`)) return;
+    const res = await eliminarGasto(id);
+    if (res.success) {
+      setGastos((prev) => prev.filter((g) => g.id !== id));
+      setUserFeedback({
+        type: 'success',
+        msg: `Gasto "${concepto}" eliminado correctamente.`,
+      });
+      setTimeout(() => setUserFeedback(null), 3500);
+    } else {
+      alert(res.error || 'Error al eliminar');
+    }
+  };
+
+  const handleEliminarVenta = async (idOrCodigo: string) => {
+    if (!confirm(`¿Estás seguro de eliminar el registro de venta ${idOrCodigo}?`)) return;
+    const res = await eliminarVenta(idOrCodigo);
+    if (res.success) {
+      setVentas((prev) => prev.filter((v) => (v.id ? v.id !== idOrCodigo : v.codigo !== idOrCodigo)));
+      setUserFeedback({
+        type: 'success',
+        msg: `Venta ${idOrCodigo} eliminada correctamente.`,
+      });
+      setTimeout(() => setUserFeedback(null), 3500);
+    } else {
+      alert(res.error || 'Error al eliminar la venta');
+    }
+  };
+
+  const handleEliminarPedido = async (id: string, codigo: string) => {
+    if (!confirm(`¿Estás seguro de eliminar permanentemente el pedido ${codigo}?`)) return;
+    const res = await eliminarPedido(id);
+    if (res.success) {
+      setPedidos((prev) => prev.filter((p) => p.id !== id && p.codigo !== codigo));
+      setUserFeedback({
+        type: 'success',
+        msg: `Pedido ${codigo} eliminado permanentemente.`,
+      });
+      setTimeout(() => setUserFeedback(null), 3500);
+    } else {
+      alert(res.error || 'Error al eliminar el pedido');
+    }
+  };
+
+  const handleEliminarCliente = async (cliente: ClienteResumen) => {
+    if (!confirm(`¿Estás seguro de eliminar al cliente "${cliente.nombre}" (${cliente.telefono}) y sus pedidos asociados?`)) return;
+    const res = await eliminarCliente(cliente.telefono || cliente.nombre);
+    if (res.success) {
+      setPedidos((prev) =>
+        prev.filter((p) => p.cliente_telefono !== cliente.telefono && p.cliente_nombre !== cliente.nombre)
+      );
+      setUserFeedback({
+        type: 'success',
+        msg: `Cliente "${cliente.nombre}" eliminado correctamente.`,
+      });
+      setTimeout(() => setUserFeedback(null), 3500);
+    } else {
+      alert(res.error || 'Error al eliminar el cliente');
+    }
+  };
+
+  const handleEliminarMovimientoRegistro = async (id: string) => {
+    if (!confirm('¿Estás seguro de eliminar este registro de auditoría?')) return;
+    await eliminarMovimiento(id);
+    setMovimientos((prev) => prev.filter((m) => m.id !== id));
+  };
+
+  const handleLimpiarHistorialMovimientosRegistro = async () => {
+    if (!confirm('¿Estás seguro de vaciar todo el historial de movimientos de los trabajadores? Esta acción no se puede deshacer.')) return;
+    await limpiarHistorialMovimientos();
+    setMovimientos([]);
+    setUserFeedback({
+      type: 'success',
+      msg: 'Historial de movimientos vaciado correctamente.',
+    });
+    setTimeout(() => setUserFeedback(null), 3500);
+  };
+
+  const handleCopyReceiptLink = (url: string, id: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedLinkOrderId(id);
+    setTimeout(() => setCopiedLinkOrderId(null), 2500);
+  };
+
+  // Definición del menú con validación dinámica de roles (RBAC)
+  const allNavItems = [
+    { id: 'dashboard' as const, label: 'DASHBOARD', icon: LayoutDashboard, badge: 0 },
+    { id: 'pedidos' as const, label: 'PEDIDOS & COMPROBANTES', icon: Receipt, badge: pedidosPendientes },
+    { id: 'ventas' as const, label: 'VENTAS & FACTURACIÓN', icon: TrendingUp, badge: 0 },
+    { id: 'gastos' as const, label: 'GASTOS & BALANCE', icon: Wallet, badge: 0 },
+    { id: 'movimientos' as const, label: 'REGISTRO DE MOVIMIENTOS', icon: Activity, badge: 0 },
+    { id: 'productos' as const, label: 'PRODUCTOS', icon: Package, badge: 0 },
+    { id: 'categorias' as const, label: 'CATEGORÍAS', icon: Layers, badge: 0 },
+    { id: 'inventario' as const, label: 'INVENTARIO', icon: Boxes, badge: stockBajoCount + agotadosCount },
+    { id: 'clientes' as const, label: 'DIRECTORIO DE CLIENTES', icon: Users, badge: 0 },
+    { id: 'usuarios' as const, label: 'USUARIOS & ROLES', icon: Shield, badge: 0 },
+  ];
+
+  const allowedNavItems = allNavItems.filter((item) =>
+    canAccessSection(userRole, item.id)
+  );
 
   return (
     <div className="min-h-screen bg-[#F4F6F8] text-[#1A1918] flex flex-col md:flex-row font-sans">
@@ -161,30 +795,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 Alex<span className="text-[#C59A4D]">Store</span>
               </span>
               <span className="text-[9px] uppercase font-bold tracking-widest text-[#8C8375]">
-                PANEL ADMIN
+                {userRole === 'dueno' && 'PANEL DUEÑO'}
+                {userRole === 'administrador' && 'PANEL ADMIN'}
+                {userRole === 'cajero' && 'PANEL CAJERO'}
               </span>
             </div>
           </div>
 
-          <button
-            onClick={onExitAdmin}
-            className="px-3 py-1.5 rounded-xl bg-[#26221E] text-white text-xs font-bold flex items-center gap-1.5"
-          >
-            <Globe className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Tienda</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onExitAdmin}
+              className="px-2.5 py-1.5 rounded-xl bg-[#26221E] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              title="Ir a tienda pública"
+            >
+              <Globe className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Tienda</span>
+            </button>
+
+            <button
+              onClick={onLogout}
+              className="p-1.5 rounded-xl bg-rose-950/60 text-rose-400 hover:text-white border border-rose-800 transition-colors cursor-pointer"
+              title="Cerrar Sesión"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
-        {/* Scrollable menu tabs on mobile */}
+        {/* Scrollable menu tabs on mobile (filtradas estrictamente por rol) */}
         <div className="flex items-center gap-1.5 px-3 pb-2.5 overflow-x-auto no-scrollbar">
-          {[
-            { id: 'dashboard' as const, label: 'Dashboard', icon: LayoutDashboard, badge: 0 },
-            { id: 'pedidos' as const, label: 'Pedidos', icon: Receipt, badge: pedidosPendientes },
-            { id: 'ventas' as const, label: 'Ventas', icon: TrendingUp, badge: 0 },
-            { id: 'productos' as const, label: 'Productos', icon: Package, badge: 0 },
-            { id: 'categorias' as const, label: 'Categorías', icon: Layers, badge: 0 },
-            { id: 'inventario' as const, label: 'Inventario', icon: Boxes, badge: 0 },
-          ].map((item) => {
+          {allowedNavItems.map((item) => {
             const Icon = item.icon;
             const isSelected = activeSection === item.id;
             return (
@@ -193,7 +833,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 onClick={() => setActiveSection(item.id)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all shrink-0 cursor-pointer ${
                   isSelected
-                    ? 'bg-[#C59A4D] text-[#141312] shadow-sm'
+                    ? 'bg-[#C59A4D] text-[#141312] shadow-sm font-black'
                     : 'bg-[#1C1A17] text-[#A69F93] hover:text-white'
                 }`}
               >
@@ -210,7 +850,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       </div>
 
-      {/* Desktop/Tablet Sidebar (Left Column - Images 2, 3, 4, 5, 6, 7) */}
+      {/* Desktop/Tablet Sidebar (Left Column) */}
       <aside className="hidden md:flex w-64 bg-[#0F0E0D] text-white flex-col justify-between p-5 border-r border-[#26221E] shrink-0 sticky top-0 h-screen overflow-y-auto">
         <div className="space-y-6">
           {/* Logo Brand Header */}
@@ -221,111 +861,73 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 Alex<span className="text-[#C59A4D]">Store</span>
               </span>
               <span className="text-[9px] uppercase font-bold tracking-[0.2em] text-[#8C8375] mt-1">
-                CATÁLOGO OFICIAL
+                GESTIÓN OFICIAL
               </span>
             </div>
           </div>
 
-          {/* Admin Profile Box */}
-          <div className="p-3 rounded-2xl bg-[#1A1816] border border-[#2D2822] flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[#26221E] text-[#C59A4D] flex items-center justify-center">
-              <Shield className="w-5 h-5" />
+          {/* User Profile & Role Card */}
+          <div className="p-3.5 rounded-2xl bg-[#1A1816] border border-[#2D2822] space-y-2">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-[#26221E] text-[#C59A4D] flex items-center justify-center font-black">
+                {currentUser?.nombre ? currentUser.nombre.substring(0, 2).toUpperCase() : 'AS'}
+              </div>
+              <div className="min-w-0 flex-1">
+                <span className="font-extrabold text-xs text-white block truncate">
+                  {currentUser?.nombre || 'Usuario'}
+                </span>
+                <span className="text-[10px] text-[#8C8375] block truncate font-mono">
+                  {currentUser?.email || 'admin@alexmstore.com'}
+                </span>
+              </div>
             </div>
-            <div className="min-w-0">
-              <span className="font-extrabold text-xs text-white block truncate">
-                Administrador
+
+            {/* Badge de Rol con estilo distintivo */}
+            <div className="pt-1 border-t border-[#26221E] flex items-center justify-between">
+              <span
+                className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                  ROLE_PERMISSIONS[userRole]?.badgeColor || 'bg-slate-700 text-white'
+                }`}
+              >
+                {userRole === 'dueno' && '👑 DUEÑO'}
+                {userRole === 'administrador' && '🛡️ ADMINISTRADOR'}
+                {userRole === 'cajero' && '💼 CAJERO / STAFF'}
               </span>
-              <span className="text-[10px] text-[#A69F93] flex items-center gap-1 font-bold">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                ROL: ADMIN
-              </span>
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Sesión activa" />
             </div>
           </div>
 
-          {/* Menu Sections */}
+          {/* Menu Sections Dinámico según Rol */}
           <div className="space-y-1">
             <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#6E685F] px-3 block mb-2">
-              MENÚ ALEXSTORE
+              SECCIONES AUTORIZADAS
             </span>
 
-            <button
-              onClick={() => setActiveSection('dashboard')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
-                activeSection === 'dashboard'
-                  ? 'bg-[#1C1A17] text-white border border-[#C59A4D]/40 shadow-sm'
-                  : 'text-[#8C8375] hover:text-white hover:bg-[#1A1816]'
-              }`}
-            >
-              <LayoutDashboard className="w-4 h-4 text-[#C59A4D]" />
-              <span>DASHBOARD</span>
-            </button>
-
-            <button
-              onClick={() => setActiveSection('pedidos')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
-                activeSection === 'pedidos'
-                  ? 'bg-[#1C1A17] text-white border border-[#C59A4D]/40 shadow-sm'
-                  : 'text-[#8C8375] hover:text-white hover:bg-[#1A1816]'
-              }`}
-            >
-              <Receipt className="w-4 h-4 text-[#C59A4D]" />
-              <div className="flex-1 flex items-center justify-between">
-                <span>PEDIDOS & COMPROBANTES</span>
-                {pedidosPendientes > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black">
-                    {pedidosPendientes}
-                  </span>
-                )}
-              </div>
-            </button>
-
-            <button
-              onClick={() => setActiveSection('ventas')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
-                activeSection === 'ventas'
-                  ? 'bg-[#1C1A17] text-white border border-[#C59A4D]/40 shadow-sm'
-                  : 'text-[#8C8375] hover:text-white hover:bg-[#1A1816]'
-              }`}
-            >
-              <TrendingUp className="w-4 h-4 text-[#C59A4D]" />
-              <span>VENTAS & FACTURACIÓN</span>
-            </button>
-
-            <button
-              onClick={() => setActiveSection('productos')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
-                activeSection === 'productos'
-                  ? 'bg-[#1C1A17] text-white border border-[#C59A4D]/40 shadow-sm'
-                  : 'text-[#8C8375] hover:text-white hover:bg-[#1A1816]'
-              }`}
-            >
-              <Package className="w-4 h-4 text-[#C59A4D]" />
-              <span>PRODUCTOS</span>
-            </button>
-
-            <button
-              onClick={() => setActiveSection('categorias')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
-                activeSection === 'categorias'
-                  ? 'bg-[#1C1A17] text-white border border-[#C59A4D]/40 shadow-sm'
-                  : 'text-[#8C8375] hover:text-white hover:bg-[#1A1816]'
-              }`}
-            >
-              <Layers className="w-4 h-4 text-[#C59A4D]" />
-              <span>CATEGORÍAS</span>
-            </button>
-
-            <button
-              onClick={() => setActiveSection('inventario')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
-                activeSection === 'inventario'
-                  ? 'bg-[#1C1A17] text-white border border-[#C59A4D]/40 shadow-sm'
-                  : 'text-[#8C8375] hover:text-white hover:bg-[#1A1816]'
-              }`}
-            >
-              <Boxes className="w-4 h-4 text-[#C59A4D]" />
-              <span>INVENTARIO</span>
-            </button>
+            {allowedNavItems.map((item) => {
+              const Icon = item.icon;
+              const isSelected = activeSection === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveSection(item.id)}
+                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-[#1C1A17] text-white border border-[#C59A4D]/40 shadow-sm font-black'
+                      : 'text-[#8C8375] hover:text-white hover:bg-[#1A1816]'
+                  }`}
+                >
+                  <Icon className="w-4 h-4 text-[#C59A4D]" />
+                  <div className="flex-1 flex items-center justify-between">
+                    <span>{item.label}</span>
+                    {item.badge > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black">
+                        {item.badge}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -337,7 +939,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           >
             <span className="flex items-center gap-2">
               <Globe className="w-4 h-4 text-emerald-400" />
-              Ver Catálogo Público
+              Ver Tienda Pública
             </span>
             <span className="text-[10px] bg-[#26221E] px-2 py-0.5 rounded-md font-mono">
               Web
@@ -345,7 +947,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </button>
 
           <button
-            onClick={onExitAdmin}
+            onClick={onLogout}
             className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-400 hover:text-rose-300 transition-colors cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
@@ -360,26 +962,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         <header className="bg-white border-b border-[#E5E9EE] px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-black text-[#1A1918] font-heading capitalize leading-tight">
-              {activeSection === 'dashboard' && 'Dashboard'}
+              {activeSection === 'dashboard' && 'Dashboard General'}
               {activeSection === 'pedidos' && 'Gestión de Pedidos & Comprobantes'}
               {activeSection === 'ventas' && 'Módulo de Ventas & Facturación'}
+              {activeSection === 'gastos' && 'Control de Gastos & Balance Neto'}
               {activeSection === 'productos' && 'Gestión de Productos'}
               {activeSection === 'categorias' && 'Gestión de Categorías'}
               {activeSection === 'inventario' && 'Control de Inventario'}
+              {activeSection === 'clientes' && 'Directorio de Clientes'}
+              {activeSection === 'usuarios' && 'Gestión de Usuarios, Roles & Permisos'}
             </h1>
             <p className="text-xs text-[#7A7368] mt-0.5">
-              {activeSection === 'dashboard' && 'Control general del catálogo, stock y almacenamiento'}
+              {activeSection === 'dashboard' && 'Métricas operativas y financieras generales de AlexStore'}
               {activeSection === 'pedidos' && 'Verifica comprobantes de pago por Yappy y Transferencias, y aprueba compras'}
               {activeSection === 'ventas' && 'Ventas web aprobadas y registro de ventas manuales de mostrador'}
+              {activeSection === 'gastos' && 'Registra gastos operativos y de mercancía, descontándolos en vivo del total ganado para dar la ganancia neta'}
               {activeSection === 'productos' && 'Administra catálogo, precios, fotos e inventario en public.productos'}
               {activeSection === 'categorias' && 'Crea y edita categorías en public.categorias'}
               {activeSection === 'inventario' && 'Monitorea existencias, alertas de stock mínimo y reposición en public.inventario'}
+              {activeSection === 'clientes' && 'Listado consolidado de clientes, pedidos acumulados y contacto directo'}
+              {activeSection === 'usuarios' && 'Administración de cuentas de Dueño, Administradores y Cajeros con seguridad RLS'}
             </p>
           </div>
 
           <button
             onClick={onExitAdmin}
-            className="px-4 py-2 rounded-xl border border-[#D5DCE4] hover:bg-[#F4F6F8] text-xs font-bold uppercase tracking-wider flex items-center gap-2 self-start sm:self-auto transition-colors"
+            className="px-4 py-2 rounded-xl border border-[#D5DCE4] hover:bg-[#F4F6F8] text-xs font-bold uppercase tracking-wider flex items-center gap-2 self-start sm:self-auto transition-colors cursor-pointer"
           >
             <ExternalLink className="w-3.5 h-3.5 text-[#C59A4D]" />
             <span>VER CATÁLOGO</span>
@@ -388,6 +996,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
         {/* Content Body */}
         <main className="flex-1 p-6 space-y-6">
+          {/* Alertas de Feedback */}
+          {userFeedback && (
+            <div
+              className={`p-4 rounded-2xl text-xs font-bold flex items-center justify-between border animate-fade-in ${
+                userFeedback.type === 'success'
+                  ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                  : 'bg-rose-50 text-rose-900 border-rose-200'
+              }`}
+            >
+              <span>{userFeedback.msg}</span>
+              <button
+                onClick={() => setUserFeedback(null)}
+                className="text-slate-500 hover:text-black font-black ml-2 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* GUARD DE SEGURIDAD ESTRICTO: Bloqueo de secciones no autorizadas */}
+          {!canAccessSection(userRole, activeSection) && (
+            <div className="bg-white rounded-3xl p-8 border border-rose-200 text-center space-y-3 animate-fade-in">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
+              <h2 className="text-lg font-black text-[#1A1918]">Módulo Restringido</h2>
+              <p className="text-xs text-[#7A7368] max-w-md mx-auto">
+                Tu rol actual (<strong>{ROLE_PERMISSIONS[userRole]?.name}</strong>) no tiene autorización para acceder a este módulo financiero o administrativo.
+              </p>
+              <button
+                onClick={() => setActiveSection('pedidos')}
+                className="px-5 py-2.5 rounded-2xl bg-[#141312] text-white text-xs font-black uppercase tracking-wider cursor-pointer"
+              >
+                Ir a Pedidos & Comprobantes
+              </button>
+            </div>
+          )}
           {/* ======================================================== */}
           {/* 1. DASHBOARD VIEW (Image 2) */}
           {/* ======================================================== */}
@@ -526,6 +1171,179 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <span className="text-3xl font-black text-rose-600">{agotadosCount}</span>
                   </div>
                   <span className="text-[11px] font-bold text-rose-700">Sin existencias (0)</span>
+                </div>
+              </div>
+
+              {/* Balance Financiero & Total Neto (Disponible para Dueño y Administrador) */}
+              {canAccessSection(userRole, 'gastos') && (
+                <div className="bg-gradient-to-br from-[#141312] to-[#24201C] text-white rounded-3xl p-6 sm:p-7 shadow-xl border border-[#3A332B] space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-white/10">
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-[#C59A4D] flex items-center gap-2">
+                        <Wallet className="w-3.5 h-3.5" />
+                        BALANCE FINANCIERO DEL NEGOCIO
+                      </span>
+                      <h3 className="text-lg font-black text-white font-heading mt-0.5">
+                        Estado de Ingresos, Gastos y Ganancia Neta
+                      </h3>
+                    </div>
+                    <button
+                      onClick={() => setActiveSection('gastos')}
+                      className="px-4 py-2 rounded-xl bg-[#C59A4D] hover:bg-[#B3873B] text-[#141312] text-xs font-black uppercase tracking-wider self-start sm:self-auto cursor-pointer transition-all shadow-md"
+                    >
+                      GESTIONAR GASTOS & DETALLES →
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-white/60 block">
+                        TOTAL VENTAS (INGRESOS BRUTOS)
+                      </span>
+                      <span className="text-2xl sm:text-3xl font-black text-white block my-1.5">
+                        ${totalVentasGanado.toFixed(2)}
+                      </span>
+                      <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1">
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                        {ventas.length} ventas registradas
+                      </span>
+                    </div>
+
+                    <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-white/60 block">
+                        TOTAL GASTOS REGISTRADOS
+                      </span>
+                      <span className="text-2xl sm:text-3xl font-black text-rose-400 block my-1.5">
+                        ${totalGastosMonto.toFixed(2)}
+                      </span>
+                      <span className="text-[11px] text-rose-300 font-bold flex items-center gap-1">
+                        <ArrowDownRight className="w-3.5 h-3.5" />
+                        {gastos.length} gastos deducidos
+                      </span>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-[#1C1A17] to-black rounded-2xl p-4 border border-[#C59A4D]/40 shadow-inner">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-[#E6C687] block">
+                        TOTAL NETO EN CAJA (GANANCIA REAL)
+                      </span>
+                      <span className={`text-2xl sm:text-3xl font-black block my-1.5 ${
+                        totalNetoGanancia >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                      }`}>
+                        ${totalNetoGanancia.toFixed(2)} USD
+                      </span>
+                      <span className="text-[11px] text-white/70 font-medium">
+                        Total Ganado menos Gastos descontados
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Espacio de Almacenamiento & Base de Datos (Supabase Quota) */}
+              <div className="bg-white rounded-3xl p-6 border border-[#E5E9EE] shadow-xs space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#F0EAE1]">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-[#8C8375] flex items-center gap-1.5">
+                      <Database className="w-3.5 h-3.5 text-[#C59A4D]" />
+                      CAPACIDAD & ESPACIO DISPONIBLE (SUPABASE)
+                    </span>
+                    <h3 className="text-base font-black text-[#1A1918] font-heading mt-0.5">
+                      Espacio para Montar Productos, Comprobantes y Tablas
+                    </h3>
+                  </div>
+                  <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-black self-start sm:self-auto">
+                    Tier Gratuito Activo (100% Operativo)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {/* Storage: Fotos de Productos y Comprobantes */}
+                  <div className="p-4 rounded-2xl bg-[#FCFAF7] border border-[#EAE5DC] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-amber-50 text-[#C59A4D] flex items-center justify-center font-bold">
+                          <UploadCloud className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-extrabold text-[#1A1918] block">Almacenamiento Storage</span>
+                          <span className="text-[10px] text-[#7A7368]">Fotos de productos y comprobantes</span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs font-black text-[#1A1918] block">{metricasEspacio.mbStorageUsado} MB / {metricasEspacio.mbStorageTotal} MB</span>
+                        <span className="text-[10px] text-emerald-600 font-bold">{metricasEspacio.mbStorageLibre} MB libres</span>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="w-full bg-[#EAE5DC] h-2.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-[#C59A4D] h-full rounded-full transition-all duration-500"
+                        style={{ width: `${Math.max(2, metricasEspacio.porcentajeStorageUsado)}%` }}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
+                      <div className="bg-white p-2 rounded-xl border border-[#E5DFD5]">
+                        <span className="text-[#7A7368] block text-[10px]">Capacidad restante productos:</span>
+                        <strong className="text-emerald-700 font-extrabold block">
+                          ~{metricasEspacio.productosRestantesEstimados.toLocaleString()} productos
+                        </strong>
+                        <span className="text-[9px] text-[#9C9488]">({metricasEspacio.totalFotosProductos} fotos actuales)</span>
+                      </div>
+                      <div className="bg-white p-2 rounded-xl border border-[#E5DFD5]">
+                        <span className="text-[#7A7368] block text-[10px]">Capacidad comprobantes:</span>
+                        <strong className="text-emerald-700 font-extrabold block">
+                          ~{metricasEspacio.fotosRestantesEstimadas.toLocaleString()} comprobantes
+                        </strong>
+                        <span className="text-[9px] text-[#9C9488]">({metricasEspacio.totalComprobantes} capturas guardadas)</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Base de Datos: Tablas y Registros */}
+                  <div className="p-4 rounded-2xl bg-[#FCFAF7] border border-[#EAE5DC] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center font-bold">
+                          <Database className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-extrabold text-[#1A1918] block">Base de Datos PostgreSQL</span>
+                          <span className="text-[10px] text-[#7A7368]">Pedidos, ventas, clientes y gastos</span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs font-black text-[#1A1918] block">{metricasEspacio.mbBaseDatosUsado} MB / {metricasEspacio.mbBaseDatosTotal} MB</span>
+                        <span className="text-[10px] text-emerald-600 font-bold">{metricasEspacio.mbBaseDatosLibre} MB libres</span>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="w-full bg-[#EAE5DC] h-2.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-sky-500 h-full rounded-full transition-all duration-500"
+                        style={{ width: `${Math.max(2, metricasEspacio.porcentajeBaseDatosUsado)}%` }}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
+                      <div className="bg-white p-2 rounded-xl border border-[#E5DFD5]">
+                        <span className="text-[#7A7368] block text-[10px]">Registros en tablas:</span>
+                        <strong className="text-sky-800 font-extrabold block">
+                          {metricasEspacio.totalFilasTablas} registros
+                        </strong>
+                        <span className="text-[9px] text-[#9C9488]">Pedidos, ventas, gastos, etc.</span>
+                      </div>
+                      <div className="bg-white p-2 rounded-xl border border-[#E5DFD5]">
+                        <span className="text-[#7A7368] block text-[10px]">Espacio restante DB:</span>
+                        <strong className="text-emerald-700 font-extrabold block">
+                          {(100 - metricasEspacio.porcentajeBaseDatosUsado).toFixed(1)}% disponible
+                        </strong>
+                        <span className="text-[9px] text-[#9C9488]">Capacidad para +500,000 pedidos</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -723,15 +1541,498 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              {/* Empty state or table (Image 3) */}
-              <div className="bg-white rounded-3xl p-12 border border-[#E5E9EE] text-center space-y-3">
-                <TrendingUp className="w-10 h-10 mx-auto text-[#C9BFB0]" />
-                <h3 className="font-extrabold text-[#1A1918]">
-                  {ventas.length === 0 ? 'No se encontraron ventas registradas' : `${ventas.length} ventas en registro`}
-                </h3>
-                <p className="text-xs text-[#7A7368] max-w-md mx-auto">
-                  Puedes aprobar pedidos web verificados o pulsar en &quot;Registrar Venta Manual&quot; para añadir ventas directas por mostrador o chat.
-                </p>
+              {/* Ventas Table or Empty state */}
+              {ventas.length === 0 ? (
+                <div className="bg-white rounded-3xl p-12 border border-[#E5E9EE] text-center space-y-3">
+                  <TrendingUp className="w-10 h-10 mx-auto text-[#C9BFB0]" />
+                  <h3 className="font-extrabold text-[#1A1918]">
+                    No se encontraron ventas registradas
+                  </h3>
+                  <p className="text-xs text-[#7A7368] max-w-md mx-auto">
+                    Al aceptar y aprobar pedidos web verificados, se registrarán automáticamente aquí descontando del inventario. También puedes pulsar en &quot;Registrar Venta Manual&quot;.
+                  </p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-[#FAF8F5] border-b border-[#EAE5DC] text-[10px] font-black uppercase text-[#7A7368] tracking-wider">
+                        <tr>
+                          <th className="py-3.5 px-4">Código</th>
+                          <th className="py-3.5 px-4">Cliente</th>
+                          <th className="py-3.5 px-4">Teléfono</th>
+                          <th className="py-3.5 px-4">Método</th>
+                          <th className="py-3.5 px-4">Tipo</th>
+                          <th className="py-3.5 px-4">Fecha</th>
+                          <th className="py-3.5 px-4 text-right">Total</th>
+                          <th className="py-3.5 px-4 text-center">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#F2EDE4]">
+                        {ventas.map((v) => (
+                          <tr key={v.id || v.codigo} className="hover:bg-[#FCFAF7] transition-colors">
+                            <td className="py-3.5 px-4 font-mono font-bold text-[#1A1918]">
+                              {v.codigo}
+                            </td>
+                            <td className="py-3.5 px-4 font-extrabold text-[#1A1918]">
+                              {v.cliente_nombre}
+                            </td>
+                            <td className="py-3.5 px-4 text-[#7A7368]">
+                              {v.cliente_telefono || '—'}
+                            </td>
+                            <td className="py-3.5 px-4 uppercase font-bold text-[#5A554D]">
+                              {v.metodo_pago}
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                                v.tipo === 'web' ? 'bg-emerald-100 text-emerald-900' : 'bg-slate-100 text-slate-800'
+                              }`}>
+                                {v.tipo || 'web'}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4 text-[#7A7368]">
+                              {v.creado_en ? new Date(v.creado_en).toLocaleString('es-PA') : 'Reciente'}
+                            </td>
+                            <td className="py-3.5 px-4 text-right font-black text-sm text-[#1A1918]">
+                              ${Number(v.total).toFixed(2)}
+                            </td>
+                            <td className="py-3.5 px-4 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleEliminarVenta(v.id || v.codigo)}
+                                className="px-2.5 py-1 rounded-lg text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 font-bold text-xs inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                title="Eliminar registro de venta"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Eliminar</span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ======================================================== */}
+          {/* GASTOS & BALANCE FINANCIERO (Solo Dueño y Administrador) */}
+          {/* ======================================================== */}
+          {activeSection === 'gastos' && (
+            <div className="space-y-6">
+              {/* Financial Summary Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs">
+                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">
+                    TOTAL VENTAS (INGRESOS BRUTOS)
+                  </span>
+                  <span className="text-3xl font-black text-[#1A1918] block my-2">
+                    ${totalVentasGanado.toFixed(2)}
+                  </span>
+                  <span className="text-[11px] text-emerald-700 font-bold flex items-center gap-1">
+                    <ArrowUpRight className="w-3.5 h-3.5" />
+                    {ventas.length} ventas acumuladas
+                  </span>
+                </div>
+
+                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs">
+                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">
+                    TOTAL GASTOS REGISTRADOS
+                  </span>
+                  <span className="text-3xl font-black text-rose-600 block my-2">
+                    -${totalGastosMonto.toFixed(2)}
+                  </span>
+                  <span className="text-[11px] text-rose-700 font-bold flex items-center gap-1">
+                    <ArrowDownRight className="w-3.5 h-3.5" />
+                    {gastos.length} gastos operativos / inventario
+                  </span>
+                </div>
+
+                <div className={`rounded-3xl p-5 border shadow-sm ${
+                  totalNetoGanancia >= 0
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                    : 'bg-rose-50 border-rose-200 text-rose-950'
+                }`}>
+                  <span className="text-[10px] font-black uppercase tracking-wider block opacity-70">
+                    TOTAL NETO EN CAJA (GANANCIA REAL)
+                  </span>
+                  <span className="text-3xl font-black block my-2">
+                    ${totalNetoGanancia.toFixed(2)} USD
+                  </span>
+                  <span className="text-[11px] font-bold">
+                    Ventas menos Gastos deducidos en tiempo real
+                  </span>
+                </div>
+              </div>
+
+              {/* Action and Filter Bar */}
+              <div className="bg-white rounded-3xl p-4 border border-[#E5E9EE] flex flex-wrap items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => setIsModalGastoOpen(true)}
+                    className="px-5 py-2.5 rounded-2xl bg-[#141312] hover:bg-black text-[#F5E6BE] text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-md cursor-pointer transition-all active:scale-95"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>REGISTRAR NUEVO GASTO</span>
+                  </button>
+                  <button
+                    onClick={reloadAllData}
+                    className="p-2.5 rounded-xl border border-[#D5DCE4] hover:bg-[#FAF8F5] text-[#1A1918]"
+                    title="Recargar datos"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <div className="text-xs text-[#7A7368] font-bold">
+                  {gastos.length} registros de egresos
+                </div>
+              </div>
+
+              {/* Expenses Table */}
+              <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
+                {gastos.length === 0 ? (
+                  <div className="p-12 text-center space-y-3">
+                    <Wallet className="w-10 h-10 mx-auto text-[#C9BFB0]" />
+                    <h3 className="font-extrabold text-[#1A1918]">
+                      No hay gastos registrados todavía
+                    </h3>
+                    <p className="text-xs text-[#7A7368] max-w-md mx-auto">
+                      Registra los gastos de compras de mercancía (ej: 10 camisas), alquiler o publicidad para descontarlos del total ganado y ver tu ganancia neta.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-[#FAF8F5] border-b border-[#EAE5DC] text-[10px] font-black uppercase text-[#7A7368] tracking-wider">
+                        <tr>
+                          <th className="py-3.5 px-4">Concepto / Descripción</th>
+                          <th className="py-3.5 px-4">Categoría</th>
+                          <th className="py-3.5 px-4">Fecha</th>
+                          <th className="py-3.5 px-4">Registrado Por</th>
+                          <th className="py-3.5 px-4 text-right">Monto Deducido</th>
+                          <th className="py-3.5 px-4 text-center">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#F2EDE4]">
+                        {gastos.map((g) => (
+                          <tr key={g.id || g.concepto} className="hover:bg-[#FCFAF7] transition-colors">
+                            <td className="py-3.5 px-4">
+                              <span className="font-extrabold text-[#1A1918] block">{g.concepto}</span>
+                              {g.notas && (
+                                <span className="text-[11px] text-[#7A7368] block mt-0.5">{g.notas}</span>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#FAF8F5] border border-[#E5DFD5] text-[#5A554D]">
+                                {g.categoria}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4 text-[#7A7368]">
+                              {g.fecha ? new Date(g.fecha).toLocaleDateString('es-PA') : 'Reciente'}
+                            </td>
+                            <td className="py-3.5 px-4 text-[#7A7368]">
+                              {g.creado_por || 'Administrador'}
+                            </td>
+                            <td className="py-3.5 px-4 text-right font-black text-rose-600 text-sm">
+                              -${Number(g.monto).toFixed(2)}
+                            </td>
+                            <td className="py-3.5 px-4 text-center">
+                              {g.id && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleEliminarGasto(g.id!, g.concepto)}
+                                  className="px-2.5 py-1 rounded-lg text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 font-bold text-xs inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                  title="Eliminar gasto"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>Eliminar</span>
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ======================================================== */}
+          {/* REGISTRO DE MOVIMIENTOS & AUDITORÍA DE TRABAJADORES */}
+          {/* ======================================================== */}
+          {activeSection === 'movimientos' && (
+            <div className="space-y-6 animate-fade-in">
+              {/* Header card */}
+              <div className="bg-white rounded-3xl p-6 border border-[#E5E9EE] shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-black text-[#1A1918] font-heading flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-[#C59A4D]" />
+                    Registro de Movimientos & Auditoría de Trabajadores
+                  </h2>
+                  <p className="text-xs text-[#7A7368] mt-0.5">
+                    Historial cronológico de cada acción, turno, confirmación de pedidos, cobros y ajustes de inventario realizados por los trabajadores.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <button
+                    onClick={async () => {
+                      const m = await getMovimientosTrabajadores();
+                      setMovimientos(m);
+                    }}
+                    className="p-2.5 rounded-2xl bg-[#F4F6F8] hover:bg-[#EAEFF5] text-[#1A1918] transition-colors cursor-pointer"
+                    title="Actualizar movimientos en tiempo real"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+
+                  {userRole === 'dueno' && (
+                    <button
+                      onClick={handleLimpiarHistorialMovimientosRegistro}
+                      className="px-4 py-2.5 rounded-2xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-black tracking-wider uppercase flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span>VACIAR HISTORIAL</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 4 Stat Cards de Auditoría */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs">
+                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">
+                    TOTAL MOVIMIENTOS
+                  </span>
+                  <span className="text-2xl sm:text-3xl font-black text-[#1A1918] block my-2">
+                    {movimientos.length}
+                  </span>
+                  <span className="text-[11px] text-emerald-600 font-bold">
+                    Acciones registradas
+                  </span>
+                </div>
+
+                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs">
+                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">
+                    TURNOS DE TRABAJO
+                  </span>
+                  <span className="text-2xl sm:text-3xl font-black text-emerald-600 block my-2">
+                    {movimientos.filter((m) => m.modulo === 'auth' || m.accion.toLowerCase().includes('turno')).length}
+                  </span>
+                  <span className="text-[11px] text-[#7A7368]">
+                    Inicios de sesión
+                  </span>
+                </div>
+
+                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs">
+                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">
+                    MOVIMIENTOS EN PEDIDOS
+                  </span>
+                  <span className="text-2xl sm:text-3xl font-black text-[#C59A4D] block my-2">
+                    {movimientos.filter((m) => m.modulo === 'pedidos').length}
+                  </span>
+                  <span className="text-[11px] text-[#7A7368]">
+                    Aprobados / Rechazados
+                  </span>
+                </div>
+
+                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs">
+                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">
+                    AJUSTES DE INVENTARIO
+                  </span>
+                  <span className="text-2xl sm:text-3xl font-black text-sky-600 block my-2">
+                    {movimientos.filter((m) => m.modulo === 'inventario').length}
+                  </span>
+                  <span className="text-[11px] text-[#7A7368]">
+                    Stock modificado
+                  </span>
+                </div>
+              </div>
+
+              {/* Filtros de Búsqueda y Módulo */}
+              <div className="bg-white rounded-3xl p-4 border border-[#E5E9EE] flex flex-wrap items-center justify-between gap-3 shadow-xs">
+                <div className="relative flex-1 min-w-[220px] max-w-md">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8C8375]" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por trabajador, correo, pedido o acción..."
+                    value={movimientosSearch}
+                    onChange={(e) => setMovimientosSearch(e.target.value)}
+                    className="w-full bg-[#FAF8F5] text-xs px-10 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <select
+                    value={movimientosModuloFilter}
+                    onChange={(e) => setMovimientosModuloFilter(e.target.value)}
+                    className="bg-[#FAF8F5] text-xs font-bold text-[#1A1918] px-3.5 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none"
+                  >
+                    <option value="todos">Todos los Módulos</option>
+                    <option value="auth">Turnos / Sesiones</option>
+                    <option value="pedidos">Pedidos & Comprobantes</option>
+                    <option value="inventario">Inventario & Stock</option>
+                    <option value="ventas">Ventas</option>
+                    <option value="gastos">Gastos</option>
+                  </select>
+
+                  <select
+                    value={movimientosRolFilter}
+                    onChange={(e) => setMovimientosRolFilter(e.target.value)}
+                    className="bg-[#FAF8F5] text-xs font-bold text-[#1A1918] px-3.5 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none"
+                  >
+                    <option value="todos">Todos los Roles</option>
+                    <option value="cajero">Solo Trabajadores</option>
+                    <option value="dueno">Solo Dueños</option>
+                    <option value="administrador">Solo Administradores</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Tabla de Movimientos */}
+              <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-[#FAF8F5] border-b border-[#EAE5DC] text-[10px] font-black uppercase text-[#7A7368] tracking-wider">
+                      <tr>
+                        <th className="py-3.5 px-5">FECHA Y HORA</th>
+                        <th className="py-3.5 px-5">TRABAJADOR / USUARIO</th>
+                        <th className="py-3.5 px-5">MÓDULO</th>
+                        <th className="py-3.5 px-5">ACCIÓN REALIZADA</th>
+                        <th className="py-3.5 px-5">DETALLES DEL MOVIMIENTO</th>
+                        {userRole === 'dueno' && (
+                          <th className="py-3.5 px-5 text-right">ACCIONES</th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#F2EDE4]">
+                      {movimientos
+                        .filter((m) => {
+                          if (movimientosModuloFilter !== 'todos' && m.modulo !== movimientosModuloFilter) return false;
+                          if (movimientosRolFilter !== 'todos' && m.rol !== movimientosRolFilter) return false;
+                          if (movimientosSearch.trim()) {
+                            const query = movimientosSearch.toLowerCase();
+                            const matchesNombre = m.usuario_nombre.toLowerCase().includes(query);
+                            const matchesEmail = m.usuario_email.toLowerCase().includes(query);
+                            const matchesAccion = m.accion.toLowerCase().includes(query);
+                            const matchesDetalles = (m.detalles || '').toLowerCase().includes(query);
+                            if (!matchesNombre && !matchesEmail && !matchesAccion && !matchesDetalles) {
+                              return false;
+                            }
+                          }
+                          return true;
+                        })
+                        .map((mov) => {
+                          const dateObj = new Date(mov.creado_en);
+                          const formattedDate = dateObj.toLocaleDateString('es-PA', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                          });
+                          const formattedTime = dateObj.toLocaleTimeString('es-PA', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true,
+                          });
+
+                          const isWorker = mov.rol === 'cajero' || mov.rol === 'trabajador';
+
+                          return (
+                            <tr key={mov.id} className="hover:bg-[#FCFAF7] transition-colors">
+                              <td className="py-3.5 px-5 whitespace-nowrap">
+                                <span className="font-bold text-[#1A1918] block">{formattedTime}</span>
+                                <span className="text-[10px] text-[#7A7368] block">{formattedDate}</span>
+                              </td>
+
+                              <td className="py-3.5 px-5">
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 ${
+                                    isWorker ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-[#8C6B28]'
+                                  }`}>
+                                    {mov.usuario_nombre.charAt(0).toUpperCase()}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <strong className="text-xs text-[#1A1918]">{mov.usuario_nombre}</strong>
+                                      <span className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase ${
+                                        isWorker
+                                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                                          : 'bg-amber-100 text-[#8C6B28] border border-amber-300'
+                                      }`}>
+                                        {isWorker ? 'TRABAJADOR' : mov.rol.toUpperCase()}
+                                      </span>
+                                    </div>
+                                    <span className="text-[10px] text-[#7A7368] block truncate">
+                                      {mov.usuario_email}
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+
+                              <td className="py-3.5 px-5">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-slate-100 text-slate-800 border border-slate-200">
+                                  {mov.modulo || 'general'}
+                                </span>
+                              </td>
+
+                              <td className="py-3.5 px-5">
+                                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-extrabold ${
+                                  mov.accion.includes('Aprobó') || mov.accion.includes('Verificado')
+                                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                    : mov.accion.includes('Rechazó')
+                                    ? 'bg-rose-50 text-rose-800 border border-rose-200'
+                                    : mov.accion.includes('Stock')
+                                    ? 'bg-sky-50 text-sky-800 border border-sky-200'
+                                    : mov.accion.includes('Turno') || mov.accion.includes('Sesión')
+                                    ? 'bg-purple-50 text-purple-800 border border-purple-200'
+                                    : 'bg-amber-50 text-amber-800 border border-amber-200'
+                                }`}>
+                                  {mov.accion}
+                                </span>
+                              </td>
+
+                              <td className="py-3.5 px-5 max-w-md">
+                                <p className="text-xs text-[#453F38] font-medium leading-relaxed">
+                                  {mov.detalles || 'Sin detalles adicionales'}
+                                </p>
+                              </td>
+
+                              {userRole === 'dueno' && (
+                                <td className="py-3.5 px-5 text-right">
+                                  <button
+                                    onClick={() => handleEliminarMovimientoRegistro(mov.id)}
+                                    className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 hover:border-rose-200 border border-transparent transition-colors cursor-pointer"
+                                    title="Eliminar este registro de auditoría"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
+
+                      {movimientos.length === 0 && (
+                        <tr>
+                          <td colSpan={userRole === 'dueno' ? 6 : 5} className="py-14 text-center text-[#7A7368]">
+                            <Activity className="w-8 h-8 text-[#CCC5B8] mx-auto mb-2" />
+                            <strong className="block text-sm text-[#1A1918]">
+                              No hay movimientos registrados todavía
+                            </strong>
+                            <p className="text-xs text-[#7A7368] mt-1 max-w-sm mx-auto">
+                              Cada vez que un trabajador inicie turno, apruebe pedidos o ajuste inventario, se registrará automáticamente en esta tabla.
+                            </p>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
@@ -805,14 +2106,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              {/* Order Cards List (Image 4) */}
+              {/* Toast de confirmación de comprobante */}
+              {comprobanteToast && (
+                <div
+                  className={`p-4 rounded-2xl flex items-center justify-between gap-3 text-xs font-bold animate-fade-in shadow-sm ${
+                    comprobanteToast.type === 'success'
+                      ? 'bg-emerald-50 border border-emerald-200 text-emerald-900'
+                      : 'bg-rose-50 border border-rose-200 text-rose-900'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                    <span>{comprobanteToast.msg}</span>
+                  </div>
+                  <button
+                    onClick={() => setComprobanteToast(null)}
+                    className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-800 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Order Cards List */}
               <div className="space-y-4">
                 {pedidos
                   .filter((p) => {
                     if (pedidoFilter === 'pendientes' && p.estado !== 'pendiente') return false;
-                    if (pedidoFilter === 'aprobados' && p.estado !== 'aprobado') return false;
+                    if (pedidoFilter === 'aprobados' && p.estado !== 'aprobado' && p.estado !== 'aceptado') return false;
                     if (pedidoFilter === 'entregados' && p.estado !== 'entregado') return false;
-                    if (pedidoFilter === 'cancelados' && p.estado !== 'cancelado') return false;
+                    if (pedidoFilter === 'cancelados' && p.estado !== 'cancelado' && p.estado !== 'rechazado') return false;
                     if (searchQuery.trim()) {
                       const q = searchQuery.toLowerCase();
                       const matchCode = p.codigo.toLowerCase().includes(q);
@@ -840,7 +2163,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
                                   pedido.estado === 'pendiente'
                                     ? 'bg-amber-100 text-amber-900'
-                                    : pedido.estado === 'aprobado'
+                                    : pedido.estado === 'aprobado' || pedido.estado === 'aceptado'
                                     ? 'bg-emerald-100 text-emerald-900'
                                     : pedido.estado === 'entregado'
                                     ? 'bg-blue-100 text-blue-900'
@@ -856,24 +2179,65 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           </div>
                         </div>
 
-                        {/* Status selector */}
-                        <div className="flex items-center gap-3">
+                        {/* Status selector & Direct Action buttons */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {pedido.estado !== 'aprobado' && pedido.estado !== 'entregado' && (
+                            <button
+                              type="button"
+                              disabled={orderActionLoadingId === (pedido.id || pedido.codigo)}
+                              onClick={() => handleAprobarPedido(pedido)}
+                              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                              title="Aceptar pedido: descuenta stock automáticamente de inventario y registra la venta en Ventas"
+                            >
+                              <Check className="w-3.5 h-3.5 stroke-[3]" />
+                              <span>
+                                {orderActionLoadingId === (pedido.id || pedido.codigo)
+                                  ? 'Aceptando...'
+                                  : 'ACEPTAR PEDIDO'}
+                              </span>
+                            </button>
+                          )}
+
+                          {pedido.estado === 'pendiente' && (
+                            <button
+                              type="button"
+                              disabled={orderActionLoadingId === (pedido.id || pedido.codigo)}
+                              onClick={() => handleRechazarPedido(pedido)}
+                              className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-extrabold text-xs flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                              title="Rechazar pedido"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                              <span>Rechazar</span>
+                            </button>
+                          )}
+
                           <select
                             value={pedido.estado}
                             onChange={(e) =>
-                              handleUpdateOrderStatus(pedido.id || '', e.target.value as any)
+                              handleUpdateOrderStatus(pedido.id || '', e.target.value)
                             }
-                            className="bg-[#FAF8F5] text-xs font-bold text-[#1A1918] px-3.5 py-2 rounded-xl border border-[#E5DFD5] focus:outline-none"
+                            className="bg-[#FAF8F5] text-xs font-bold text-[#1A1918] px-3 py-1.5 rounded-xl border border-[#E5DFD5] focus:outline-none"
                           >
-                            <option value="pendiente">Estado: Pendiente</option>
-                            <option value="aprobado">Estado: Aprobado</option>
-                            <option value="entregado">Estado: Entregado</option>
-                            <option value="cancelado">Estado: Cancelado</option>
+                            <option value="pendiente">Pendiente</option>
+                            <option value="aprobado">Aprobado</option>
+                            <option value="entregado">Entregado</option>
+                            <option value="cancelado">Cancelado</option>
+                            <option value="rechazado">Rechazado</option>
                           </select>
+
+                          <button
+                            type="button"
+                            onClick={() => handleEliminarPedido(pedido.id || pedido.codigo, pedido.codigo)}
+                            className="px-2.5 py-1.5 rounded-xl text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                            title="Eliminar este pedido permanentemente"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Eliminar</span>
+                          </button>
                         </div>
                       </div>
 
-                      {/* 3 Columns details (Image 4) */}
+                      {/* 3 Columns details */}
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs">
                         {/* Col 1: Datos del Cliente */}
                         <div className="space-y-1.5">
@@ -894,7 +2258,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   '_blank'
                                 );
                               }}
-                              className="p-1 rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                              className="p-1 rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200 cursor-pointer"
                               title="Chatear por WhatsApp"
                             >
                               <MessageCircle className="w-3.5 h-3.5 fill-current" />
@@ -905,10 +2269,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               📍 {pedido.cliente_direccion}
                             </span>
                           )}
+                          {pedido.notas && (
+                            <span className="text-[11px] text-[#7A7368] block italic mt-1 bg-[#FAF8F5] p-2 rounded-xl border border-[#F0EAE1]">
+                              Nota: {pedido.notas}
+                            </span>
+                          )}
                         </div>
 
-                        {/* Col 2: Pago & Comprobante */}
-                        <div className="space-y-2">
+                        {/* Col 2: Pago & Comprobante (Requisito 4) */}
+                        <div className="space-y-2.5">
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] font-black uppercase text-[#9C9488]">
                               PAGO & COMPROBANTE
@@ -923,58 +2292,268 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             <span className="text-xl font-black text-[#1A1918]">${pedido.total}</span>
                           </div>
 
+                          {/* Estado de validación del comprobante */}
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-[#7A7368] font-bold">Estado del Comprobante:</span>
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                pedido.estado_pago === 'verificado'
+                                  ? 'bg-emerald-100 text-emerald-900 border border-emerald-200'
+                                  : pedido.estado_pago === 'rechazado'
+                                  ? 'bg-rose-100 text-rose-900 border border-rose-200'
+                                  : 'bg-amber-100 text-amber-900 border border-amber-200'
+                              }`}
+                            >
+                              {pedido.estado_pago === 'verificado'
+                                ? '✅ Verificado'
+                                : pedido.estado_pago === 'rechazado'
+                                ? '❌ Rechazado'
+                                : '⏳ Pendiente'}
+                            </span>
+                          </div>
+
                           {pedido.comprobante_url ? (
-                            <div className="flex items-center gap-3 p-2 rounded-2xl bg-[#FAF8F5] border border-[#EAE5DC]">
-                              <img
-                                src={pedido.comprobante_url}
-                                alt="Comprobante"
-                                className="w-10 h-10 object-cover rounded-lg border border-[#D5CEC2]"
-                              />
-                              <div className="flex-1 min-w-0">
-                                <span className="text-xs font-bold text-[#1A1918] block truncate">Comprobante Adjunto</span>
-                                <span className="text-[10px] text-emerald-600 font-semibold">Listo para verificar</span>
+                            <div className="rounded-2xl bg-[#FAF8F5] border border-[#EAE5DC] p-2.5 space-y-2.5">
+                              {/* Vista previa de imagen + botones Ver y Descargar */}
+                              <div className="flex items-center gap-2.5">
+                                <img
+                                  src={pedido.comprobante_url}
+                                  alt="Comprobante de pago"
+                                  className="w-14 h-14 object-cover rounded-xl border border-[#D5CEC2] shadow-xs cursor-pointer hover:opacity-90 transition-opacity"
+                                  onClick={() => {
+                                    setSelectedOrderForProof(pedido);
+                                    setViewingProofUrl(pedido.comprobante_url || null);
+                                  }}
+                                  title="Click para ver en pantalla completa"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-xs font-bold text-[#1A1918] block truncate">
+                                    Comprobante Adjunto
+                                  </span>
+                                  <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedOrderForProof(pedido);
+                                        setViewingProofUrl(pedido.comprobante_url || null);
+                                      }}
+                                      className="px-2 py-1 rounded-lg bg-[#141312] text-white text-[10px] font-bold flex items-center gap-1 hover:bg-black transition-colors cursor-pointer"
+                                      title="Abrir en tamaño completo"
+                                    >
+                                      <Eye className="w-3 h-3 text-[#E6C687]" />
+                                      <span>Ver</span>
+                                    </button>
+
+                                    <a
+                                      href={pedido.comprobante_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="px-2 py-1 rounded-lg bg-white border border-[#DDD7CC] hover:bg-[#FAF8F5] text-[#1A1918] text-[10px] font-bold flex items-center gap-1 transition-colors"
+                                      title="Abrir comprobante en nueva pestaña"
+                                    >
+                                      <ExternalLink className="w-3 h-3 text-[#7A7368]" />
+                                      <span>Pestaña</span>
+                                    </a>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyReceiptLink(pedido.comprobante_url!, pedido.id || pedido.codigo)}
+                                      className="px-2 py-1 rounded-lg bg-white border border-[#DDD7CC] hover:bg-[#FAF8F5] text-[#1A1918] text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                                      title="Copiar enlace directo del comprobante"
+                                    >
+                                      <Copy className="w-3 h-3 text-[#7A7368]" />
+                                      <span>{copiedLinkOrderId === (pedido.id || pedido.codigo) ? '¡Copiado!' : 'Copiar link'}</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        descargarArchivo(
+                                          pedido.comprobante_url!,
+                                          `comprobante_${pedido.codigo}_${pedido.cliente_nombre.replace(/\s+/g, '_')}.jpg`
+                                        )
+                                      }
+                                      className="px-2 py-1 rounded-lg bg-white border border-[#DDD7CC] hover:bg-[#FAF8F5] text-[#1A1918] text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                                      title="Descargar comprobante a tu dispositivo con nombre descriptivo"
+                                    >
+                                      <Download className="w-3 h-3 text-[#7A7368]" />
+                                      <span>Descargar</span>
+                                    </button>
+                                  </div>
+                                </div>
                               </div>
-                              <button
-                                onClick={() => setViewingProofUrl(pedido.comprobante_url || null)}
-                                className="px-2.5 py-1 rounded-lg bg-[#141312] text-white text-[10px] font-bold flex items-center gap-1"
-                              >
-                                <Eye className="w-3 h-3" />
-                                <span>Ver</span>
-                              </button>
+
+                              {/* Selector rápido de validación del comprobante con confirmación visual */}
+                              <div className="pt-2 border-t border-[#EFE8DD] flex items-center justify-between gap-1">
+                                <span className="text-[10px] text-[#7A7368] font-bold">Cambiar estado:</span>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleUpdatePaymentProofStatus(
+                                        pedido.id || pedido.codigo,
+                                        pedido.codigo,
+                                        'verificado'
+                                      )
+                                    }
+                                    className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
+                                      pedido.estado_pago === 'verificado'
+                                        ? 'bg-emerald-600 text-white shadow-xs'
+                                        : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
+                                    }`}
+                                    title="Marcar comprobante como verificado"
+                                  >
+                                    Verificar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleUpdatePaymentProofStatus(
+                                        pedido.id || pedido.codigo,
+                                        pedido.codigo,
+                                        'rechazado'
+                                      )
+                                    }
+                                    className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
+                                      pedido.estado_pago === 'rechazado'
+                                        ? 'bg-rose-600 text-white shadow-xs'
+                                        : 'bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200'
+                                    }`}
+                                    title="Marcar comprobante como rechazado"
+                                  >
+                                    Rechazar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleUpdatePaymentProofStatus(
+                                        pedido.id || pedido.codigo,
+                                        pedido.codigo,
+                                        'pendiente_revision'
+                                      )
+                                    }
+                                    className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
+                                      pedido.estado_pago === 'pendiente_revision'
+                                        ? 'bg-amber-600 text-white shadow-xs'
+                                        : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+                                    }`}
+                                    title="Restablecer comprobante a pendiente"
+                                  >
+                                    Pendiente
+                                  </button>
+                                </div>
+
+                                {pedido.revisado_por && (
+                                  <div className="pt-2 border-t border-[#EFE8DD] text-[10px] text-[#7A7368] flex items-center justify-between">
+                                    <span>Revisado por: <strong className="text-[#1A1918]">{pedido.revisado_por}</strong></span>
+                                    {pedido.revisado_en && <span>{new Date(pedido.revisado_en).toLocaleString('es-PA')}</span>}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           ) : (
-                            <span className="text-[11px] text-[#9C9488] block italic">
-                              Sin comprobante adjunto
-                            </span>
+                            <div className="p-3 rounded-2xl bg-[#FAF8F5] border border-dashed border-[#DDD7CC] text-center space-y-2">
+                              <span className="text-[11px] text-[#9C9488] font-bold block">
+                                ⚠️ Sin comprobante adjunto
+                              </span>
+                              <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-[#DDD7CC] hover:border-[#141312] text-[#1A1918] text-[10px] font-bold cursor-pointer transition-colors shadow-xs">
+                                <UploadCloud className="w-3.5 h-3.5 text-[#C59A4D]" />
+                                <span>
+                                  {uploadingProofOrderId === (pedido.id || pedido.codigo)
+                                    ? 'Subiendo...'
+                                    : 'Subir comprobante'}
+                                </span>
+                                <input
+                                  type="file"
+                                  accept="image/*,application/pdf"
+                                  className="hidden"
+                                  disabled={uploadingProofOrderId === (pedido.id || pedido.codigo)}
+                                  onChange={(e) => {
+                                    if (e.target.files && e.target.files[0]) {
+                                      handleAttachReceiptToOrder(pedido, e.target.files[0]);
+                                    }
+                                  }}
+                                />
+                              </label>
+                            </div>
                           )}
                         </div>
 
-                        {/* Col 3: Productos del Pedido */}
+                        {/* Col 3: Productos del Pedido (con variantes y opciones) */}
                         <div className="space-y-1.5">
                           <span className="text-[10px] font-black uppercase text-[#9C9488] block">
                             PRODUCTOS DEL PEDIDO ({pedido.items?.length || 0})
                           </span>
 
                           <div className="space-y-2">
-                            {pedido.items?.map((it, idx) => (
-                              <div key={idx} className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2 truncate">
-                                  {it.imagen_url && (
-                                    <img
-                                      src={it.imagen_url}
-                                      alt=""
-                                      className="w-7 h-8 object-cover rounded bg-white border border-[#EAE5DC] shrink-0"
-                                    />
-                                  )}
-                                  <span className="font-semibold text-[#1A1918] truncate">
-                                    {it.nombre} <span className="text-[#8C8375]">x{it.cantidad}</span>
+                            {pedido.items?.map((it, idx) => {
+                              const varDesc =
+                                it.variante_titulo ||
+                                (it.opciones
+                                  ? Object.entries(it.opciones)
+                                      .map(([k, v]) => `${k}: ${v}`)
+                                      .join(' • ')
+                                  : it.talla
+                                  ? `Talla: ${it.talla}`
+                                  : null);
+
+                              return (
+                                <div
+                                  key={idx}
+                                  className="flex items-start justify-between gap-2 bg-[#FCFAF7] p-2 rounded-xl border border-[#F0EAE1]"
+                                >
+                                  <div className="flex items-center gap-2 truncate min-w-0">
+                                    {it.imagen_url && (
+                                      <img
+                                        src={it.imagen_url}
+                                        alt=""
+                                        className="w-8 h-9 object-cover rounded bg-white border border-[#EAE5DC] shrink-0"
+                                      />
+                                    )}
+                                    <div className="min-w-0">
+                                      <span className="font-bold text-[#1A1918] truncate block text-[11px]">
+                                        {it.nombre} <span className="text-[#8C8375]">x{it.cantidad}</span>
+                                      </span>
+                                      {varDesc && (
+                                        <span className="text-[10px] text-[#C59A4D] font-bold block truncate">
+                                          {varDesc}
+                                        </span>
+                                      )}
+                                      <span className="text-[9px] text-[#7A7368] block">
+                                        ${it.precio.toFixed(2)} c/u
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <span className="font-black text-[#1A1918] shrink-0 text-xs">
+                                    ${(it.precio * it.cantidad).toFixed(2)}
                                   </span>
                                 </div>
-                                <span className="font-bold text-[#1A1918] shrink-0">
-                                  ${it.precio * it.cantidad}
-                                </span>
+                              );
+                            })}
+                          </div>
+
+                          {/* Desglose Económico Completo del Pedido */}
+                          <div className="pt-2.5 border-t border-[#EAE3D5] space-y-1 text-[11px] text-[#7A7368] bg-[#FAF8F5] p-2 rounded-xl">
+                            <div className="flex justify-between">
+                              <span>Subtotal Artículos:</span>
+                              <span className="font-bold text-[#1A1918]">${(pedido.subtotal || pedido.total).toFixed(2)}</span>
+                            </div>
+                            {(pedido.descuento ?? 0) > 0 && (
+                              <div className="flex justify-between text-emerald-700">
+                                <span>Descuento:</span>
+                                <span className="font-bold">-${Number(pedido.descuento).toFixed(2)}</span>
                               </div>
-                            ))}
+                            )}
+                            <div className="flex justify-between">
+                              <span>Envío:</span>
+                              <span className="font-bold text-[#1A1918]">
+                                {(pedido.costo_envio ?? 0) > 0 ? `$${Number(pedido.costo_envio).toFixed(2)}` : '$0.00'}
+                              </span>
+                            </div>
+                            <div className="pt-1.5 border-t border-[#EAE3D5] flex justify-between font-black text-xs text-[#1A1918]">
+                              <span>TOTAL FINAL:</span>
+                              <span className="text-[#C59A4D] text-sm">${Number(pedido.total).toFixed(2)}</span>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -1426,9 +3005,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   setProductoToEdit(prod);
                                   setIsModalProductoOpen(true);
                                 }}
-                                className="px-3 py-1.5 rounded-xl border border-[#E5DFD5] text-[#1A1918] hover:bg-slate-100 font-bold text-xs inline-flex items-center gap-1"
+                                className="px-3 py-1.5 rounded-xl border border-[#D5DCE4] hover:bg-[#FAF8F5] text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                               >
-                                <Edit2 className="w-3 h-3" />
+                                <Edit2 className="w-3.5 h-3.5 text-[#C59A4D]" />
                                 <span>Editar</span>
                               </button>
                             </td>
@@ -1440,23 +3019,794 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
             </div>
           )}
+
+          {/* ======================================================== */}
+          {/* 7. DIRECTORIO DE CLIENTES */}
+          {/* ======================================================== */}
+          {activeSection === 'clientes' && (
+            <div className="space-y-6 animate-fade-in">
+              {/* Header card */}
+              <div className="bg-white rounded-3xl p-6 border border-[#E5E9EE] shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-black text-[#1A1918] font-heading">
+                    Directorio Consolidado de Clientes
+                  </h2>
+                  <p className="text-xs text-[#7A7368] mt-0.5">
+                    Clientes extraídos y sincronizados desde las órdenes de compra registradas.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1.5 rounded-xl bg-[#FAF8F5] border border-[#E5DFD5] text-xs font-bold text-[#1A1918]">
+                    Total Clientes: {clientesList.length}
+                  </span>
+                </div>
+              </div>
+
+              {/* Search Bar */}
+              <div className="bg-white rounded-3xl p-4 border border-[#E5E9EE] flex items-center gap-3">
+                <div className="relative flex-1 max-w-md">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8C8375]" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por nombre o teléfono de cliente..."
+                    value={clienteSearch}
+                    onChange={(e) => setClienteSearch(e.target.value)}
+                    className="w-full bg-[#FAF8F5] text-xs px-10 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                  />
+                </div>
+              </div>
+
+              {/* Table */}
+              <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-[#E5E9EE] bg-[#FAF8F5] text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
+                      <th className="py-3 px-6">Cliente</th>
+                      <th className="py-3 px-6">Contacto WhatsApp</th>
+                      <th className="py-3 px-6">Dirección Habitual</th>
+                      <th className="py-3 px-6">Pedidos Totales</th>
+                      <th className="py-3 px-6">Total Comprado</th>
+                      <th className="py-3 px-6 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#F0EAE1] text-xs">
+                    {clientesList
+                      .filter((c) => {
+                        if (!clienteSearch.trim()) return true;
+                        const q = clienteSearch.toLowerCase().trim();
+                        return c.nombre.toLowerCase().includes(q) || c.telefono.includes(q);
+                      })
+                      .map((cli, idx) => (
+                        <tr key={idx} className="hover:bg-[#FCFAF7] transition-colors">
+                          <td className="py-4 px-6">
+                            <strong className="font-extrabold text-[#1A1918] block text-sm">
+                              {cli.nombre}
+                            </strong>
+                            <span className="text-[10px] text-[#7A7368]">
+                              Cliente AlexStore
+                            </span>
+                          </td>
+
+                          <td className="py-4 px-6 font-mono font-bold text-[#1A1918]">
+                            {cli.telefono}
+                          </td>
+
+                          <td className="py-4 px-6 text-[#7A7368] max-w-xs truncate">
+                            {cli.direccion || 'Por coordinar'}
+                          </td>
+
+                          <td className="py-4 px-6 font-bold text-[#1A1918]">
+                            <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-800 font-extrabold text-xs">
+                              {cli.totalPedidos} {cli.totalPedidos === 1 ? 'pedido' : 'pedidos'}
+                            </span>
+                          </td>
+
+                          <td className="py-4 px-6 font-black text-sm text-emerald-800">
+                            ${cli.totalGastado.toFixed(2)} USD
+                          </td>
+
+                          <td className="py-4 px-6 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => {
+                                  const cleanPhone = cli.telefono.replace(/\D/g, '') || '66212802';
+                                  window.open(
+                                    `https://wa.me/507${cleanPhone}?text=${encodeURIComponent(
+                                      `¡Hola ${cli.nombre}! 👋 Te saludamos de AlexStore. ¿Cómo estás?`
+                                    )}`,
+                                    '_blank'
+                                  );
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                              >
+                                <MessageCircle className="w-3.5 h-3.5 fill-current" />
+                                <span>WhatsApp</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleEliminarCliente(cli)}
+                                className="px-2.5 py-1.5 rounded-xl text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 font-bold text-xs inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                title="Eliminar cliente e historial de pedidos"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Eliminar</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+
+                    {clientesList.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center text-[#7A7368]">
+                          Aún no se han registrado clientes en las órdenes.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ======================================================== */}
+          {/* 8. GESTIÓN DE USUARIOS, ROLES & PERMISOS */}
+          {/* ======================================================== */}
+          {activeSection === 'usuarios' && (
+            <div className="space-y-6 animate-fade-in">
+              {/* Header card */}
+              <div className="bg-white rounded-3xl p-6 border border-[#E5E9EE] shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-black text-[#1A1918] font-heading flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-[#C59A4D]" />
+                    Gestión de Usuarios, Roles & Permisos
+                  </h2>
+                  <p className="text-xs text-[#7A7368] mt-0.5">
+                    Control de accesos basado en roles (Dueño, Administrador, Cajero) con autorización segura.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  {/* Botón para ver script SQL de Autenticación */}
+                  <button
+                    onClick={() => setIsModalSqlAuthOpen(true)}
+                    className="px-4 py-2.5 rounded-2xl bg-amber-50 hover:bg-amber-100 text-[#8C6B28] border border-amber-300 text-xs font-black tracking-wider uppercase flex items-center gap-2 shadow-xs transition-all active:scale-95 cursor-pointer self-start sm:self-auto"
+                  >
+                    <KeyRound className="w-4 h-4 text-[#C59A4D]" />
+                    <span>SQL SUPABASE AUTH</span>
+                  </button>
+
+                  {/* Botón para crear usuario (Disponible para Dueño y Admin) */}
+                  <button
+                    onClick={() => setIsModalUsuarioOpen(true)}
+                    className="px-5 py-2.5 rounded-2xl bg-[#141312] hover:bg-black text-[#F5E6BE] text-xs font-black tracking-wider uppercase flex items-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer self-start sm:self-auto"
+                  >
+                    <UserPlus className="w-4 h-4 text-[#C59A4D]" />
+                    <span>REGISTRAR USUARIO</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 3 Stats de Usuarios */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="p-5 rounded-3xl bg-white border border-[#E5E9EE] shadow-xs flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-[#8C8375] tracking-wider block">
+                      DUEÑOS (ACCESO TOTAL)
+                    </span>
+                    <span className="text-2xl font-black text-[#1A1918] mt-1 block">
+                      {usuarios.filter((u) => u.rol === 'dueno').length}
+                    </span>
+                  </div>
+                  <div className="w-10 h-10 rounded-2xl bg-amber-50 text-[#C59A4D] flex items-center justify-center font-black">
+                    👑
+                  </div>
+                </div>
+
+                <div className="p-5 rounded-3xl bg-white border border-[#E5E9EE] shadow-xs flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-[#8C8375] tracking-wider block">
+                      ADMINISTRADORES
+                    </span>
+                    <span className="text-2xl font-black text-[#1A1918] mt-1 block">
+                      {usuarios.filter((u) => u.rol === 'administrador').length}
+                    </span>
+                  </div>
+                  <div className="w-10 h-10 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center">
+                    <Shield className="w-5 h-5" />
+                  </div>
+                </div>
+
+                <div className="p-5 rounded-3xl bg-white border border-[#E5E9EE] shadow-xs flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-[#8C8375] tracking-wider block">
+                      TRABAJADORES / CAJEROS
+                    </span>
+                    <span className="text-2xl font-black text-[#1A1918] mt-1 block">
+                      {usuarios.filter((u) => u.rol === 'cajero').length}
+                    </span>
+                  </div>
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                    <Users className="w-5 h-5" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Tarjeta Directa para Guardar Usuario de Supabase Authentication */}
+              <div className="bg-[#141312] text-white rounded-3xl p-6 sm:p-7 border border-[#2B2722] shadow-xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#26221E]">
+                  <div>
+                    <h3 className="text-base font-black text-white flex items-center gap-2">
+                      <KeyRound className="w-4 h-4 text-[#C59A4D]" />
+                      <span>Guardar Usuario de Supabase Authentication como Dueño o Trabajador</span>
+                    </h3>
+                    <p className="text-xs text-[#A69F93] mt-1">
+                      ¿Creaste una cuenta con correo y contraseña en el menú <code className="text-[#E6C687] font-mono">Authentication</code> de Supabase? Ingresa el correo aquí para guardarlo como <strong>Dueño / Admin</strong> o como <strong>Trabajador</strong>.
+                    </p>
+                  </div>
+                  <span className="px-3 py-1 rounded-xl bg-[#26221E] text-[#E6C687] text-[11px] font-mono border border-[#3A332B] self-start sm:self-auto">
+                    Sincronización Inmediata
+                  </span>
+                </div>
+
+                <form onSubmit={handleGuardarUsuarioAuthDirecto} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                  {/* Correo */}
+                  <div className="md:col-span-5 space-y-1">
+                    <label className="text-[11px] font-bold text-[#A69F93] block">
+                      CORREO ELECTRÓNICO (REGISTRADO EN AUTHENTICATION):
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="ej: pedro76porro@gmail.com"
+                      value={authEmailInput}
+                      onChange={(e) => setAuthEmailInput(e.target.value)}
+                      className="w-full bg-[#1C1A17] text-xs text-white placeholder-[#6E685F] px-4 py-2.5 rounded-xl border border-[#2D2822] focus:outline-none focus:border-[#C59A4D]"
+                    />
+                  </div>
+
+                  {/* Nombre */}
+                  <div className="md:col-span-3 space-y-1">
+                    <label className="text-[11px] font-bold text-[#A69F93] block">
+                      NOMBRE DEL USUARIO:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Pedro Porro"
+                      value={authNombreInput}
+                      onChange={(e) => setAuthNombreInput(e.target.value)}
+                      className="w-full bg-[#1C1A17] text-xs text-white placeholder-[#6E685F] px-4 py-2.5 rounded-xl border border-[#2D2822] focus:outline-none focus:border-[#C59A4D]"
+                    />
+                  </div>
+
+                  {/* Selector de Rol */}
+                  <div className="md:col-span-2 space-y-1">
+                    <label className="text-[11px] font-bold text-[#A69F93] block">
+                      GUARDAR COMO:
+                    </label>
+                    <select
+                      value={authRolSelected}
+                      onChange={(e) => setAuthRolSelected(e.target.value as UserRole)}
+                      className="w-full bg-[#1C1A17] text-xs font-bold text-[#E6C687] px-3 py-2.5 rounded-xl border border-[#2D2822] focus:outline-none focus:border-[#C59A4D]"
+                    >
+                      <option value="dueno">👑 Dueño / Admin</option>
+                      <option value="cajero">💼 Trabajador</option>
+                    </select>
+                  </div>
+
+                  {/* Botón Guardar */}
+                  <div className="md:col-span-2">
+                    <button
+                      type="submit"
+                      disabled={savingAuthRole}
+                      className="w-full py-2.5 px-3 rounded-xl bg-[#C59A4D] hover:bg-[#D4A95B] text-black font-black text-xs uppercase tracking-wider transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
+                    >
+                      {savingAuthRole ? 'GUARDANDO...' : 'GUARDAR ROL'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Filtros */}
+              <div className="bg-white rounded-3xl p-4 border border-[#E5E9EE] flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3 flex-1 min-w-[240px]">
+                  <div className="relative flex-1 max-w-sm">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8C8375]" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por nombre o correo..."
+                      value={userSearchQuery}
+                      onChange={(e) => setUserSearchQuery(e.target.value)}
+                      className="w-full bg-[#FAF8F5] text-xs px-10 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                    />
+                  </div>
+
+                  <select
+                    value={userRoleFilter}
+                    onChange={(e) => setUserRoleFilter(e.target.value as any)}
+                    className="bg-[#FAF8F5] text-xs font-bold text-[#1A1918] px-3.5 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none"
+                  >
+                    <option value="todos">Todos los roles</option>
+                    <option value="dueno">Dueño</option>
+                    <option value="administrador">Administrador</option>
+                    <option value="cajero">Trabajador / Cajero</option>
+                  </select>
+
+                  <select
+                    value={userStatusFilter}
+                    onChange={(e) => setUserStatusFilter(e.target.value as any)}
+                    className="bg-[#FAF8F5] text-xs font-bold text-[#1A1918] px-3.5 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none"
+                  >
+                    <option value="todos">Todos los estados</option>
+                    <option value="activos">Solo activos</option>
+                    <option value="inactivos">Solo inactivos</option>
+                  </select>
+                </div>
+
+                <button
+                  onClick={reloadAllData}
+                  className="p-2.5 rounded-2xl bg-[#F4F6F8] hover:bg-[#EAEFF5] text-[#1A1918] transition-colors"
+                  title="Actualizar lista"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+
+              {/* Table de Usuarios */}
+              <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-[#E5E9EE] bg-[#FAF8F5] text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
+                      <th className="py-3 px-6">Usuario & Colaborador</th>
+                      <th className="py-3 px-6">Nivel de Rol</th>
+                      <th className="py-3 px-6">Estado de Acceso</th>
+                      <th className="py-3 px-6">Creado por</th>
+                      <th className="py-3 px-6">Fecha Registro</th>
+                      <th className="py-3 px-6 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#F0EAE1] text-xs">
+                    {usuarios
+                      .filter((u) => {
+                        if (userRoleFilter !== 'todos' && u.rol !== userRoleFilter) return false;
+                        if (userStatusFilter === 'activos' && !u.activo) return false;
+                        if (userStatusFilter === 'inactivos' && u.activo) return false;
+                        if (userSearchQuery.trim()) {
+                          const q = userSearchQuery.toLowerCase().trim();
+                          return u.nombre.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
+                        }
+                        return true;
+                      })
+                      .map((u) => {
+                        const isSelf = currentUser?.email === u.email;
+                        const isOwner = u.rol === 'dueno';
+                        const canModify = currentUser ? canModifyUser(currentUser.rol, u) : false;
+                        const canDelete = currentUser?.rol === 'dueno' && !isSelf;
+
+                        return (
+                          <tr key={u.id} className="hover:bg-[#FCFAF7] transition-colors">
+                            <td className="py-4 px-6">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-2xl bg-[#141312] text-[#E6C687] flex items-center justify-center font-black text-sm shrink-0">
+                                  {u.nombre ? u.nombre.substring(0, 2).toUpperCase() : 'US'}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <strong className="font-extrabold text-sm text-[#1A1918]">
+                                      {u.nombre}
+                                    </strong>
+                                    {isSelf && (
+                                      <span className="text-[9px] bg-slate-100 text-slate-700 font-black px-1.5 py-0.2 rounded">
+                                        Tú
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-[11px] text-[#7A7368] font-mono block">
+                                    {u.email}
+                                  </span>
+                                </div>
+                              </div>
+                            </td>
+
+                            <td className="py-4 px-6">
+                              <span
+                                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black ${
+                                  u.rol === 'dueno'
+                                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                    : u.rol === 'administrador'
+                                    ? 'bg-sky-100 text-sky-900 border border-sky-300'
+                                    : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                                }`}
+                              >
+                                {u.rol === 'dueno' && '👑 Dueño'}
+                                {u.rol === 'administrador' && '🛡️ Administrador'}
+                                {u.rol === 'cajero' && '💼 Cajero'}
+                              </span>
+                            </td>
+
+                            <td className="py-4 px-6">
+                              {u.activo ? (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold">
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                  Activo
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 text-rose-800 border border-rose-200 text-xs font-bold">
+                                  <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                                  Desactivado
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="py-4 px-6 text-[#7A7368] font-mono text-[11px]">
+                              {u.creado_por || 'Sistema'}
+                            </td>
+
+                            <td className="py-4 px-6 text-[#7A7368] text-[11px]">
+                              {new Date(u.creado_en).toLocaleDateString('es-PA')}
+                            </td>
+
+                            <td className="py-4 px-6 text-right">
+                              <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                {/* Botones directos para cambiar a Dueño o Trabajador en 1 clic */}
+                                {currentUser?.rol === 'dueno' && u.rol !== 'dueno' && (
+                                  <button
+                                    onClick={() => handleCambiarRolDirecto(u, 'dueno')}
+                                    className="px-2.5 py-1 rounded-xl bg-amber-50 hover:bg-amber-100 text-[#8C6B28] border border-amber-300 font-bold text-[10px] inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                    title="Convertir a Dueño / Admin"
+                                  >
+                                    <span>👑 Hacer Dueño</span>
+                                  </button>
+                                )}
+
+                                {currentUser?.rol === 'dueno' && u.rol !== 'cajero' && (
+                                  <button
+                                    onClick={() => handleCambiarRolDirecto(u, 'cajero')}
+                                    className="px-2.5 py-1 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-[10px] inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                    title="Convertir a Trabajador"
+                                  >
+                                    <span>💼 Hacer Trabajador</span>
+                                  </button>
+                                )}
+
+                                {/* Botón Modificar Nombre / Detalles */}
+                                {canModify && (
+                                  <button
+                                    onClick={() => setUsuarioToEditRole(u)}
+                                    className="p-1.5 rounded-xl border border-[#E5DFD5] text-[#1A1918] hover:bg-slate-100 font-bold transition-colors cursor-pointer"
+                                    title="Modificar rol o permisos"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5 text-[#C59A4D]" />
+                                  </button>
+                                )}
+
+                                {/* Botón Activar / Desactivar */}
+                                {canModify && !(isOwner && isSelf) && (
+                                  <button
+                                    onClick={() => handleToggleUserActive(u)}
+                                    className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-colors cursor-pointer ${
+                                      u.activo
+                                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                                        : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                    }`}
+                                    title={u.activo ? 'Desactivar cuenta' : 'Activar cuenta'}
+                                  >
+                                    {u.activo ? 'Desactivar' : 'Activar'}
+                                  </button>
+                                )}
+
+                                {/* Botón Eliminar (solo Dueño) */}
+                                {canDelete && (
+                                  <button
+                                    onClick={() => handleDeleteUser(u)}
+                                    className="px-2.5 py-1 rounded-xl text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 font-bold text-[10px] inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                    title="Eliminar usuario definitivamente"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>Eliminar</span>
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+
+                    {usuarios.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center text-[#7A7368]">
+                          No hay usuarios registrados todavía.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </main>
       </div>
 
-      {/* Proof image zoom modal */}
+      {/* Proof image zoom modal with order context, status change & download */}
       {viewingProofUrl && (
         <div
-          onClick={() => setViewingProofUrl(null)}
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => {
+            setViewingProofUrl(null);
+            setSelectedOrderForProof(null);
+          }}
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-fade-in"
         >
-          <div className="relative max-w-xl max-h-[90vh] bg-white rounded-3xl p-4 overflow-hidden">
-            <button
-              onClick={() => setViewingProofUrl(null)}
-              className="absolute top-4 right-4 p-2 rounded-full bg-black/70 text-white"
-            >
-              <X className="w-5 h-5" />
-            </button>
-            <img src={viewingProofUrl} alt="Comprobante completo" className="w-full h-auto max-h-[80vh] object-contain rounded-2xl" />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative w-full max-w-2xl bg-white rounded-3xl p-5 sm:p-6 space-y-4 shadow-2xl border border-[#E5DFD5] overflow-hidden"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-[#F0EAE1]">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-black text-sm text-[#1A1918]">
+                    {selectedOrderForProof ? `Comprobante Pedido ${selectedOrderForProof.codigo}` : 'Comprobante de Pago'}
+                  </span>
+                  {selectedOrderForProof?.estado_pago && (
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                        selectedOrderForProof.estado_pago === 'verificado'
+                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-200'
+                          : selectedOrderForProof.estado_pago === 'rechazado'
+                          ? 'bg-rose-100 text-rose-900 border border-rose-200'
+                          : 'bg-amber-100 text-amber-900 border border-amber-200'
+                      }`}
+                    >
+                      {selectedOrderForProof.estado_pago === 'verificado'
+                        ? 'Verificado'
+                        : selectedOrderForProof.estado_pago === 'rechazado'
+                        ? 'Rechazado'
+                        : 'Pendiente'}
+                    </span>
+                  )}
+                </div>
+                {selectedOrderForProof && (
+                  <span className="text-[11px] text-[#7A7368] block mt-0.5">
+                    Cliente: {selectedOrderForProof.cliente_nombre} • Tel: {selectedOrderForProof.cliente_telefono} • Total: ${selectedOrderForProof.total}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <a
+                  href={viewingProofUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-xl bg-white border border-[#DDD7CC] hover:bg-[#FAF8F5] text-xs font-bold text-[#1A1918] flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Abrir en pestaña nueva"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-[#7A7368]" />
+                  <span>Pestaña</span>
+                </a>
+
+                <button
+                  type="button"
+                  onClick={() => handleCopyReceiptLink(viewingProofUrl, selectedOrderForProof?.id || 'modal')}
+                  className="px-3 py-1.5 rounded-xl bg-white border border-[#DDD7CC] hover:bg-[#FAF8F5] text-xs font-bold text-[#1A1918] flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Copiar enlace directo"
+                >
+                  <Copy className="w-3.5 h-3.5 text-[#7A7368]" />
+                  <span>{copiedLinkOrderId === (selectedOrderForProof?.id || 'modal') ? '¡Copiado!' : 'Copiar enlace'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    descargarArchivo(
+                      viewingProofUrl,
+                      selectedOrderForProof
+                        ? `comprobante_${selectedOrderForProof.codigo}_${selectedOrderForProof.cliente_nombre.replace(/\s+/g, '_')}.jpg`
+                        : 'comprobante.jpg'
+                    )
+                  }
+                  className="px-3 py-1.5 rounded-xl bg-white border border-[#DDD7CC] hover:bg-[#FAF8F5] text-xs font-bold text-[#1A1918] flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Descargar comprobante"
+                >
+                  <Download className="w-3.5 h-3.5 text-[#7A7368]" />
+                  <span>Descargar</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setViewingProofUrl(null);
+                    setSelectedOrderForProof(null);
+                  }}
+                  className="p-1.5 rounded-full hover:bg-[#F2ECE1] text-[#7A7368] hover:text-[#1A1918] transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Image Preview Container */}
+            <div className="bg-[#141312] rounded-2xl p-2 flex items-center justify-center max-h-[60vh] overflow-hidden">
+              <img
+                src={viewingProofUrl}
+                alt="Comprobante en alta resolución"
+                className="max-h-[58vh] w-auto max-w-full object-contain rounded-xl"
+              />
+            </div>
+
+            {/* Quick status change buttons inside modal */}
+            {selectedOrderForProof && (
+              <div className="pt-2 border-t border-[#F0EAE1] flex items-center justify-between flex-wrap gap-2 text-xs">
+                <span className="text-[#7A7368] font-bold">Cambiar estado de validación:</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleUpdatePaymentProofStatus(
+                        selectedOrderForProof.id || selectedOrderForProof.codigo,
+                        selectedOrderForProof.codigo,
+                        'verificado'
+                      )
+                    }
+                    className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 cursor-pointer ${
+                      selectedOrderForProof.estado_pago === 'verificado'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
+                    }`}
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Verificar</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleUpdatePaymentProofStatus(
+                        selectedOrderForProof.id || selectedOrderForProof.codigo,
+                        selectedOrderForProof.codigo,
+                        'rechazado'
+                      )
+                    }
+                    className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 cursor-pointer ${
+                      selectedOrderForProof.estado_pago === 'rechazado'
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200'
+                    }`}
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                    <span>Rechazar</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleUpdatePaymentProofStatus(
+                        selectedOrderForProof.id || selectedOrderForProof.codigo,
+                        selectedOrderForProof.codigo,
+                        'pendiente_revision'
+                      )
+                    }
+                    className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 cursor-pointer ${
+                      selectedOrderForProof.estado_pago === 'pendiente_revision'
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+                    }`}
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>Pendiente</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal Registrar Gasto */}
+      {isModalGastoOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 space-y-5 border border-[#E5DFD5] shadow-2xl animate-fade-in">
+            <div className="flex items-center justify-between pb-3 border-b border-[#F0EAE1]">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                  <Wallet className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-[#1A1918]">Registrar Nuevo Gasto</h3>
+                  <p className="text-[11px] text-[#7A7368]">Se deducirá del total ganado para dar la ganancia neta</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsModalGastoOpen(false)}
+                className="p-1.5 rounded-full hover:bg-[#FAF8F5] text-[#7A7368]"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCrearGastoSubmit} className="space-y-4 text-xs">
+              <div>
+                <label className="font-extrabold text-[#1A1918] block mb-1">
+                  Concepto o Descripción del Gasto *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: Compra de 10 camisas para inventario"
+                  value={nuevoGastoConcepto}
+                  onChange={(e) => setNuevoGastoConcepto(e.target.value)}
+                  className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-extrabold text-[#1A1918] block mb-1">
+                    Monto en USD ($) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    required
+                    placeholder="0.00"
+                    value={nuevoGastoMonto}
+                    onChange={(e) => setNuevoGastoMonto(e.target.value)}
+                    className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-extrabold text-[#1A1918] block mb-1">
+                    Categoría
+                  </label>
+                  <select
+                    value={nuevoGastoCategoria}
+                    onChange={(e) => setNuevoGastoCategoria(e.target.value)}
+                    className="w-full bg-[#FAF8F5] px-3 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none"
+                  >
+                    <option value="Mercancía e Inventario">Mercancía e Inventario</option>
+                    <option value="Alquiler y Local">Alquiler y Local</option>
+                    <option value="Servicios Básicos">Servicios Básicos</option>
+                    <option value="Transporte y Envíos">Transporte y Envíos</option>
+                    <option value="Publicidad y Marketing">Publicidad y Marketing</option>
+                    <option value="Nómina y Sueldos">Nómina y Sueldos</option>
+                    <option value="Mantenimiento">Mantenimiento</option>
+                    <option value="Otros Gastos">Otros Gastos</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="font-extrabold text-[#1A1918] block mb-1">
+                  Notas o detalles adicionales (opcional)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Detalles de proveedor, factura o reposición..."
+                  value={nuevoGastoNotas}
+                  onChange={(e) => setNuevoGastoNotas(e.target.value)}
+                  className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none resize-none"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsModalGastoOpen(false)}
+                  className="px-4 py-2.5 rounded-xl text-[#7A7368] hover:text-[#1A1918] font-bold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingGasto}
+                  className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer"
+                >
+                  <Wallet className="w-3.5 h-3.5" />
+                  <span>{submittingGasto ? 'Guardando...' : 'GUARDAR Y DEDUCIR'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -1475,6 +3825,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         onClose={() => setIsModalCategoriaOpen(false)}
         categoriaToEdit={categoriaToEdit}
         onCategoriaSaved={reloadAllData}
+      />
+
+      {currentUser && (
+        <ModalNuevoUsuario
+          isOpen={isModalUsuarioOpen}
+          onClose={() => setIsModalUsuarioOpen(false)}
+          currentUser={currentUser}
+          onUserCreated={reloadAllData}
+        />
+      )}
+
+      {currentUser && usuarioToEditRole && (
+        <ModalEditarRol
+          isOpen={!!usuarioToEditRole}
+          onClose={() => setUsuarioToEditRole(null)}
+          targetUser={usuarioToEditRole}
+          currentUser={currentUser}
+          onUserUpdated={reloadAllData}
+        />
+      )}
+
+      <ModalSqlAuth
+        isOpen={isModalSqlAuthOpen}
+        onClose={() => setIsModalSqlAuthOpen(false)}
       />
     </div>
   );

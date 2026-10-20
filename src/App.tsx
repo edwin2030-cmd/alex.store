@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Categoria, Producto, ItemCarrito } from './types';
-import { getCategorias, getProductos } from './lib/supabase';
+import { Categoria, Producto, ItemCarrito, UsuarioPanel } from './types';
+import { supabase, getCategorias, getProductos } from './lib/supabase';
+import { getSavedUserProfile, getPerfilUsuario, cerrarSesion } from './lib/auth';
 import { Header } from './components/Header';
 import { Banner } from './components/Banner';
 import { CategoryFilter } from './components/CategoryFilter';
@@ -18,7 +19,9 @@ import { Check, X, ArrowUpDown, PackageOpen, Plus } from 'lucide-react';
 export default function App() {
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
-  const [adminEmail, setAdminEmail] = useState('admin@alexmstore.com');
+  const [currentUser, setCurrentUser] = useState<UsuarioPanel | null>(() => {
+    return getSavedUserProfile();
+  });
 
   const [currentView, setCurrentView] = useState<'catalogo' | 'colecciones'>('catalogo');
   const [categorias, setCategorias] = useState<Categoria[]>(CATEGORIAS_INICIALES);
@@ -74,6 +77,32 @@ export default function App() {
 
   useEffect(() => {
     loadData();
+
+    // Restaurar sesión de Supabase Auth si existe
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user?.email) {
+        const perfil = await getPerfilUsuario(session.user.id, session.user.email);
+        if (perfil && perfil.activo) {
+          setCurrentUser(perfil);
+        }
+      }
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user?.email) {
+        const perfil = await getPerfilUsuario(session.user.id, session.user.email);
+        if (perfil && perfil.activo) {
+          setCurrentUser(perfil);
+        }
+      } else if (event === 'SIGNED_OUT') {
+        setCurrentUser(null);
+        setIsAdminMode(false);
+      }
+    });
+
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
   }, []);
 
   // Filtered & Sorted products
@@ -118,21 +147,51 @@ export default function App() {
     return counts;
   }, [categorias, productos]);
 
-  // Cart operations
-  const handleAddToCart = (producto: Producto, cantidad = 1, talla?: string) => {
+  // Cart operations con soporte para variantes y opciones
+  const handleAddToCart = (
+    producto: Producto,
+    cantidad = 1,
+    talla?: string,
+    opcionesSeleccionadas?: Record<string, string>,
+    varianteSeleccionada?: any
+  ) => {
+    const unitPrice = Number(varianteSeleccionada?.precio) || Number(producto.precio) || 0;
+    const variantLabel =
+      varianteSeleccionada?.titulo ||
+      (opcionesSeleccionadas ? Object.entries(opcionesSeleccionadas).map(([k, v]) => `${k}: ${v}`).join(' / ') : talla);
+
     setCartItems((prev) => {
-      const existingIndex = prev.findIndex(
-        (item) => item.producto.id === producto.id && item.tallaSeleccionada === talla
-      );
+      const existingIndex = prev.findIndex((item) => {
+        if (item.producto.id !== producto.id) return false;
+        if (varianteSeleccionada?.id && item.varianteSeleccionada?.id) {
+          return item.varianteSeleccionada.id === varianteSeleccionada.id;
+        }
+        if (opcionesSeleccionadas && item.opcionesSeleccionadas) {
+          return JSON.stringify(item.opcionesSeleccionadas) === JSON.stringify(opcionesSeleccionadas);
+        }
+        return item.tallaSeleccionada === talla;
+      });
+
       if (existingIndex > -1) {
         const updated = [...prev];
         updated[existingIndex].cantidad += cantidad;
         return updated;
       }
-      return [...prev, { producto, cantidad, tallaSeleccionada: talla }];
+
+      return [
+        ...prev,
+        {
+          producto,
+          cantidad,
+          tallaSeleccionada: talla || (opcionesSeleccionadas ? Object.values(opcionesSeleccionadas).join(' / ') : undefined),
+          opcionesSeleccionadas,
+          varianteSeleccionada,
+          precioUnitario: unitPrice,
+        },
+      ];
     });
 
-    setToastMessage(`Agregado a la bolsa: ${producto.nombre}`);
+    setToastMessage(`Agregado a la bolsa: ${producto.nombre}${variantLabel ? ` (${variantLabel})` : ''}`);
     setTimeout(() => {
       setToastMessage((cur) => (cur?.includes(producto.nombre) ? null : cur));
     }, 3500);
@@ -169,23 +228,39 @@ export default function App() {
     setCurrentView('catalogo');
   };
 
-  const handleLoginSuccess = (email: string) => {
-    setAdminEmail(email);
+  const handleOpenAdmin = () => {
+    if (currentUser && currentUser.activo) {
+      setIsAdminMode(true);
+    } else {
+      setIsAdminLoginOpen(true);
+    }
+  };
+
+  const handleLoginSuccess = (userProfile: UsuarioPanel) => {
+    setCurrentUser(userProfile);
     setIsAdminLoginOpen(false);
     setIsAdminMode(true);
   };
 
+  const handleLogout = async () => {
+    await cerrarSesion();
+    setCurrentUser(null);
+    setIsAdminMode(false);
+    loadData();
+  };
+
   const totalCartCount = cartItems.reduce((acc, curr) => acc + curr.cantidad, 0);
 
-  // If Admin Mode is active, render full AdminPanel (Images 2, 3, 4, 5, 6, 7)
+  // If Admin Mode is active, render full AdminPanel with dynamic role protection
   if (isAdminMode) {
     return (
       <AdminPanel
-        adminEmail={adminEmail}
+        currentUser={currentUser}
         onExitAdmin={() => {
           setIsAdminMode(false);
           loadData();
         }}
+        onLogout={handleLogout}
       />
     );
   }
@@ -208,7 +283,7 @@ export default function App() {
         }}
         cartCount={totalCartCount}
         onOpenCart={() => setIsCartOpen(true)}
-        onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
+        onOpenAdminLogin={handleOpenAdmin}
       />
 
       {/* Main Content Area */}
@@ -369,7 +444,10 @@ export default function App() {
       )}
 
       {/* Footer */}
-      <Footer onWhatsAppContact={handleWhatsAppContact} />
+      <Footer
+        onWhatsAppContact={handleWhatsAppContact}
+        onOpenAdminLogin={handleOpenAdmin}
+      />
     </div>
   );
 }
