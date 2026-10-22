@@ -48,13 +48,40 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [added, setAdded] = useState(false);
 
-  // Atributos disponibles
+  // Atributos y opciones disponibles (Tallas y Colores configurados)
   const atributos = useMemo(() => {
-    if (producto.atributos && producto.atributos.length > 0) {
-      return producto.atributos;
+    const list: { nombre: string; valores: string[] }[] = [];
+
+    // 1. Tallas configuradas manualmente
+    if (producto.tallas && Array.isArray(producto.tallas) && producto.tallas.length > 0) {
+      list.push({
+        nombre: 'Talla',
+        valores: producto.tallas,
+      });
     }
 
-    // Si no tiene atributos configurados explícitamente, extraer tallas o usar estándar
+    // 2. Colores configurados manualmente
+    if (producto.colores && Array.isArray(producto.colores) && producto.colores.length > 0) {
+      list.push({
+        nombre: 'Color',
+        valores: producto.colores,
+      });
+    }
+
+    // 3. Atributos adicionales de variantes si existen
+    if (producto.atributos && producto.atributos.length > 0) {
+      producto.atributos.forEach((a) => {
+        if (!list.some((existing) => existing.nombre.toLowerCase() === a.nombre.toLowerCase())) {
+          list.push(a);
+        }
+      });
+    }
+
+    if (list.length > 0) {
+      return list;
+    }
+
+    // Si no tiene tallas ni atributos configurados explícitamente, detectar de la descripción o estándar
     const descLower = (producto.descripcion || '').toLowerCase();
     const commonSizes = ['s', 'm', 'l', 'xl', '2xl', '3xl'];
     const detected: string[] = [];

@@ -279,6 +279,88 @@ CREATE POLICY "Acceso total a movimientos_trabajadores" ON public.movimientos_tr
 CREATE INDEX IF NOT EXISTS idx_movimientos_usuario_email ON public.movimientos_trabajadores (usuario_email);
 CREATE INDEX IF NOT EXISTS idx_movimientos_creado_en ON public.movimientos_trabajadores (creado_en DESC);
 CREATE INDEX IF NOT EXISTS idx_movimientos_modulo ON public.movimientos_trabajadores (modulo);
+
+-- ==============================================================================
+-- 6. TABLA DE GASTOS Y BALANCE FINANCIERO
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.gastos (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  concepto TEXT NOT NULL,
+  monto NUMERIC(10,2) NOT NULL DEFAULT 0,
+  categoria TEXT NOT NULL DEFAULT 'Mercancía e Inventario',
+  fecha TIMESTAMPTZ NOT NULL DEFAULT now(),
+  notas TEXT,
+  creado_por TEXT,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.gastos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Acceso total a gastos" ON public.gastos;
+CREATE POLICY "Acceso total a gastos" ON public.gastos FOR ALL USING (true) WITH CHECK (true);
+CREATE INDEX IF NOT EXISTS idx_gastos_fecha ON public.gastos (fecha DESC);
+
+-- ==============================================================================
+-- 7. TABLA DETALLES DE PRODUCTOS (TALLAS, COLORES Y OPCIONES)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.detalles_productos (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  producto_id TEXT NOT NULL UNIQUE,
+  tallas JSONB DEFAULT '[]'::jsonb,
+  colores JSONB DEFAULT '[]'::jsonb,
+  opciones_personalizadas JSONB DEFAULT '{}'::jsonb,
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Asegurar columnas tallas y colores directamente en la tabla productos
+ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS tallas JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS colores JSONB DEFAULT '[]'::jsonb;
+
+ALTER TABLE public.detalles_productos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Acceso total a detalles_productos" ON public.detalles_productos;
+CREATE POLICY "Acceso total a detalles_productos" ON public.detalles_productos FOR ALL USING (true) WITH CHECK (true);
+
+-- ==============================================================================
+-- 8. TABLA DE VENTAS Y FACTURACIÓN (WEB Y MANUALES EN EFECTIVO)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.ventas (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  codigo TEXT NOT NULL UNIQUE,
+  pedido_id TEXT,
+  cliente_nombre TEXT NOT NULL,
+  cliente_telefono TEXT,
+  metodo_pago TEXT NOT NULL DEFAULT 'efectivo',
+  total NUMERIC(10,2) NOT NULL DEFAULT 0,
+  items JSONB DEFAULT '[]'::jsonb,
+  tipo TEXT NOT NULL DEFAULT 'manual',
+  notas TEXT,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.ventas ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Acceso total a ventas" ON public.ventas;
+CREATE POLICY "Acceso total a ventas" ON public.ventas FOR ALL USING (true) WITH CHECK (true);
+CREATE INDEX IF NOT EXISTS idx_ventas_creado_en ON public.ventas (creado_en DESC);
+CREATE INDEX IF NOT EXISTS idx_ventas_cliente_tel ON public.ventas (cliente_telefono);
+
+-- ==============================================================================
+-- 9. PERMISOS TOTALES DE ELIMINACIÓN REAL (DELETE) EN SUPABASE
+-- ==============================================================================
+-- Garantiza que al eliminar un gasto, pedido, venta o cliente, Supabase NO bloquee la eliminación por RLS
+ALTER TABLE public.pedidos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Acceso total a pedidos" ON public.pedidos;
+CREATE POLICY "Acceso total a pedidos" ON public.pedidos FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE public.productos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Acceso total a productos" ON public.productos;
+CREATE POLICY "Acceso total a productos" ON public.productos FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE public.inventario ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Acceso total a inventario" ON public.inventario;
+CREATE POLICY "Acceso total a inventario" ON public.inventario FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE public.categorias ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Acceso total a categorias" ON public.categorias;
+CREATE POLICY "Acceso total a categorias" ON public.categorias FOR ALL USING (true) WITH CHECK (true);
 `;
 
   const handleCopy = () => {

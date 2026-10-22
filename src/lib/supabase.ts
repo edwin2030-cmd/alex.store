@@ -105,9 +105,10 @@ export async function eliminarCategoria(id: string): Promise<{ success: boolean;
 // ==========================================
 export async function getProductos(): Promise<Producto[]> {
   try {
-    const [prodRes, invRes] = await Promise.all([
+    const [prodRes, invRes, detRes] = await Promise.all([
       supabase.from('productos').select('*').order('creado_en', { ascending: false }),
       supabase.from('inventario').select('*'),
+      supabase.from('detalles_productos').select('*').catch(() => ({ data: null })),
     ]);
 
     if (prodRes.error || !prodRes.data) {
@@ -124,17 +125,35 @@ export async function getProductos(): Promise<Producto[]> {
       });
     }
 
-    return prodRes.data.map((p) => ({
-      ...p,
-      activo: p.activo ?? true,
-      tiene_variantes: Boolean(p.tiene_variantes),
-      atributos: p.atributos || [],
-      variantes: p.variantes || [],
-      sku: p.sku || '',
-      costo: p.costo || 0,
-      stock: stockMap[p.id]?.cantidad ?? 0,
-      stock_minimo: stockMap[p.id]?.stock_minimo ?? 5,
-    }));
+    const detallesMap: Record<string, { tallas?: string[]; colores?: string[] }> = {};
+    if (detRes && (detRes as any).data && Array.isArray((detRes as any).data)) {
+      (detRes as any).data.forEach((d: any) => {
+        detallesMap[d.producto_id] = {
+          tallas: d.tallas || [],
+          colores: d.colores || [],
+        };
+      });
+    }
+
+    return prodRes.data.map((p) => {
+      const det = detallesMap[p.id];
+      const tallas = (Array.isArray(p.tallas) && p.tallas.length > 0) ? p.tallas : (det?.tallas || []);
+      const colores = (Array.isArray(p.colores) && p.colores.length > 0) ? p.colores : (det?.colores || []);
+
+      return {
+        ...p,
+        tallas,
+        colores,
+        activo: p.activo ?? true,
+        tiene_variantes: Boolean(p.tiene_variantes || tallas.length > 0 || colores.length > 0),
+        atributos: p.atributos || [],
+        variantes: p.variantes || [],
+        sku: p.sku || '',
+        costo: p.costo || 0,
+        stock: stockMap[p.id]?.cantidad ?? 0,
+        stock_minimo: stockMap[p.id]?.stock_minimo ?? 5,
+      };
+    });
   } catch (err) {
     console.warn("Fallo cargando productos de Supabase:", err);
     return [];
@@ -152,6 +171,8 @@ export async function crearProducto(
     imagenes?: string[];
     activo: boolean;
     sku?: string;
+    tallas?: string[];
+    colores?: string[];
     tiene_variantes?: boolean;
     atributos?: any[];
     variantes?: any[];
@@ -160,26 +181,39 @@ export async function crearProducto(
   stockMinimo = 5
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    // 1. Insert product
-    const { data: prodData, error: prodErr } = await supabase
-      .from('productos')
-      .insert([
-        {
-          nombre: producto.nombre,
-          descripcion: producto.descripcion || null,
-          precio: producto.precio,
-          costo: producto.costo || 0,
-          categoria_id: producto.categoria_id || null,
-          imagen_url: producto.imagen_url || null,
-          imagenes: producto.imagenes || [],
-          activo: producto.activo,
-          sku: producto.sku || null,
-          tiene_variantes: producto.tiene_variantes ?? false,
-          atributos: producto.atributos || [],
-          variantes: producto.variantes || [],
-        }
-      ])
-      .select();
+    const insertPayload: any = {
+      nombre: producto.nombre,
+      descripcion: producto.descripcion || null,
+      precio: producto.precio,
+      costo: producto.costo || 0,
+      categoria_id: producto.categoria_id || null,
+      imagen_url: producto.imagen_url || null,
+      imagenes: producto.imagenes || [],
+      activo: producto.activo,
+      sku: producto.sku || null,
+      tallas: producto.tallas || [],
+      colores: producto.colores || [],
+      tiene_variantes: producto.tiene_variantes ?? false,
+      atributos: producto.atributos || [],
+      variantes: producto.variantes || [],
+    };
+
+    let prodData: any = null;
+    let prodErr: any = null;
+
+    // 1. Intentar insertar con tallas y colores
+    const res = await supabase.from('productos').insert([insertPayload]).select();
+    prodData = res.data;
+    prodErr = res.error;
+
+    // Fallback si la tabla productos no tiene aún las columnas tallas/colores
+    if (prodErr && prodErr.message && (prodErr.message.includes('tallas') || prodErr.message.includes('colores'))) {
+      delete insertPayload.tallas;
+      delete insertPayload.colores;
+      const retry = await supabase.from('productos').insert([insertPayload]).select();
+      prodData = retry.data;
+      prodErr = retry.error;
+    }
 
     if (prodErr || !prodData || prodData.length === 0) {
       throw prodErr || new Error('No se pudo crear el producto');
@@ -187,7 +221,21 @@ export async function crearProducto(
 
     const nuevoProd = prodData[0];
 
-    // 2. Insert initial inventory
+    // 2. Guardar en la tabla detalles_productos para persistencia en SQL
+    try {
+      await supabase.from('detalles_productos').upsert([
+        {
+          producto_id: nuevoProd.id,
+          tallas: producto.tallas || [],
+          colores: producto.colores || [],
+          actualizado_en: new Date().toISOString(),
+        }
+      ]);
+    } catch (detErr) {
+      console.warn("Aviso al guardar en detalles_productos:", detErr);
+    }
+
+    // 3. Insert initial inventory
     try {
       await supabase.from('inventario').insert([
         {
@@ -200,7 +248,7 @@ export async function crearProducto(
       console.warn("Aviso al crear inventario asociado:", invErr);
     }
 
-    return { success: true, data: nuevoProd };
+    return { success: true, data: { ...nuevoProd, tallas: producto.tallas, colores: producto.colores } };
   } catch (err: any) {
     return { success: false, error: err.message || 'Error al registrar producto' };
   }
@@ -218,6 +266,8 @@ export async function actualizarProducto(
     imagenes?: string[];
     activo: boolean;
     sku?: string;
+    tallas?: string[];
+    colores?: string[];
     tiene_variantes?: boolean;
     atributos?: any[];
     variantes?: any[];
@@ -226,26 +276,48 @@ export async function actualizarProducto(
   stockMinimo?: number
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { error } = await supabase
-      .from('productos')
-      .update({
-        nombre: producto.nombre,
-        descripcion: producto.descripcion || null,
-        precio: producto.precio,
-        costo: producto.costo || 0,
-        categoria_id: producto.categoria_id || null,
-        imagen_url: producto.imagen_url || null,
-        imagenes: producto.imagenes || [],
-        activo: producto.activo,
-        sku: producto.sku || null,
-        tiene_variantes: producto.tiene_variantes ?? false,
-        atributos: producto.atributos || [],
-        variantes: producto.variantes || [],
-        actualizado_en: new Date().toISOString(),
-      })
-      .eq('id', id);
+    const updatePayload: any = {
+      nombre: producto.nombre,
+      descripcion: producto.descripcion || null,
+      precio: producto.precio,
+      costo: producto.costo || 0,
+      categoria_id: producto.categoria_id || null,
+      imagen_url: producto.imagen_url || null,
+      imagenes: producto.imagenes || [],
+      activo: producto.activo,
+      sku: producto.sku || null,
+      tallas: producto.tallas || [],
+      colores: producto.colores || [],
+      tiene_variantes: producto.tiene_variantes ?? false,
+      atributos: producto.atributos || [],
+      variantes: producto.variantes || [],
+      actualizado_en: new Date().toISOString(),
+    };
+
+    let { error } = await supabase.from('productos').update(updatePayload).eq('id', id);
+
+    if (error && error.message && (error.message.includes('tallas') || error.message.includes('colores'))) {
+      delete updatePayload.tallas;
+      delete updatePayload.colores;
+      const retry = await supabase.from('productos').update(updatePayload).eq('id', id);
+      error = retry.error;
+    }
 
     if (error) throw error;
+
+    // Sincronizar en la tabla detalles_productos
+    try {
+      await supabase.from('detalles_productos').upsert([
+        {
+          producto_id: id,
+          tallas: producto.tallas || [],
+          colores: producto.colores || [],
+          actualizado_en: new Date().toISOString(),
+        }
+      ], { onConflict: 'producto_id' });
+    } catch (detErr) {
+      console.warn("Aviso sincronizando en detalles_productos:", detErr);
+    }
 
     if (stock !== undefined) {
       await actualizarStockRapido(id, stock, stockMinimo);
@@ -253,6 +325,9 @@ export async function actualizarProducto(
 
     return { success: true };
   } catch (err: any) {
+    return { success: false, error: err.message || 'Error al actualizar producto' };
+  }
+}
     return { success: false, error: err.message };
   }
 }
@@ -526,20 +601,48 @@ export async function eliminarPedido(id: string): Promise<{ success: boolean; er
 }
 
 // ==========================================
-// VENTAS & FACTURACIÓN
+// VENTAS & FACTURACIÓN (SUPABASE + LOCAL STORAGE)
 // ==========================================
+const STORAGE_KEY_VENTAS = 'alexstore_local_ventas';
+
 export async function getVentas(): Promise<Venta[]> {
+  let remoteList: Venta[] = [];
   try {
     const { data, error } = await supabase
       .from('ventas')
       .select('*')
       .order('creado_en', { ascending: false });
 
-    if (error || !data) return [];
-    return data;
-  } catch {
-    return [];
+    if (!error && data && data.length > 0) {
+      remoteList = data as Venta[];
+    }
+  } catch (err) {
+    console.warn('Aviso cargando ventas de Supabase:', err);
   }
+
+  // Respaldo en localStorage para disponibilidad ininterrumpida
+  let localList: Venta[] = [];
+  try {
+    const local = localStorage.getItem(STORAGE_KEY_VENTAS);
+    if (local) localList = JSON.parse(local);
+  } catch {}
+
+  const map = new Map<string, Venta>();
+  remoteList.forEach((v) => map.set(v.id || v.codigo, v));
+  localList.forEach((v) => {
+    const key = v.id || v.codigo;
+    if (!map.has(key)) map.set(key, v);
+  });
+
+  const merged = Array.from(map.values()).sort(
+    (a, b) => new Date(b.creado_en || 0).getTime() - new Date(a.creado_en || 0).getTime()
+  );
+
+  try {
+    localStorage.setItem(STORAGE_KEY_VENTAS, JSON.stringify(merged));
+  } catch {}
+
+  return merged;
 }
 
 export async function crearVentaManual(venta: {
@@ -550,26 +653,61 @@ export async function crearVentaManual(venta: {
   items: any[];
   tipo?: 'web' | 'manual';
   notas?: string;
-}): Promise<{ success: boolean; error?: string }> {
+}): Promise<{ success: boolean; data?: Venta; error?: string }> {
   try {
     const codigo = `VNT-${Math.floor(1000 + Math.random() * 9000)}`;
-    const { error } = await supabase.from('ventas').insert([
-      {
-        codigo,
-        cliente_nombre: venta.cliente_nombre,
-        cliente_telefono: venta.cliente_telefono || null,
-        metodo_pago: venta.metodo_pago,
-        total: venta.total,
-        items: venta.items,
-        tipo: venta.tipo || 'manual',
-        notas: venta.notas || null,
-      }
-    ]);
+    const now = new Date().toISOString();
+    const newVentaRecord: Venta = {
+      id: `vnt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      codigo,
+      cliente_nombre: venta.cliente_nombre.trim(),
+      cliente_telefono: venta.cliente_telefono?.trim() || null,
+      metodo_pago: venta.metodo_pago || 'efectivo',
+      total: Number(venta.total) || 0,
+      items: venta.items || [],
+      tipo: venta.tipo || 'manual',
+      notas: venta.notas?.trim() || null,
+      creado_en: now,
+    };
 
-    if (error) throw error;
-    return { success: true };
+    // 1. Insertar en Supabase si la tabla ventas existe
+    try {
+      const { data, error } = await supabase
+        .from('ventas')
+        .insert([
+          {
+            codigo: newVentaRecord.codigo,
+            cliente_nombre: newVentaRecord.cliente_nombre,
+            cliente_telefono: newVentaRecord.cliente_telefono,
+            metodo_pago: newVentaRecord.metodo_pago,
+            total: newVentaRecord.total,
+            items: newVentaRecord.items,
+            tipo: newVentaRecord.tipo,
+            notas: newVentaRecord.notas,
+            creado_en: newVentaRecord.creado_en,
+          }
+        ])
+        .select()
+        .maybeSingle();
+
+      if (!error && data) {
+        newVentaRecord.id = data.id || newVentaRecord.id;
+      }
+    } catch (err) {
+      console.warn('Aviso insertando venta manual en Supabase, guardando en local:', err);
+    }
+
+    // 2. Persistir localmente de inmediato para que nunca se pierda
+    try {
+      const local = localStorage.getItem(STORAGE_KEY_VENTAS);
+      const list: Venta[] = local ? JSON.parse(local) : [];
+      const updated = [newVentaRecord, ...list.filter((v) => v.codigo !== newVentaRecord.codigo)];
+      localStorage.setItem(STORAGE_KEY_VENTAS, JSON.stringify(updated));
+    } catch {}
+
+    return { success: true, data: newVentaRecord };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: err.message || 'Error guardando venta manual' };
   }
 }
 
@@ -577,12 +715,25 @@ export async function eliminarVenta(idOrCodigo: string): Promise<{ success: bool
   try {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCodigo);
     const query = supabase.from('ventas').delete();
-    const { error } = isUuid ? await query.eq('id', idOrCodigo) : await query.eq('codigo', idOrCodigo);
-    if (error) throw error;
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+    if (isUuid) {
+      await query.eq('id', idOrCodigo);
+    } else {
+      await query.eq('codigo', idOrCodigo);
+    }
+  } catch (err) {
+    console.warn('Aviso eliminando venta de Supabase:', err);
   }
+
+  try {
+    const local = localStorage.getItem(STORAGE_KEY_VENTAS);
+    if (local) {
+      const list: Venta[] = JSON.parse(local);
+      const filtered = list.filter((v) => v.id !== idOrCodigo && v.codigo !== idOrCodigo);
+      localStorage.setItem(STORAGE_KEY_VENTAS, JSON.stringify(filtered));
+    }
+  } catch {}
+
+  return { success: true };
 }
 
 export async function eliminarCliente(telefonoONombre: string): Promise<{ success: boolean; error?: string }> {
@@ -592,12 +743,29 @@ export async function eliminarCliente(telefonoONombre: string): Promise<{ succes
     if (cleanPhone.length >= 6) {
       filter = `cliente_telefono.ilike.%${cleanPhone}%,cliente_nombre.eq.${telefonoONombre}`;
     }
-    const { error } = await supabase.from('pedidos').delete().or(filter);
-    if (error) throw error;
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+    await supabase.from('pedidos').delete().or(filter);
+    await supabase.from('ventas').delete().or(filter);
+  } catch (e) {
+    console.warn('Aviso eliminando cliente en Supabase:', e);
   }
+
+  // Limpiar también de ventas locales asociadas al cliente
+  try {
+    const cleanPhone = telefonoONombre.replace(/\D/g, '');
+    const local = localStorage.getItem(STORAGE_KEY_VENTAS);
+    if (local) {
+      const list: Venta[] = JSON.parse(local);
+      const filtered = list.filter((v) => {
+        const vPhone = (v.cliente_telefono || '').replace(/\D/g, '');
+        if (cleanPhone && vPhone && (vPhone.includes(cleanPhone) || cleanPhone.includes(vPhone))) return false;
+        if (v.cliente_nombre.toLowerCase() === telefonoONombre.toLowerCase()) return false;
+        return true;
+      });
+      localStorage.setItem(STORAGE_KEY_VENTAS, JSON.stringify(filtered));
+    }
+  } catch {}
+
+  return { success: true };
 }
 
 /**
@@ -677,20 +845,46 @@ export async function aprobarPedidoYDescontarStock(
     const cleanCode = (pedido.codigo || '').replace(/[^0-9]/g, '') || Math.floor(1000 + Math.random() * 9000);
     const codigoVenta = `VNT-${cleanCode}`;
 
-    await supabase.from('ventas').insert([
-      {
-        codigo: codigoVenta,
-        pedido_id: pedido.id || pedidoId,
-        cliente_nombre: pedido.cliente_nombre,
-        cliente_telefono: pedido.cliente_telefono || null,
-        metodo_pago: pedido.metodo_pago,
-        total: Number(pedido.total) || 0,
-        items: pedido.items,
-        tipo: 'web',
-        notas: `Venta generada automáticamente al aprobar el pedido ${pedido.codigo}. Aprobado por: ${aprobadoPor || 'Admin'}`,
-        creado_en: now,
-      },
-    ]);
+    const ventaRecord: Venta = {
+      id: `vnt_${cleanCode}`,
+      codigo: codigoVenta,
+      pedido_id: pedido.id || pedidoId,
+      cliente_nombre: pedido.cliente_nombre,
+      cliente_telefono: pedido.cliente_telefono || null,
+      metodo_pago: pedido.metodo_pago,
+      total: Number(pedido.total) || 0,
+      items: pedido.items,
+      tipo: 'web',
+      notas: `Venta generada automáticamente al aprobar el pedido ${pedido.codigo}. Aprobado por: ${aprobadoPor || 'Admin'}`,
+      creado_en: now,
+    };
+
+    try {
+      await supabase.from('ventas').insert([
+        {
+          codigo: ventaRecord.codigo,
+          pedido_id: ventaRecord.pedido_id,
+          cliente_nombre: ventaRecord.cliente_nombre,
+          cliente_telefono: ventaRecord.cliente_telefono,
+          metodo_pago: ventaRecord.metodo_pago,
+          total: ventaRecord.total,
+          items: ventaRecord.items,
+          tipo: ventaRecord.tipo,
+          notas: ventaRecord.notas,
+          creado_en: ventaRecord.creado_en,
+        }
+      ]);
+    } catch (vErr) {
+      console.warn('Aviso insertando venta en Supabase:', vErr);
+    }
+
+    // Guardar también en localStorage para consistencia inmediata
+    try {
+      const local = localStorage.getItem(STORAGE_KEY_VENTAS);
+      const list: Venta[] = local ? JSON.parse(local) : [];
+      const updated = [ventaRecord, ...list.filter((v) => v.codigo !== codigoVenta)];
+      localStorage.setItem(STORAGE_KEY_VENTAS, JSON.stringify(updated));
+    } catch {}
 
     return { success: true };
   } catch (err: any) {
@@ -702,6 +896,8 @@ export async function aprobarPedidoYDescontarStock(
 // ==========================================
 // GASTOS & BALANCE FINANCIERO
 // ==========================================
+const STORAGE_KEY_GASTOS = 'alexstore_local_gastos';
+
 export async function getGastos(): Promise<Gasto[]> {
   try {
     const { data, error } = await supabase
@@ -709,11 +905,24 @@ export async function getGastos(): Promise<Gasto[]> {
       .select('*')
       .order('fecha', { ascending: false });
 
-    if (error || !data) return [];
-    return data as Gasto[];
-  } catch {
-    return [];
+    if (!error && data && data.length > 0) {
+      try {
+        localStorage.setItem(STORAGE_KEY_GASTOS, JSON.stringify(data));
+      } catch {}
+      return data as Gasto[];
+    }
+  } catch (err) {
+    console.warn('Aviso cargando gastos de Supabase:', err);
   }
+
+  try {
+    const local = localStorage.getItem(STORAGE_KEY_GASTOS);
+    if (local) {
+      return JSON.parse(local) as Gasto[];
+    }
+  } catch {}
+
+  return [];
 }
 
 export async function crearGasto(gasto: {
@@ -723,36 +932,77 @@ export async function crearGasto(gasto: {
   fecha?: string;
   notas?: string;
   creado_por?: string;
-}): Promise<{ success: boolean; data?: any; error?: string }> {
+}): Promise<{ success: boolean; data?: Gasto; error?: string }> {
+  const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `gst_${Date.now()}`;
+  const fecha = gasto.fecha || new Date().toISOString();
+  const newGastoRecord: Gasto = {
+    id: newId,
+    concepto: gasto.concepto.trim(),
+    monto: Number(gasto.monto) || 0,
+    categoria: gasto.categoria || 'Mercancía e Inventario',
+    fecha,
+    notas: gasto.notas?.trim() || null,
+    creado_por: gasto.creado_por || 'Administrador',
+    creado_en: new Date().toISOString(),
+  };
+
+  // 1. Intentar guardar en Supabase si la tabla existe
   try {
-    const fecha = gasto.fecha || new Date().toISOString();
     const { data, error } = await supabase
       .from('gastos')
       .insert([
         {
-          concepto: gasto.concepto,
-          monto: Number(gasto.monto) || 0,
-          categoria: gasto.categoria,
-          fecha,
-          notas: gasto.notas || null,
-          creado_por: gasto.creado_por || null,
-          creado_en: new Date().toISOString(),
+          id: newId,
+          concepto: newGastoRecord.concepto,
+          monto: newGastoRecord.monto,
+          categoria: newGastoRecord.categoria,
+          fecha: newGastoRecord.fecha,
+          notas: newGastoRecord.notas,
+          creado_por: newGastoRecord.creado_por,
+          creado_en: newGastoRecord.creado_en,
         },
       ])
       .select()
-      .single();
+      .maybeSingle();
 
-    if (error) throw error;
-    return { success: true, data };
+    if (!error && data) {
+      try {
+        const currentList = await getGastos();
+        const updated = [data as Gasto, ...currentList.filter((g) => g.id !== data.id)];
+        localStorage.setItem(STORAGE_KEY_GASTOS, JSON.stringify(updated));
+      } catch {}
+      return { success: true, data: data as Gasto };
+    }
   } catch (err: any) {
-    return { success: false, error: err.message };
+    console.warn('Aviso insertando gasto en Supabase, guardando en local:', err);
+  }
+
+  // 2. Persistencia local garantizada para funcionamiento ininterrumpido
+  try {
+    const local = localStorage.getItem(STORAGE_KEY_GASTOS);
+    const list: Gasto[] = local ? JSON.parse(local) : [];
+    const updated = [newGastoRecord, ...list];
+    localStorage.setItem(STORAGE_KEY_GASTOS, JSON.stringify(updated));
+    return { success: true, data: newGastoRecord };
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Error guardando gasto' };
   }
 }
 
 export async function eliminarGasto(id: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const { error } = await supabase.from('gastos').delete().eq('id', id);
-    if (error) throw error;
+    await supabase.from('gastos').delete().eq('id', id);
+  } catch (err) {
+    console.warn('Aviso eliminando de Supabase:', err);
+  }
+
+  try {
+    const local = localStorage.getItem(STORAGE_KEY_GASTOS);
+    if (local) {
+      const list: Gasto[] = JSON.parse(local);
+      const filtered = list.filter((g) => g.id !== id);
+      localStorage.setItem(STORAGE_KEY_GASTOS, JSON.stringify(filtered));
+    }
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };

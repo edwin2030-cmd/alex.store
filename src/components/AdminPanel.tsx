@@ -88,6 +88,8 @@ import {
   KeyRound,
   Activity,
   ClipboardList,
+  Menu,
+  ChevronRight,
 } from 'lucide-react';
 
 interface AdminPanelProps {
@@ -128,6 +130,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [usuarios, setUsuarios] = useState<UsuarioPanel[]>([]);
   const [movimientos, setMovimientos] = useState<MovimientoTrabajador[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Modals state
   const [isModalProductoOpen, setIsModalProductoOpen] = useState(false);
@@ -146,6 +149,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [nuevoGastoCategoria, setNuevoGastoCategoria] = useState('Mercancía e Inventario');
   const [nuevoGastoNotas, setNuevoGastoNotas] = useState('');
   const [submittingGasto, setSubmittingGasto] = useState(false);
+
+  // Modal Registrar Venta Manual (con opción Efectivo exclusiva)
+  const [isModalVentaManualOpen, setIsModalVentaManualOpen] = useState(false);
+  const [ventaManualCliente, setVentaManualCliente] = useState('');
+  const [ventaManualTelefono, setVentaManualTelefono] = useState('');
+  const [ventaManualMetodo, setVentaManualMetodo] = useState<'efectivo' | 'yappy' | 'transferencia' | 'tarjeta'>('efectivo');
+  const [ventaManualMonto, setVentaManualMonto] = useState('');
+  const [ventaManualProductoId, setVentaManualProductoId] = useState('');
+  const [ventaManualNotas, setVentaManualNotas] = useState('');
+  const [submittingVentaManual, setSubmittingVentaManual] = useState(false);
 
   const [viewingProofUrl, setViewingProofUrl] = useState<string | null>(null);
   const [selectedOrderForProof, setSelectedOrderForProof] = useState<Pedido | null>(null);
@@ -285,31 +298,75 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const pedidosAprobados = pedidos.filter((p) => p.estado === 'aprobado' || p.estado === 'entregado').length;
   const volumenTotalPedidos = pedidos.reduce((acc, p) => acc + (p.total || 0), 0);
 
-  // Extracción de clientes desde el registro de pedidos
+  // Extracción consolidada de clientes basada prioritariamente en el NÚMERO DE TELÉFONO
   const clientesList: ClienteResumen[] = useMemo(() => {
     const map: Record<string, ClienteResumen> = {};
+
+    // 1. Procesar pedidos agrupando por teléfono
     pedidos.forEach((p) => {
-      const cleanPhone = (p.cliente_telefono || '').trim();
-      const key = cleanPhone || p.cliente_nombre.toLowerCase().trim();
-      if (!key) return;
-      if (!map[key]) {
-        map[key] = {
-          nombre: p.cliente_nombre,
-          telefono: p.cliente_telefono,
-          direccion: p.cliente_direccion,
+      const rawPhone = (p.cliente_telefono || '').trim();
+      const cleanDigits = rawPhone.replace(/\D/g, '');
+      // La clave primaria obligatoria es el teléfono del cliente
+      const phoneKey = cleanDigits.length >= 6 ? cleanDigits : (rawPhone || p.cliente_nombre.toLowerCase().trim());
+      if (!phoneKey) return;
+
+      if (!map[phoneKey]) {
+        map[phoneKey] = {
+          nombre: p.cliente_nombre || 'Cliente',
+          telefono: rawPhone || 'Sin teléfono',
+          direccion: p.cliente_direccion || undefined,
           totalPedidos: 0,
           totalGastado: 0,
           ultimoPedidoFecha: p.creado_en,
         };
       }
-      map[key].totalPedidos += 1;
-      map[key].totalGastado += p.total || 0;
-      if (p.cliente_direccion && !map[key].direccion) {
-        map[key].direccion = p.cliente_direccion;
+
+      map[phoneKey].totalPedidos += 1;
+      map[phoneKey].totalGastado += Number(p.total) || 0;
+
+      // Mantener el nombre más descriptivo
+      if (p.cliente_nombre && map[phoneKey].nombre.toLowerCase().includes('cliente') && !p.cliente_nombre.toLowerCase().includes('cliente')) {
+        map[phoneKey].nombre = p.cliente_nombre;
+      }
+      if (p.cliente_direccion && !map[phoneKey].direccion) {
+        map[phoneKey].direccion = p.cliente_direccion;
+      }
+      if (p.creado_en && (!map[phoneKey].ultimoPedidoFecha || new Date(p.creado_en) > new Date(map[phoneKey].ultimoPedidoFecha!))) {
+        map[phoneKey].ultimoPedidoFecha = p.creado_en;
       }
     });
+
+    // 2. Procesar ventas registradas (incluye ventas manuales con teléfono)
+    ventas.forEach((v) => {
+      const rawPhone = (v.cliente_telefono || '').trim();
+      const cleanDigits = rawPhone.replace(/\D/g, '');
+      const phoneKey = cleanDigits.length >= 6 ? cleanDigits : (rawPhone || v.cliente_nombre.toLowerCase().trim());
+      if (!phoneKey) return;
+
+      if (!map[phoneKey]) {
+        map[phoneKey] = {
+          nombre: v.cliente_nombre || 'Cliente',
+          telefono: rawPhone || 'Sin teléfono',
+          direccion: undefined,
+          totalPedidos: 0,
+          totalGastado: 0,
+          ultimoPedidoFecha: v.creado_en,
+        };
+      }
+
+      // Si la venta no viene de un pedido ya contado
+      if (!v.pedido_id) {
+        map[phoneKey].totalPedidos += 1;
+        map[phoneKey].totalGastado += Number(v.total) || 0;
+      }
+
+      if (v.creado_en && (!map[phoneKey].ultimoPedidoFecha || new Date(v.creado_en) > new Date(map[phoneKey].ultimoPedidoFecha!))) {
+        map[phoneKey].ultimoPedidoFecha = v.creado_en;
+      }
+    });
+
     return Object.values(map);
-  }, [pedidos]);
+  }, [pedidos, ventas]);
 
   // Handlers
   const handleDeleteProducto = async (id: string, nombre: string) => {
@@ -662,7 +719,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         creado_por: currentUser?.nombre || currentUser?.email || 'Admin',
       });
       if (res.success && res.data) {
-        setGastos((prev) => [res.data, ...prev]);
+        const gastoCreado = res.data;
+        setGastos((prev) => [gastoCreado, ...prev]);
         setNuevoGastoConcepto('');
         setNuevoGastoMonto('');
         setNuevoGastoNotas('');
@@ -785,31 +843,52 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   return (
     <div className="min-h-screen bg-[#F4F6F8] text-[#1A1918] flex flex-col md:flex-row font-sans">
-      {/* Mobile Top Navigation (for phones and small tablets) */}
+      {/* Mobile Top Header (Optimized for Android & iOS with 3-rayitas Menu button) */}
       <div className="md:hidden bg-[#0F0E0D] text-white border-b border-[#26221E] sticky top-0 z-30">
-        <div className="p-3.5 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <AlexStoreLogo size="sm" />
-            <div>
-              <span className="font-extrabold text-base text-white leading-none block">
-                Alex<span className="text-[#C59A4D]">Store</span>
-              </span>
-              <span className="text-[9px] uppercase font-bold tracking-widest text-[#8C8375]">
-                {userRole === 'dueno' && 'PANEL DUEÑO'}
-                {userRole === 'administrador' && 'PANEL ADMIN'}
-                {userRole === 'cajero' && 'PANEL CAJERO'}
-              </span>
+        <div className="px-3.5 py-3 flex items-center justify-between gap-2">
+          {/* Left side: Botón de 3 rayitas (Menú a la mano izquierda) + Logo */}
+          <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              type="button"
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="p-2 -ml-1 rounded-xl bg-[#1C1A17] hover:bg-[#2A2621] text-[#E6C687] border border-[#2B2722] transition-colors cursor-pointer flex items-center justify-center shrink-0 active:scale-95 shadow-sm"
+              aria-label="Abrir panel de opciones"
+              title="Abrir panel de opciones (3 rayitas)"
+            >
+              <Menu className="w-5 h-5 stroke-[2.5]" />
+            </button>
+
+            <div className="flex items-center gap-2 min-w-0">
+              <AlexStoreLogo size="sm" />
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-extrabold text-sm text-white leading-none">
+                    Alex<span className="text-[#C59A4D]">Store</span>
+                  </span>
+                  <span className={`px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-wider ${
+                    userRole === 'dueno'
+                      ? 'bg-amber-400/20 text-[#E6C687] border border-[#C59A4D]/40'
+                      : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  }`}>
+                    {userRole === 'dueno' ? '👑 DUEÑO' : '💼 TRABAJADOR'}
+                  </span>
+                </div>
+                <span className="text-[10px] text-[#A69F93] font-bold block truncate capitalize mt-0.5">
+                  {allowedNavItems.find((i) => i.id === activeSection)?.label || activeSection}
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Right side quick actions */}
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               onClick={onExitAdmin}
-              className="px-2.5 py-1.5 rounded-xl bg-[#26221E] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-              title="Ir a tienda pública"
+              className="px-2.5 py-1.5 rounded-xl bg-[#1C1A17] text-white hover:text-[#E6C687] text-xs font-bold border border-[#2B2722] flex items-center gap-1 cursor-pointer transition-colors"
+              title="Ver Tienda Pública"
             >
               <Globe className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Tienda</span>
+              <span className="hidden xs:inline">Tienda</span>
             </button>
 
             <button
@@ -821,34 +900,142 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </button>
           </div>
         </div>
-
-        {/* Scrollable menu tabs on mobile (filtradas estrictamente por rol) */}
-        <div className="flex items-center gap-1.5 px-3 pb-2.5 overflow-x-auto no-scrollbar">
-          {allowedNavItems.map((item) => {
-            const Icon = item.icon;
-            const isSelected = activeSection === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setActiveSection(item.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all shrink-0 cursor-pointer ${
-                  isSelected
-                    ? 'bg-[#C59A4D] text-[#141312] shadow-sm font-black'
-                    : 'bg-[#1C1A17] text-[#A69F93] hover:text-white'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                <span>{item.label}</span>
-                {item.badge > 0 ? (
-                  <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[9px] font-black">
-                    {item.badge}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
       </div>
+
+      {/* Panel de Opciones a la Mano Izquierda (Off-canvas Drawer para Móviles) */}
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 z-50 md:hidden animate-fade-in">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+
+          {/* Drawer Panel a la izquierda */}
+          <aside className="fixed inset-y-0 left-0 w-[290px] max-w-[85vw] bg-[#0F0E0D] text-white border-r border-[#26221E] shadow-2xl flex flex-col z-50 animate-slide-right">
+            {/* Header del Drawer */}
+            <div className="p-4 border-b border-[#26221E] flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <AlexStoreLogo size="sm" />
+                <div>
+                  <span className="font-extrabold text-base text-white block leading-none">
+                    Alex<span className="text-[#C59A4D]">Store</span>
+                  </span>
+                  <span className="text-[9px] uppercase font-bold tracking-widest text-[#8C8375] block mt-0.5">
+                    PANEL DE OPCIONES
+                  </span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="p-2 rounded-xl text-[#8C8375] hover:text-white hover:bg-[#1C1A17] transition-colors cursor-pointer"
+                title="Cerrar panel"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Info del Usuario activo en Drawer */}
+            <div className="p-3.5 m-3 rounded-2xl bg-[#171513] border border-[#2B2722] space-y-1.5">
+              <div className="flex items-center gap-2.5">
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                  userRole === 'dueno' ? 'bg-[#C59A4D] text-black font-black' : 'bg-emerald-600 text-white'
+                }`}>
+                  {currentUser?.nombre ? currentUser.nombre.charAt(0).toUpperCase() : 'U'}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="font-extrabold text-xs text-white block truncate">
+                    {currentUser?.nombre || 'Usuario'}
+                  </span>
+                  <span className="text-[10px] text-[#8C8375] block truncate font-mono">
+                    {currentUser?.email || 'admin@alexstore.com'}
+                  </span>
+                </div>
+              </div>
+              <div className="pt-1 border-t border-[#26221E] flex items-center justify-between">
+                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${
+                  userRole === 'dueno'
+                    ? 'bg-[#C59A4D]/20 text-[#E6C687] border border-[#C59A4D]/30'
+                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                }`}>
+                  {userRole === 'dueno' ? '👑 DUEÑO (ACCESO TOTAL)' : '💼 TRABAJADOR'}
+                </span>
+                <span className="text-[9px] text-emerald-400 flex items-center gap-1 font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Activo
+                </span>
+              </div>
+            </div>
+
+            {/* Lista Vertical de Opciones (Scrolleable y Cómoda) */}
+            <div className="flex-1 overflow-y-auto px-3 py-1 space-y-1 overscroll-contain">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#6E685F] px-2 py-1 block">
+                MÓDULOS DISPONIBLES:
+              </span>
+              {allowedNavItems.map((item) => {
+                const Icon = item.icon;
+                const isSelected = activeSection === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveSection(item.id);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3.5 py-3 rounded-2xl text-xs font-bold transition-all text-left cursor-pointer active:scale-98 ${
+                      isSelected
+                        ? 'bg-[#C59A4D] text-[#141312] shadow-md font-black'
+                        : 'text-[#A69F93] hover:text-white hover:bg-[#1A1816]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Icon className={`w-4 h-4 shrink-0 ${isSelected ? 'text-[#141312]' : 'text-[#C59A4D]'}`} />
+                      <span className="truncate">{item.label}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {item.badge > 0 && (
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                          isSelected ? 'bg-[#141312] text-[#E6C687]' : 'bg-rose-500 text-white'
+                        }`}>
+                          {item.badge}
+                        </span>
+                      )}
+                      <ChevronRight className={`w-3.5 h-3.5 opacity-60 ${isSelected ? 'text-black' : 'text-[#6E685F]'}`} />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Footer del Drawer */}
+            <div className="p-3 border-t border-[#26221E] space-y-2 bg-[#0A0908]">
+              <button
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onExitAdmin();
+                }}
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-[#1C1A17] hover:bg-[#25221F] text-[#E6C687] text-xs font-bold border border-[#2D2822] cursor-pointer"
+              >
+                <Globe className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Ver Catálogo Público</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onLogout();
+                }}
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-rose-950/40 hover:bg-rose-950/80 text-rose-300 text-xs font-bold border border-rose-900/50 cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5 text-rose-400" />
+                <span>Cerrar Sesión</span>
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
 
       {/* Desktop/Tablet Sidebar (Left Column) */}
       <aside className="hidden md:flex w-64 bg-[#0F0E0D] text-white flex-col justify-between p-5 border-r border-[#26221E] shrink-0 sticky top-0 h-screen overflow-y-auto">
@@ -959,13 +1146,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* Main Content Viewport */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
         {/* Top bar header */}
-        <header className="bg-white border-b border-[#E5E9EE] px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <header className="bg-white border-b border-[#E5E9EE] px-4 sm:px-6 py-3.5 sm:py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <div>
-            <h1 className="text-2xl font-black text-[#1A1918] font-heading capitalize leading-tight">
+            <h1 className="text-xl sm:text-2xl font-black text-[#1A1918] font-heading capitalize leading-tight">
               {activeSection === 'dashboard' && 'Dashboard General'}
               {activeSection === 'pedidos' && 'Gestión de Pedidos & Comprobantes'}
               {activeSection === 'ventas' && 'Módulo de Ventas & Facturación'}
               {activeSection === 'gastos' && 'Control de Gastos & Balance Neto'}
+              {activeSection === 'movimientos' && 'Registro de Movimientos & Auditoría'}
               {activeSection === 'productos' && 'Gestión de Productos'}
               {activeSection === 'categorias' && 'Gestión de Categorías'}
               {activeSection === 'inventario' && 'Control de Inventario'}
@@ -977,6 +1165,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {activeSection === 'pedidos' && 'Verifica comprobantes de pago por Yappy y Transferencias, y aprueba compras'}
               {activeSection === 'ventas' && 'Ventas web aprobadas y registro de ventas manuales de mostrador'}
               {activeSection === 'gastos' && 'Registra gastos operativos y de mercancía, descontándolos en vivo del total ganado para dar la ganancia neta'}
+              {activeSection === 'movimientos' && 'Historial cronológico de turnos, aprobaciones y ajustes de stock'}
               {activeSection === 'productos' && 'Administra catálogo, precios, fotos e inventario en public.productos'}
               {activeSection === 'categorias' && 'Crea y edita categorías en public.categorias'}
               {activeSection === 'inventario' && 'Monitorea existencias, alertas de stock mínimo y reposición en public.inventario'}
@@ -995,7 +1184,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </header>
 
         {/* Content Body */}
-        <main className="flex-1 p-6 space-y-6">
+        <main className="flex-1 p-3.5 sm:p-6 lg:p-8 space-y-5 sm:space-y-6 max-w-full overflow-x-hidden">
           {/* Alertas de Feedback */}
           {userFeedback && (
             <div
@@ -2794,70 +2983,72 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               {/* Table (Image 6) */}
               <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-[#FAF8F5] border-b border-[#E5E9EE] text-[#7A7368] font-bold uppercase tracking-wider text-[10px]">
-                    <tr>
-                      <th className="py-4 px-6">CATEGORÍA</th>
-                      <th className="py-4 px-6">DESCRIPCIÓN</th>
-                      <th className="py-4 px-6">PRODUCTOS</th>
-                      <th className="py-4 px-6">ESTADO</th>
-                      <th className="py-4 px-6 text-right">ACCIONES</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#F0EAE1]">
-                    {categorias.map((cat) => {
-                      const prodsCount = productos.filter((p) => p.categoria_id === cat.id).length;
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[550px] text-left text-xs">
+                    <thead className="bg-[#FAF8F5] border-b border-[#E5E9EE] text-[#7A7368] font-bold uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="py-4 px-6">CATEGORÍA</th>
+                        <th className="py-4 px-6">DESCRIPCIÓN</th>
+                        <th className="py-4 px-6">PRODUCTOS</th>
+                        <th className="py-4 px-6">ESTADO</th>
+                        <th className="py-4 px-6 text-right">ACCIONES</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#F0EAE1]">
+                      {categorias.map((cat) => {
+                        const prodsCount = productos.filter((p) => p.categoria_id === cat.id).length;
 
-                      return (
-                        <tr key={cat.id} className="hover:bg-[#FCFAF7] transition-colors">
-                          <td className="py-4 px-6">
-                            <div className="flex items-center gap-3">
-                              <div className="w-9 h-9 rounded-xl bg-[#FAF8F5] border border-[#EAE5DC] flex items-center justify-center text-[#C59A4D]">
-                                <Layers className="w-4 h-4" />
+                        return (
+                          <tr key={cat.id} className="hover:bg-[#FCFAF7] transition-colors">
+                            <td className="py-4 px-6">
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-xl bg-[#FAF8F5] border border-[#EAE5DC] flex items-center justify-center text-[#C59A4D]">
+                                  <Layers className="w-4 h-4" />
+                                </div>
+                                <span className="font-extrabold text-sm text-[#1A1918]">{cat.nombre}</span>
                               </div>
-                              <span className="font-extrabold text-sm text-[#1A1918]">{cat.nombre}</span>
-                            </div>
-                          </td>
+                            </td>
 
-                          <td className="py-4 px-6 text-[#7A7368] italic">
-                            {cat.descripcion || 'Sin descripción'}
-                          </td>
+                            <td className="py-4 px-6 text-[#7A7368] italic">
+                              {cat.descripcion || 'Sin descripción'}
+                            </td>
 
-                          <td className="py-4 px-6 font-bold text-[#1A1918]">
-                            {prodsCount} productos
-                          </td>
+                            <td className="py-4 px-6 font-bold text-[#1A1918]">
+                              {prodsCount} productos
+                            </td>
 
-                          <td className="py-4 px-6">
-                            <span className="inline-flex items-center gap-1 font-bold text-emerald-600">
-                              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                              Activa
-                            </span>
-                          </td>
+                            <td className="py-4 px-6">
+                              <span className="inline-flex items-center gap-1 font-bold text-emerald-600">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                                Activa
+                              </span>
+                            </td>
 
-                          <td className="py-4 px-6 text-right">
-                            <div className="inline-flex items-center gap-2">
-                              <button
-                                onClick={() => {
-                                  setCategoriaToEdit(cat);
-                                  setIsModalCategoriaOpen(true);
-                                }}
-                                className="p-1.5 rounded-lg text-[#7A7368] hover:text-[#1A1918] hover:bg-slate-100"
-                              >
-                                <Edit2 className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteCategoria(cat.id, cat.nombre)}
-                                className="p-1.5 rounded-lg text-[#9C9488] hover:text-rose-600 hover:bg-rose-50"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            <td className="py-4 px-6 text-right">
+                              <div className="inline-flex items-center gap-2">
+                                <button
+                                  onClick={() => {
+                                    setCategoriaToEdit(cat);
+                                    setIsModalCategoriaOpen(true);
+                                  }}
+                                  className="p-1.5 rounded-lg text-[#7A7368] hover:text-[#1A1918] hover:bg-slate-100"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteCategoria(cat.id, cat.nombre)}
+                                  className="p-1.5 rounded-lg text-[#9C9488] hover:text-rose-600 hover:bg-rose-50"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
@@ -2906,7 +3097,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               {/* Table (Image 7) */}
               <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
-                <table className="w-full text-left text-xs">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[650px] text-left text-xs">
                   <thead className="bg-[#FAF8F5] border-b border-[#E5E9EE] text-[#7A7368] font-bold uppercase tracking-wider text-[10px]">
                     <tr>
                       <th className="py-4 px-6">PRODUCTO</th>
@@ -3016,6 +3208,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       })}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
           )}
@@ -3059,7 +3252,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               {/* Table */}
               <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
-                <table className="w-full text-left border-collapse">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[650px] text-left border-collapse">
                   <thead>
                     <tr className="border-b border-[#E5E9EE] bg-[#FAF8F5] text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
                       <th className="py-3 px-6">Cliente</th>
@@ -3146,6 +3340,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     )}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
           )}
@@ -3355,7 +3550,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               {/* Table de Usuarios */}
               <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
-                <table className="w-full text-left border-collapse">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[700px] text-left border-collapse">
                   <thead>
                     <tr className="border-b border-[#E5E9EE] bg-[#FAF8F5] text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
                       <th className="py-3 px-6">Usuario & Colaborador</th>
@@ -3522,6 +3718,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     )}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
           )}
@@ -3703,8 +3900,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
       {/* Modal Registrar Gasto */}
       {isModalGastoOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-md p-6 space-y-5 border border-[#E5DFD5] shadow-2xl animate-fade-in">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-4 sm:space-y-5 border border-[#E5DFD5] shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between pb-3 border-b border-[#F0EAE1]">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">

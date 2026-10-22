@@ -60,6 +60,12 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
   const [atributos, setAtributos] = useState<AtributoOpcion[]>(productoToEdit?.atributos || []);
   const [variantes, setVariantes] = useState<VarianteProducto[]>(productoToEdit?.variantes || []);
 
+  // Tallas y Colores directos para el cliente
+  const [tallas, setTallas] = useState<string[]>(productoToEdit?.tallas || []);
+  const [colores, setColores] = useState<string[]>(productoToEdit?.colores || []);
+  const [tallaInput, setTallaInput] = useState('');
+  const [colorInput, setColorInput] = useState('');
+
   // Input temporal para agregar valor a un atributo
   const [newValInputs, setNewValInputs] = useState<Record<number, string>>({});
 
@@ -75,6 +81,8 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
       setStockMinimo(String(productoToEdit.stock_minimo ?? 3));
       setDescripcion(productoToEdit.descripcion || '');
       setImagenes(productoToEdit.imagenes || (productoToEdit.imagen_url ? [productoToEdit.imagen_url] : []));
+      setTallas(productoToEdit.tallas || []);
+      setColores(productoToEdit.colores || []);
       setTieneVariantes(Boolean(productoToEdit.tiene_variantes || (productoToEdit.variantes && productoToEdit.variantes.length > 0)));
       setAtributos(productoToEdit.atributos || []);
       setVariantes(productoToEdit.variantes || []);
@@ -89,6 +97,8 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
       setStockMinimo('3');
       setDescripcion('');
       setImagenes([]);
+      setTallas([]);
+      setColores([]);
       setTieneVariantes(false);
       setAtributos([]);
       setVariantes([]);
@@ -305,7 +315,9 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
       imagenes,
       activo,
       sku: skuGeneral.trim() || undefined,
-      tiene_variantes: tieneVariantes,
+      tallas,
+      colores,
+      tiene_variantes: tieneVariantes || tallas.length > 0 || colores.length > 0,
       atributos: tieneVariantes ? atributos : [],
       variantes: tieneVariantes ? variantes : [],
     };
@@ -331,7 +343,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-fade-in">
       <div className="relative w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-[#E5DFD5] overflow-hidden my-6">
         {/* Header */}
-        <div className="p-6 sm:p-8 border-b border-[#F0EAE1] flex items-start justify-between bg-[#FCFAF7]">
+        <div className="p-4 sm:p-8 border-b border-[#F0EAE1] flex items-start justify-between bg-[#FCFAF7]">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="w-2.5 h-2.5 rounded-full bg-[#C59A4D]" />
@@ -356,7 +368,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-6 max-h-[75vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-8 space-y-5 sm:space-y-6 max-h-[75vh] overflow-y-auto">
           {/* Row 1: Categoría & Precio Base */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
@@ -462,6 +474,237 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
               onChange={(e) => setDescripcion(e.target.value)}
               className="w-full bg-white text-xs sm:text-sm text-[#1A1918] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
             />
+          </div>
+
+          {/* ======================================================== */}
+          {/* OPCIONES MANUALES: TALLAS Y COLORES PARA EL CLIENTE      */}
+          {/* ======================================================== */}
+          <div className="p-4 sm:p-5 rounded-3xl bg-[#FAF9F6] border-2 border-[#E5DFD5] space-y-4">
+            <div className="flex items-center gap-2.5 pb-2 border-b border-[#EBE5DB]">
+              <div className="w-8 h-8 rounded-xl bg-[#141312] text-[#E6C687] flex items-center justify-center font-bold shrink-0">
+                <Tag className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-xs sm:text-sm font-extrabold text-[#1A1918] font-heading">
+                  Opciones para el Cliente: Tallas y Colores Disponibles
+                </h3>
+                <p className="text-[11px] text-[#7A7368]">
+                  Las opciones que agregues aquí aparecerán en la tienda para que el cliente elija su talla y color antes de comprar
+                </p>
+              </div>
+            </div>
+
+            {/* SECCIÓN TALLAS */}
+            <div className="space-y-2.5 p-3.5 bg-white rounded-2xl border border-[#EAE5DC]">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black uppercase text-[#1A1918] flex items-center gap-1.5">
+                  <span>👕 Tallas Disponibles ({tallas.length}):</span>
+                </label>
+                {tallas.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setTallas([])}
+                    className="text-[10px] text-rose-600 hover:underline font-bold cursor-pointer"
+                  >
+                    Borrar todas
+                  </button>
+                )}
+              </div>
+
+              {/* Botones rápidos de tallas */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] text-[#8C8375] font-bold mr-1">Rápidos:</span>
+                {['S', 'M', 'L', 'XL', '2XL', '3XL', 'Única'].map((t) => {
+                  const exists = tallas.includes(t);
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => {
+                        if (exists) {
+                          setTallas(tallas.filter((x) => x !== t));
+                        } else {
+                          setTallas([...tallas, t]);
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                        exists
+                          ? 'bg-[#141312] text-[#E6C687] border border-[#141312] shadow-xs'
+                          : 'bg-[#FAF8F5] text-[#5A554D] border border-[#DDD7CC] hover:border-[#141312]'
+                      }`}
+                    >
+                      {exists ? `✓ ${t}` : `+ ${t}`}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Input manual para agregar cualquier talla personalizada */}
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="text"
+                  placeholder="Escribe otra talla manual (ej: 38, 40, Oversize, 12 Meses...)"
+                  value={tallaInput}
+                  onChange={(e) => setTallaInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (tallaInput.trim() && !tallas.includes(tallaInput.trim())) {
+                        setTallas([...tallas, tallaInput.trim()]);
+                        setTallaInput('');
+                      }
+                    }
+                  }}
+                  className="flex-1 bg-[#FAF8F5] text-xs px-3.5 py-2 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (tallaInput.trim() && !tallas.includes(tallaInput.trim())) {
+                      setTallas([...tallas, tallaInput.trim()]);
+                      setTallaInput('');
+                    }
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-[#141312] text-[#F5E6BE] text-xs font-bold hover:bg-black transition-colors cursor-pointer shrink-0"
+                >
+                  + Agregar Talla
+                </button>
+              </div>
+
+              {/* Chips de tallas activas */}
+              {tallas.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {tallas.map((t, idx) => (
+                    <span
+                      key={idx}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#141312] text-white text-xs font-bold shadow-xs"
+                    >
+                      <span>{t}</span>
+                      <button
+                        type="button"
+                        onClick={() => setTallas(tallas.filter((_, i) => i !== idx))}
+                        className="text-[#E6C687] hover:text-white cursor-pointer"
+                        title="Eliminar talla"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* SECCIÓN COLORES */}
+            <div className="space-y-2.5 p-3.5 bg-white rounded-2xl border border-[#EAE5DC]">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black uppercase text-[#1A1918] flex items-center gap-1.5">
+                  <span>🎨 Colores Disponibles ({colores.length}):</span>
+                </label>
+                {colores.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setColores([])}
+                    className="text-[10px] text-rose-600 hover:underline font-bold cursor-pointer"
+                  >
+                    Borrar todos
+                  </button>
+                )}
+              </div>
+
+              {/* Botones rápidos de colores */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] text-[#8C8375] font-bold mr-1">Rápidos:</span>
+                {[
+                  { name: 'Negro', bg: '#000000', border: false },
+                  { name: 'Blanco', bg: '#ffffff', border: true },
+                  { name: 'Azul', bg: '#1e3a8a', border: false },
+                  { name: 'Rojo', bg: '#b91c1c', border: false },
+                  { name: 'Gris', bg: '#64748b', border: false },
+                  { name: 'Verde', bg: '#15803d', border: false },
+                  { name: 'Beige', bg: '#f5f5dc', border: true },
+                ].map((c) => {
+                  const exists = colores.includes(c.name);
+                  return (
+                    <button
+                      key={c.name}
+                      type="button"
+                      onClick={() => {
+                        if (exists) {
+                          setColores(colores.filter((x) => x !== c.name));
+                        } else {
+                          setColores([...colores, c.name]);
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        exists
+                          ? 'bg-[#141312] text-[#E6C687] border border-[#141312] shadow-xs'
+                          : 'bg-[#FAF8F5] text-[#5A554D] border border-[#DDD7CC] hover:border-[#141312]'
+                      }`}
+                    >
+                      <span
+                        className={`w-2.5 h-2.5 rounded-full inline-block ${c.border ? 'border border-[#999]' : ''}`}
+                        style={{ backgroundColor: c.bg }}
+                      />
+                      <span>{exists ? `✓ ${c.name}` : `+ ${c.name}`}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Input manual para agregar cualquier color personalizado */}
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="text"
+                  placeholder="Escribe otro color manual (ej: Azul Rey, Vino Tinto, Dorado, Camuflaje...)"
+                  value={colorInput}
+                  onChange={(e) => setColorInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (colorInput.trim() && !colores.includes(colorInput.trim())) {
+                        setColores([...colores, colorInput.trim()]);
+                        setColorInput('');
+                      }
+                    }
+                  }}
+                  className="flex-1 bg-[#FAF8F5] text-xs px-3.5 py-2 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (colorInput.trim() && !colores.includes(colorInput.trim())) {
+                      setColores([...colores, colorInput.trim()]);
+                      setColorInput('');
+                    }
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-[#141312] text-[#F5E6BE] text-xs font-bold hover:bg-black transition-colors cursor-pointer shrink-0"
+                >
+                  + Agregar Color
+                </button>
+              </div>
+
+              {/* Chips de colores activos */}
+              {colores.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {colores.map((c, idx) => (
+                    <span
+                      key={idx}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#141312] text-white text-xs font-bold shadow-xs"
+                    >
+                      <span>{c}</span>
+                      <button
+                        type="button"
+                        onClick={() => setColores(colores.filter((_, i) => i !== idx))}
+                        className="text-[#E6C687] hover:text-white cursor-pointer"
+                        title="Eliminar color"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* ======================================================== */}

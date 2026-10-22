@@ -26,6 +26,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
   const hasVariants = Boolean(
     producto.tiene_variantes ||
+    (producto.tallas && producto.tallas.length > 0) ||
+    (producto.colores && producto.colores.length > 0) ||
     (producto.atributos && producto.atributos.length > 0) ||
     (producto.variantes && producto.variantes.length > 0)
   );
@@ -146,9 +148,22 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             </p>
           )}
 
-          {producto.atributos && producto.atributos.length > 0 && (
-            <div className="flex flex-wrap gap-1 pt-1.5">
-              {producto.atributos.map((attr, aIdx) => (
+          {/* Tallas y Colores manuales disponibles */}
+          <div className="flex flex-wrap gap-1 pt-1.5">
+            {producto.tallas && producto.tallas.length > 0 && (
+              <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] bg-[#FAF8F5] border border-[#EAE5DC] text-[#5A554D] px-2 py-0.5 rounded-lg font-medium">
+                <strong className="font-extrabold text-[#1A1918]">Tallas:</strong>
+                <span>{producto.tallas.slice(0, 4).join(', ')}{producto.tallas.length > 4 ? ` +${producto.tallas.length - 4}` : ''}</span>
+              </span>
+            )}
+            {producto.colores && producto.colores.length > 0 && (
+              <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] bg-[#FAF8F5] border border-[#EAE5DC] text-[#5A554D] px-2 py-0.5 rounded-lg font-medium">
+                <strong className="font-extrabold text-[#1A1918]">Colores:</strong>
+                <span>{producto.colores.slice(0, 3).join(', ')}{producto.colores.length > 3 ? ` +${producto.colores.length - 3}` : ''}</span>
+              </span>
+            )}
+            {(!producto.tallas || producto.tallas.length === 0) && (!producto.colores || producto.colores.length === 0) && producto.atributos && producto.atributos.length > 0 && (
+              producto.atributos.map((attr, aIdx) => (
                 <span
                   key={aIdx}
                   className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] bg-[#FAF8F5] border border-[#EAE5DC] text-[#5A554D] px-2 py-0.5 rounded-lg font-medium"
@@ -156,9 +171,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                   <strong className="font-extrabold text-[#1A1918]">{attr.nombre}:</strong>
                   <span>{attr.valores?.slice(0, 3).join(', ')}{attr.valores && attr.valores.length > 3 ? ` +${attr.valores.length - 3}` : ''}</span>
                 </span>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
         </div>
 
         <div className="pt-2 sm:pt-3 border-t border-[#F2ECE1] flex items-center justify-between gap-1 sm:gap-2">

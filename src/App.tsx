@@ -183,7 +183,8 @@ export default function App() {
         {
           producto,
           cantidad,
-          tallaSeleccionada: talla || (opcionesSeleccionadas ? Object.values(opcionesSeleccionadas).join(' / ') : undefined),
+          tallaSeleccionada: talla || opcionesSeleccionadas?.['Talla'] || opcionesSeleccionadas?.['talla'] || (opcionesSeleccionadas ? Object.values(opcionesSeleccionadas).join(' / ') : undefined),
+          colorSeleccionado: opcionesSeleccionadas?.['Color'] || opcionesSeleccionadas?.['color'],
           opcionesSeleccionadas,
           varianteSeleccionada,
           precioUnitario: unitPrice,

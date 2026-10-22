@@ -473,7 +473,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           variante_id: i.varianteSeleccionada?.id,
           variante_titulo: varTitle,
           opciones: i.opcionesSeleccionadas,
-          talla: i.tallaSeleccionada || (i.opcionesSeleccionadas ? Object.values(i.opcionesSeleccionadas).join(' / ') : undefined),
+          talla: i.tallaSeleccionada || i.opcionesSeleccionadas?.['Talla'] || i.opcionesSeleccionadas?.['talla'] || (i.opcionesSeleccionadas ? Object.values(i.opcionesSeleccionadas).join(' / ') : undefined),
+          color: i.colorSeleccionado || i.opcionesSeleccionadas?.['Color'] || i.opcionesSeleccionadas?.['color'],
           imagen_url: i.producto.imagen_url || (i.producto.imagenes && i.producto.imagenes[0]) || undefined,
         };
       }),

@@ -40,11 +40,24 @@ export interface Producto {
   sku?: string;
   stock?: number;
   stock_minimo?: number;
+  // Opciones directas: tallas y colores manuales
+  tallas?: string[];
+  colores?: string[];
+  detalles_personalizados?: Record<string, any>;
   // Variantes personalizables
   tiene_variantes?: boolean;
   atributos?: AtributoOpcion[];
   variantes?: VarianteProducto[];
   creado_en?: string;
+  actualizado_en?: string;
+}
+
+export interface DetallesProducto {
+  id?: string;
+  producto_id: string;
+  tallas: string[];
+  colores: string[];
+  opciones_personalizadas?: Record<string, any>;
   actualizado_en?: string;
 }
 
@@ -63,8 +76,9 @@ export interface ItemCarrito {
   varianteSeleccionada?: VarianteProducto;
   opcionesSeleccionadas?: Record<string, string>;
   precioUnitario: number;
-  // Compatibilidad hacia atrás
+  // Talla y Color elegidos por el cliente
   tallaSeleccionada?: string;
+  colorSeleccionado?: string;
 }
 
 // ==========================================
@@ -93,6 +107,7 @@ export interface PedidoItem {
   variante_titulo?: string;
   opciones?: Record<string, string>;
   talla?: string;
+  color?: string;
   imagen_url?: string;
 }
 
