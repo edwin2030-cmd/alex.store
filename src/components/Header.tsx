@@ -26,9 +26,9 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="sticky top-0 z-40 bg-[#FAF8F5]/95 backdrop-blur-md border-b border-[#EAE5DC] w-full">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
-        {/* Brand - Logo with 5 quick clicks to open admin */}
+        {/* Brand - Logo with 10 quick clicks to open admin */}
         <div className="flex items-center gap-2 sm:gap-3 select-none shrink-0">
-          <AlexStoreLogo size="md" onFiveClicks={onOpenAdminLogin} />
+          <AlexStoreLogo size="md" onTenClicks={onOpenAdminLogin} />
           <div
             onClick={() => onViewChange('catalogo')}
             className="flex flex-col cursor-pointer group"

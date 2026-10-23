@@ -2,20 +2,24 @@ import React, { useRef } from 'react';
 
 interface AlexStoreLogoProps {
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  onTenClicks?: () => void;
   onFiveClicks?: () => void;
   className?: string;
 }
 
 export const AlexStoreLogo: React.FC<AlexStoreLogoProps> = ({
   size = 'md',
+  onTenClicks,
   onFiveClicks,
   className = '',
 }) => {
   const clickCountRef = useRef(0);
   const clickTimeoutRef = useRef<any>(null);
 
+  const targetCallback = onTenClicks || onFiveClicks;
+
   const handleClick = (e: React.MouseEvent) => {
-    if (!onFiveClicks) return;
+    if (!targetCallback) return;
     e.stopPropagation();
 
     clickCountRef.current += 1;
@@ -23,13 +27,14 @@ export const AlexStoreLogo: React.FC<AlexStoreLogoProps> = ({
       clearTimeout(clickTimeoutRef.current);
     }
 
-    if (clickCountRef.current >= 5) {
+    if (clickCountRef.current >= 10) {
       clickCountRef.current = 0;
-      onFiveClicks();
+      targetCallback();
     } else {
+      // 2.5 segundos de margen entre clics para permitir alcanzar los 10 toques en celular y PC
       clickTimeoutRef.current = setTimeout(() => {
         clickCountRef.current = 0;
-      }, 1800);
+      }, 2500);
     }
   };
 
@@ -45,13 +50,13 @@ export const AlexStoreLogo: React.FC<AlexStoreLogoProps> = ({
   return (
     <div
       onClick={handleClick}
-      title={onFiveClicks ? 'AlexStore Oficial (5 clics rápidos para gestión)' : 'AlexStore'}
-      className={`relative ${dim} rounded-full bg-black p-[2px] shadow-lg border border-[#C59A4D]/50 shrink-0 flex items-center justify-center select-none cursor-pointer active:scale-95 transition-transform overflow-hidden ${className}`}
+      title={targetCallback ? 'AlexStore Oficial (10 clics rápidos para gestión)' : 'AlexStore'}
+      className={`relative ${dim} rounded-full bg-black p-[2px] shadow-lg border border-[#C59A4D]/50 shrink-0 flex items-center justify-center select-none cursor-pointer active:scale-90 transition-transform overflow-hidden touch-manipulation ${className}`}
     >
       <img
         src="/images/logo.png"
         alt="AlexStore"
-        className="w-full h-full object-cover rounded-full"
+        className="w-full h-full object-cover rounded-full pointer-events-none"
         onError={(e) => {
           const target = e.target as HTMLImageElement;
           if (!target.src.includes('b9d09119')) {

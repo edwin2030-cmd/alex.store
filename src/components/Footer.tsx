@@ -15,7 +15,7 @@ export const Footer: React.FC<FooterProps> = ({ onWhatsAppContact, onOpenAdminLo
           {/* Brand */}
           <div className="space-y-3.5 md:col-span-1">
             <div className="flex items-center gap-3">
-              <AlexStoreLogo size="sm" />
+              <AlexStoreLogo size="sm" onTenClicks={onOpenAdminLogin} />
               <div className="flex flex-col">
                 <span className="font-extrabold text-xl text-[#1A1918] leading-tight">
                   Alex<span className="text-[#C59A4D]">Store</span>

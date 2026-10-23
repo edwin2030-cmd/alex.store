@@ -417,7 +417,7 @@ export default function App() {
         initialMethod={checkoutMethod}
       />
 
-      {/* Admin Login Modal (Image 1 - triggered by 5 fast clicks on logo) */}
+      {/* Admin Login Modal (Triggered by 10 fast clicks on logo) */}
       <AdminLoginModal
         isOpen={isAdminLoginOpen}
         onClose={() => setIsAdminLoginOpen(false)}
