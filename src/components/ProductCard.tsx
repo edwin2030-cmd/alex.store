@@ -177,9 +177,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         </div>
 
         <div className="pt-2 sm:pt-3 border-t border-[#F2ECE1] flex items-center justify-between gap-1 sm:gap-2">
-          <div>
-            <span className="text-[9px] sm:text-[10px] uppercase font-bold text-[#9C9488] block">Precio</span>
-            <span className="text-base sm:text-xl font-black text-[#C59A4D]">
+          <div className="min-w-0">
+            <span className="text-[8px] sm:text-[10px] uppercase font-bold text-[#9C9488] block leading-none">Precio</span>
+            <span className="text-sm sm:text-lg md:text-xl font-black text-[#C59A4D] block leading-tight">
               ${producto.precio.toFixed(2)}
             </span>
           </div>
@@ -187,7 +187,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           <button
             onClick={handleAdd}
             disabled={isAgotado}
-            className={`px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-[10px] sm:text-xs font-bold tracking-wider flex items-center gap-1 sm:gap-1.5 transition-all uppercase cursor-pointer ${
+            className={`px-2 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-[10px] sm:text-xs font-bold tracking-wider flex items-center gap-1 sm:gap-1.5 transition-all uppercase cursor-pointer shrink-0 ${
               isAgotado
                 ? 'bg-[#EAE5DC] text-[#9C9488] cursor-not-allowed'
                 : justAdded
@@ -199,13 +199,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               <span>Agotado</span>
             ) : justAdded ? (
               <>
-                <Check className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                <span className="hidden xs:inline">Agregado</span>
+                <Check className="w-3 h-3 sm:w-3.5 sm:h-3.5 stroke-[3]" />
+                <span>Listo</span>
               </>
             ) : hasVariants ? (
               <>
                 <ShoppingBag className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#E6C687]" />
-                <span>Opciones</span>
+                <span>Elegir</span>
               </>
             ) : (
               <>

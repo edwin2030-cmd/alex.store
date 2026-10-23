@@ -87,9 +87,9 @@ export const ModalNuevaCategoria: React.FC<ModalNuevaCategoriaProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-fade-in">
-      <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-[#E5DFD5] overflow-hidden my-6">
+      <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-[#E5DFD5] overflow-hidden my-3 sm:my-6 max-h-[90dvh] flex flex-col">
         {/* Header (Image 10) */}
-        <div className="p-6 sm:p-8 border-b border-[#F0EAE1] flex items-start justify-between">
+        <div className="p-4 sm:p-7 border-b border-[#F0EAE1] flex items-start justify-between shrink-0">
           <div>
             <h2 className="text-xl sm:text-2xl font-extrabold text-[#1A1918] font-heading leading-tight">
               {isEditing ? 'Editar Categoría' : 'Nueva Categoría'}
@@ -108,7 +108,7 @@ export const ModalNuevaCategoria: React.FC<ModalNuevaCategoriaProps> = ({
         </div>
 
         {/* Form Body (Image 10) */}
-        <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-5">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-8 space-y-4 sm:space-y-5 flex-1 overflow-y-auto">
           <div>
             <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D] block mb-1.5">
               NOMBRE DE LA CATEGORÍA *
@@ -189,11 +189,11 @@ export const ModalNuevaCategoria: React.FC<ModalNuevaCategoriaProps> = ({
           </div>
 
           {/* Actions */}
-          <div className="pt-4 border-t border-[#F0EAE1] flex items-center justify-end gap-3">
+          <div className="pt-4 border-t border-[#F0EAE1] flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5 sm:gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2.5 rounded-full text-xs font-extrabold uppercase tracking-wider text-[#7A7368] hover:text-[#1A1918]"
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider text-[#7A7368] hover:text-[#1A1918] cursor-pointer text-center"
             >
               Cancelar
             </button>
@@ -201,7 +201,7 @@ export const ModalNuevaCategoria: React.FC<ModalNuevaCategoriaProps> = ({
             <button
               type="submit"
               disabled={isSubmitting || uploadingImage}
-              className="px-7 py-3 rounded-2xl bg-[#141312] hover:bg-black text-[#F5E6BE] font-extrabold text-xs tracking-wider uppercase transition-all shadow-lg active:scale-98 disabled:opacity-50"
+              className="w-full sm:w-auto px-7 py-3 rounded-2xl bg-[#141312] hover:bg-black text-[#F5E6BE] font-extrabold text-xs tracking-wider uppercase transition-all shadow-lg active:scale-98 disabled:opacity-50 cursor-pointer text-center justify-center"
             >
               {isSubmitting
                 ? 'Guardando...'

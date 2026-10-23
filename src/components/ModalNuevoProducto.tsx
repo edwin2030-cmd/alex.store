@@ -341,9 +341,9 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-fade-in">
-      <div className="relative w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-[#E5DFD5] overflow-hidden my-6">
+      <div className="relative w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-[#E5DFD5] overflow-hidden my-3 sm:my-6 max-h-[90dvh] flex flex-col">
         {/* Header */}
-        <div className="p-4 sm:p-8 border-b border-[#F0EAE1] flex items-start justify-between bg-[#FCFAF7]">
+        <div className="p-4 sm:p-7 border-b border-[#F0EAE1] flex items-start justify-between bg-[#FCFAF7] shrink-0">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="w-2.5 h-2.5 rounded-full bg-[#C59A4D]" />
@@ -368,7 +368,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-4 sm:p-8 space-y-5 sm:space-y-6 max-h-[75vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-8 space-y-5 sm:space-y-6 flex-1 overflow-y-auto">
           {/* Row 1: Categoría & Precio Base */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
@@ -1141,11 +1141,11 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
           </div>
 
           {/* Footer actions */}
-          <div className="pt-4 border-t border-[#F0EAE1] flex items-center justify-end gap-3 sticky bottom-0 bg-white py-2">
+          <div className="pt-4 border-t border-[#F0EAE1] flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5 sm:gap-3 sticky bottom-0 bg-white py-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2.5 rounded-full text-xs font-extrabold uppercase tracking-wider text-[#7A7368] hover:text-[#1A1918] cursor-pointer"
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider text-[#7A7368] hover:text-[#1A1918] cursor-pointer text-center"
             >
               Cancelar
             </button>
@@ -1153,7 +1153,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
             <button
               type="submit"
               disabled={isSubmitting || uploadingImage}
-              className="px-7 py-3 rounded-2xl bg-[#141312] hover:bg-black text-[#F5E6BE] font-extrabold text-xs tracking-wider uppercase transition-all shadow-lg active:scale-98 disabled:opacity-50 cursor-pointer"
+              className="w-full sm:w-auto px-7 py-3 rounded-2xl bg-[#141312] hover:bg-black text-[#F5E6BE] font-extrabold text-xs tracking-wider uppercase transition-all shadow-lg active:scale-98 disabled:opacity-50 cursor-pointer text-center justify-center"
             >
               {isSubmitting
                 ? 'Guardando...'

@@ -36,7 +36,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="font-extrabold text-lg sm:text-2xl tracking-tight leading-none text-[#1A1918]">
               Alex<span className="text-[#C59A4D]">Store</span>
             </span>
-            <span className="text-[8px] sm:text-[10px] uppercase font-bold tracking-[0.18em] text-[#7A7368] mt-0.5 hidden xs:block">
+            <span className="text-[8px] sm:text-[10px] uppercase font-bold tracking-[0.18em] text-[#7A7368] mt-0.5 hidden sm:block">
               CATÁLOGO OFICIAL
             </span>
           </div>
@@ -65,13 +65,13 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Navigation Tabs & Actions */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-2.5 shrink-0">
           {/* Catalogo Tab */}
           <button
             onClick={() => onViewChange('catalogo')}
-            className={`px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all cursor-pointer ${
+            className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-full text-[10px] sm:text-xs font-black tracking-wider uppercase transition-all cursor-pointer ${
               currentView === 'catalogo'
-                ? 'bg-white border sm:border-2 border-[#1A1918] text-[#1A1918] shadow-sm'
+                ? 'bg-white border border-[#1A1918] sm:border-2 text-[#1A1918] shadow-sm'
                 : 'text-[#6B655C] hover:text-[#1A1918]'
             }`}
           >
@@ -81,9 +81,9 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Colecciones Tab */}
           <button
             onClick={() => onViewChange('colecciones')}
-            className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all cursor-pointer ${
+            className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-full text-[10px] sm:text-xs font-black tracking-wider uppercase transition-all cursor-pointer ${
               currentView === 'colecciones'
-                ? 'bg-white border sm:border-2 border-[#1A1918] text-[#1A1918] shadow-sm'
+                ? 'bg-white border border-[#1A1918] sm:border-2 text-[#1A1918] shadow-sm'
                 : 'text-[#6B655C] hover:text-[#1A1918]'
             }`}
           >
@@ -94,13 +94,13 @@ export const Header: React.FC<HeaderProps> = ({
           {/* BOLSA Button */}
           <button
             onClick={onOpenCart}
-            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full bg-[#141312] hover:bg-black text-white text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
+            className="flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-full bg-[#141312] hover:bg-black text-white text-[10px] sm:text-xs font-black tracking-wider uppercase transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
             aria-label="Abrir bolsa de pedidos"
           >
-            <ShoppingBag className="w-3.5 h-3.5 text-[#E6C687]" />
+            <ShoppingBag className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#E6C687]" />
             <span>BOLSA</span>
             {cartCount > 0 && (
-              <span className="min-w-4 h-4 px-1 rounded-full bg-[#E6C687] text-[#141312] text-[10px] font-black flex items-center justify-center">
+              <span className="min-w-4 h-4 px-1 rounded-full bg-[#E6C687] text-[#141312] text-[9px] sm:text-[10px] font-black flex items-center justify-center">
                 {cartCount}
               </span>
             )}

@@ -26,6 +26,7 @@ import {
   registrarMovimiento,
   eliminarMovimiento,
   limpiarHistorialMovimientos,
+  crearUsuarioPanel,
 } from '../lib/supabase';
 import {
   ROLE_PERMISSIONS,
@@ -54,6 +55,7 @@ import {
   RefreshCw,
   Search,
   Eye,
+  EyeOff,
   Edit2,
   Trash2,
   Shield,
@@ -157,6 +159,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [ventaManualMetodo, setVentaManualMetodo] = useState<'efectivo' | 'yappy' | 'transferencia' | 'tarjeta'>('efectivo');
   const [ventaManualMonto, setVentaManualMonto] = useState('');
   const [ventaManualProductoId, setVentaManualProductoId] = useState('');
+  const [ventaManualCantidad, setVentaManualCantidad] = useState('1');
+  const [ventaManualVarianteId, setVentaManualVarianteId] = useState('');
   const [ventaManualNotas, setVentaManualNotas] = useState('');
   const [submittingVentaManual, setSubmittingVentaManual] = useState(false);
 
@@ -185,11 +189,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [userStatusFilter, setUserStatusFilter] = useState<'todos' | 'activos' | 'inactivos'>('todos');
   const [userFeedback, setUserFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
-  // Estados para vincular usuario de Authentication
+  // Estados para crear usuario en Supabase Authentication o vincular rol
   const [authEmailInput, setAuthEmailInput] = useState('');
+  const [authPasswordInput, setAuthPasswordInput] = useState('');
+  const [authShowPassword, setAuthShowPassword] = useState(false);
   const [authNombreInput, setAuthNombreInput] = useState('');
-  const [authRolSelected, setAuthRolSelected] = useState<UserRole>('dueno');
+  const [authRolSelected, setAuthRolSelected] = useState<UserRole>('cajero');
   const [savingAuthRole, setSavingAuthRole] = useState(false);
+  const [showStorageDetails, setShowStorageDetails] = useState(false);
 
   // Clientes filter
   const [clienteSearch, setClienteSearch] = useState('');
@@ -529,27 +536,74 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
+  const handleGenerateAuthPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+    let generated = 'Alex';
+    for (let i = 0; i < 6; i++) {
+      generated += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    generated += '26!';
+    setAuthPasswordInput(generated);
+    setAuthShowPassword(true);
+  };
+
   const handleGuardarUsuarioAuthDirecto = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = authEmailInput.trim().toLowerCase();
+    const cleanNombre = authNombreInput.trim() || cleanEmail.split('@')[0];
+    const cleanPass = authPasswordInput.trim();
+
     if (!cleanEmail || !cleanEmail.includes('@')) {
-      alert('Ingresa un correo electrónico válido de Supabase Authentication.');
+      alert('Ingresa un correo electrónico válido.');
       return;
     }
+
     setSavingAuthRole(true);
     try {
-      const res = await guardarRolUsuarioAuth(cleanEmail, authRolSelected, authNombreInput);
+      let res;
+      // Si el usuario especificó una contraseña, creamos la cuenta en Supabase Authentication
+      if (cleanPass) {
+        if (cleanPass.length < 6) {
+          alert('La contraseña debe tener un mínimo de 6 caracteres para registrarse en Supabase Authentication.');
+          setSavingAuthRole(false);
+          return;
+        }
+        res = await crearUsuarioPanel({
+          email: cleanEmail,
+          password: cleanPass,
+          nombre: cleanNombre,
+          rol: authRolSelected,
+          creadoPorEmail: currentUser?.email,
+        });
+      } else {
+        // Si no ingresó contraseña, vinculamos rol a una cuenta ya existente en Supabase Authentication
+        res = await guardarRolUsuarioAuth(cleanEmail, authRolSelected, cleanNombre);
+      }
+
       if (res.success) {
         setUserFeedback({
           type: 'success',
-          msg: `¡Usuario ${cleanEmail} guardado exitosamente como ${authRolSelected === 'dueno' ? '👑 DUEÑO' : '💼 TRABAJADOR'}!`,
+          msg: `¡Usuario ${cleanEmail} guardado exitosamente en Supabase como ${authRolSelected === 'dueno' ? '👑 DUEÑO' : '💼 TRABAJADOR'}! Ya puede iniciar sesión con su correo y contraseña.`,
         });
         setAuthEmailInput('');
         setAuthNombreInput('');
+        setAuthPasswordInput('');
+
+        // Registrar en auditoría
+        registrarMovimiento({
+          usuario_id: currentUser?.id,
+          usuario_nombre: currentUser?.nombre || 'Dueño',
+          usuario_email: currentUser?.email || '',
+          rol: currentUser?.rol || 'dueno',
+          accion: 'Creó Usuario en Supabase',
+          modulo: 'usuarios',
+          detalles: `Registró usuario "${cleanNombre}" (${cleanEmail}) con rol ${authRolSelected.toUpperCase()} en Supabase.`,
+        }).then(() => getMovimientosTrabajadores().then(setMovimientos));
+
         await reloadAllData();
-        setTimeout(() => setUserFeedback(null), 4000);
+        setTimeout(() => setUserFeedback(null), 5000);
       } else {
-        alert(res.error || 'Error al guardar rol.');
+        alert(res.error || 'Error al guardar usuario en Supabase.');
       }
     } finally {
       setSavingAuthRole(false);
@@ -640,6 +694,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           type: 'success',
         });
         setTimeout(() => setComprobanteToast(null), 5000);
+
+        // Recargar datos para garantizar sincronización exacta con las tablas de Supabase
+        reloadAllData();
 
         registrarMovimiento({
           usuario_id: currentUser?.id,
@@ -791,9 +848,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       return;
     }
 
+    const cantNum = Math.max(1, parseInt(ventaManualCantidad) || 1);
     setSubmittingVentaManual(true);
     try {
       const selectedProd = productos.find((p) => p.id === ventaManualProductoId);
+      let selectedVarTitulo = '';
+      if (selectedProd && ventaManualVarianteId && Array.isArray(selectedProd.variantes)) {
+        const vFound = selectedProd.variantes.find(
+          (v: any) => v.id === ventaManualVarianteId || v.titulo === ventaManualVarianteId
+        );
+        if (vFound) {
+          selectedVarTitulo = (vFound as any).titulo || (vFound as any).nombre || '';
+        }
+      }
+
       const items = selectedProd
         ? [
             {
@@ -801,7 +869,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               producto_id: selectedProd.id,
               nombre: selectedProd.nombre,
               precio: montoNum,
-              cantidad: 1,
+              cantidad: cantNum,
+              variante_id: ventaManualVarianteId || undefined,
+              variante_titulo: selectedVarTitulo || undefined,
             },
           ]
         : [];
@@ -813,19 +883,52 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         total: montoNum,
         items,
         tipo: 'manual',
-        notas: ventaManualNotas.trim() || (selectedProd ? `Producto: ${selectedProd.nombre}` : undefined),
+        notas:
+          ventaManualNotas.trim() ||
+          (selectedProd
+            ? `Producto: ${selectedProd.nombre}${selectedVarTitulo ? ` (${selectedVarTitulo})` : ''} x${cantNum}`
+            : undefined),
       });
 
       if (res.success && res.data) {
         const nuevaVenta = res.data;
+
+        // Descontar inmediatamente en el estado local de productos si se asoció un producto
+        if (selectedProd) {
+          setProductos((prev) =>
+            prev.map((prod) => {
+              if (prod.id !== selectedProd.id) return prod;
+              const nextStock = Math.max(0, (prod.stock ?? 0) - cantNum);
+              let nextVars = prod.variantes;
+              if (Array.isArray(nextVars) && (ventaManualVarianteId || selectedVarTitulo)) {
+                nextVars = nextVars.map((v: any) => {
+                  if (
+                    (ventaManualVarianteId && (v.id === ventaManualVarianteId || v.titulo === ventaManualVarianteId)) ||
+                    (selectedVarTitulo && (v.titulo === selectedVarTitulo || v.id === selectedVarTitulo))
+                  ) {
+                    return { ...v, stock: Math.max(0, (v.stock ?? 0) - cantNum) };
+                  }
+                  return v;
+                });
+              }
+              return { ...prod, stock: nextStock, variantes: nextVars };
+            })
+          );
+        }
+
         setVentas((prev) => [nuevaVenta, ...prev.filter((v) => v.codigo !== nuevaVenta.codigo)]);
         setIsModalVentaManualOpen(false);
         setVentaManualCliente('');
         setVentaManualTelefono('');
         setVentaManualMonto('');
         setVentaManualProductoId('');
+        setVentaManualCantidad('1');
+        setVentaManualVarianteId('');
         setVentaManualNotas('');
         setVentaManualMetodo('efectivo');
+
+        // Sincronizar en segundo plano con Supabase para actualizar métricas de inventario
+        reloadAllData();
 
         // Registrar auditoría
         registrarMovimiento({
@@ -835,12 +938,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           rol: currentUser?.rol || 'cajero',
           accion: 'Registró Venta Manual',
           modulo: 'ventas',
-          detalles: `Venta manual por $${montoNum.toFixed(2)} (${ventaManualMetodo.toUpperCase()}) para ${ventaManualCliente.trim()} (Tel: ${ventaManualTelefono.trim() || 'N/A'}).`,
+          detalles: `Venta manual por $${montoNum.toFixed(2)} (${ventaManualMetodo.toUpperCase()}) para ${ventaManualCliente.trim()} (Tel: ${ventaManualTelefono.trim() || 'N/A'})${selectedProd ? ` - Descontó ${cantNum} un. de "${selectedProd.nombre}"` : ''}.`,
         }).then(() => getMovimientosTrabajadores().then(setMovimientos));
 
         setUserFeedback({
           type: 'success',
-          msg: `¡Venta manual ${nuevaVenta.codigo} registrada con éxito por $${montoNum.toFixed(2)} (${ventaManualMetodo.toUpperCase()})!`,
+          msg: `¡Venta manual ${nuevaVenta.codigo} registrada con éxito por $${montoNum.toFixed(2)} (${ventaManualMetodo.toUpperCase()})! Se descontó automáticamente del inventario.`,
         });
         setTimeout(() => setUserFeedback(null), 4500);
       } else {
@@ -915,9 +1018,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   );
 
   return (
-    <div className="min-h-screen bg-[#F4F6F8] text-[#1A1918] flex flex-col md:flex-row font-sans">
-      {/* Mobile Top Header (Optimized for Android & iOS with 3-rayitas Menu button) */}
-      <div className="md:hidden bg-[#0F0E0D] text-white border-b border-[#26221E] sticky top-0 z-30">
+    <div className="min-h-screen bg-[#F4F6F8] text-[#1A1918] flex flex-col lg:flex-row font-sans">
+      {/* Mobile & Tablet Top Header (Optimized for Android & iOS with 3-rayitas Menu button) */}
+      <div className="lg:hidden bg-[#0F0E0D] text-white border-b border-[#26221E] sticky top-0 z-30">
         <div className="px-3.5 py-3 flex items-center justify-between gap-2">
           {/* Left side: Botón de 3 rayitas (Menú a la mano izquierda) + Logo */}
           <div className="flex items-center gap-2.5 min-w-0">
@@ -961,7 +1064,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               title="Ver Tienda Pública"
             >
               <Globe className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden xs:inline">Tienda</span>
+              <span className="hidden sm:inline">Tienda</span>
             </button>
 
             <button
@@ -975,9 +1078,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       </div>
 
-      {/* Panel de Opciones a la Mano Izquierda (Off-canvas Drawer para Móviles) */}
+      {/* Panel de Opciones a la Mano Izquierda (Off-canvas Drawer para Móviles & Tablets) */}
       {isMobileMenuOpen && (
-        <div className="fixed inset-0 z-50 md:hidden animate-fade-in">
+        <div className="fixed inset-0 z-50 lg:hidden animate-fade-in">
           {/* Backdrop */}
           <div
             className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity"
@@ -1110,8 +1213,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
-      {/* Desktop/Tablet Sidebar (Left Column) */}
-      <aside className="hidden md:flex w-64 bg-[#0F0E0D] text-white flex-col justify-between p-5 border-r border-[#26221E] shrink-0 sticky top-0 h-screen overflow-y-auto">
+      {/* Desktop Sidebar (Desktops >= 1024px) */}
+      <aside className="hidden lg:flex w-64 bg-[#0F0E0D] text-white flex-col justify-between p-5 border-r border-[#26221E] shrink-0 sticky top-0 h-screen overflow-y-auto">
         <div className="space-y-6">
           {/* Logo Brand Header */}
           <div className="flex items-center gap-3">
@@ -1334,40 +1437,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               {/* 5 Stats Cards (Image 2) */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-4">
                 {/* 1. Total Productos */}
                 <div
                   onClick={() => setActiveSection('productos')}
-                  className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs hover:border-[#C59A4D]/50 transition-all cursor-pointer flex flex-col justify-between"
+                  className="bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#E5E9EE] shadow-xs hover:border-[#C59A4D]/50 transition-all cursor-pointer flex flex-col justify-between"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
                       TOTAL PRODUCTOS
                     </span>
-                    <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
-                      <Package className="w-4 h-4" />
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
+                      <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </div>
                   </div>
-                  <div className="my-3">
-                    <span className="text-3xl font-black text-[#1A1918]">{totalProductos}</span>
+                  <div className="my-2 sm:my-3">
+                    <span className="text-2xl sm:text-3xl font-black text-[#1A1918]">{totalProductos}</span>
                   </div>
-                  <span className="text-[11px] font-bold text-[#C59A4D]">Ver catálogo completo →</span>
+                  <span className="text-[10px] sm:text-[11px] font-bold text-[#C59A4D]">Ver catálogo completo →</span>
                 </div>
 
                 {/* 2. Activos Visibles */}
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs flex flex-col justify-between">
+                <div className="bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#E5E9EE] shadow-xs flex flex-col justify-between">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
                       ACTIVOS (VISIBLES)
                     </span>
-                    <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600">
-                      <CheckCircle2 className="w-4 h-4" />
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600">
+                      <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </div>
                   </div>
-                  <div className="my-3">
-                    <span className="text-3xl font-black text-[#1A1918]">{activosVisibles}</span>
+                  <div className="my-2 sm:my-3">
+                    <span className="text-2xl sm:text-3xl font-black text-[#1A1918]">{activosVisibles}</span>
                   </div>
-                  <span className="text-[11px] font-bold text-emerald-600">
+                  <span className="text-[10px] sm:text-[11px] font-bold text-emerald-600">
                     {totalProductos > 0 ? Math.round((activosVisibles / totalProductos) * 100) : 100}% del total
                   </span>
                 </div>
@@ -1375,20 +1478,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 {/* 3. Categorías */}
                 <div
                   onClick={() => setActiveSection('categorias')}
-                  className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs hover:border-[#C59A4D]/50 transition-all cursor-pointer flex flex-col justify-between"
+                  className="bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#E5E9EE] shadow-xs hover:border-[#C59A4D]/50 transition-all cursor-pointer flex flex-col justify-between"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
                       CATEGORÍAS
                     </span>
-                    <div className="w-8 h-8 rounded-xl bg-amber-50 flex items-center justify-center text-[#C59A4D]">
-                      <Layers className="w-4 h-4" />
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-50 flex items-center justify-center text-[#C59A4D]">
+                      <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </div>
                   </div>
-                  <div className="my-3">
-                    <span className="text-3xl font-black text-[#1A1918]">{totalCategorias}</span>
+                  <div className="my-2 sm:my-3">
+                    <span className="text-2xl sm:text-3xl font-black text-[#1A1918]">{totalCategorias}</span>
                   </div>
-                  <span className="text-[11px] font-bold text-[#C59A4D]">Gestionar categorías →</span>
+                  <span className="text-[10px] sm:text-[11px] font-bold text-[#C59A4D]">Gestionar categorías →</span>
                 </div>
 
                 {/* 4. Stock Bajo */}
@@ -1397,20 +1500,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     setInventarioFilter('stock-bajo');
                     setActiveSection('inventario');
                   }}
-                  className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs hover:border-amber-400 transition-all cursor-pointer flex flex-col justify-between"
+                  className="bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#E5E9EE] shadow-xs hover:border-amber-400 transition-all cursor-pointer flex flex-col justify-between"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
                       STOCK BAJO
                     </span>
-                    <div className="w-8 h-8 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600">
-                      <AlertTriangle className="w-4 h-4" />
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600">
+                      <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </div>
                   </div>
-                  <div className="my-3">
-                    <span className="text-3xl font-black text-amber-600">{stockBajoCount}</span>
+                  <div className="my-2 sm:my-3">
+                    <span className="text-2xl sm:text-3xl font-black text-amber-600">{stockBajoCount}</span>
                   </div>
-                  <span className="text-[11px] font-bold text-amber-700">Requieren reposición</span>
+                  <span className="text-[10px] sm:text-[11px] font-bold text-amber-700">Requieren reposición</span>
                 </div>
 
                 {/* 5. Agotados */}
@@ -1419,20 +1522,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     setInventarioFilter('agotados');
                     setActiveSection('inventario');
                   }}
-                  className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs hover:border-rose-400 transition-all cursor-pointer flex flex-col justify-between"
+                  className="bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#E5E9EE] shadow-xs hover:border-rose-400 transition-all cursor-pointer flex flex-col justify-between"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
                       AGOTADOS
                     </span>
-                    <div className="w-8 h-8 rounded-xl bg-rose-50 flex items-center justify-center text-rose-600">
-                      <XCircle className="w-4 h-4" />
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-rose-50 flex items-center justify-center text-rose-600">
+                      <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </div>
                   </div>
-                  <div className="my-3">
-                    <span className="text-3xl font-black text-rose-600">{agotadosCount}</span>
+                  <div className="my-2 sm:my-3">
+                    <span className="text-2xl sm:text-3xl font-black text-rose-600">{agotadosCount}</span>
                   </div>
-                  <span className="text-[11px] font-bold text-rose-700">Sin existencias (0)</span>
+                  <span className="text-[10px] sm:text-[11px] font-bold text-rose-700">Sin existencias (0)</span>
                 </div>
               </div>
 
@@ -1764,14 +1867,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   />
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <button className="px-3.5 py-1.5 rounded-xl bg-[#141312] text-white text-xs font-bold">
+                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                  <button className="px-3 py-1.5 rounded-xl bg-[#141312] text-white text-xs font-bold">
                     Todas ({ventas.length})
                   </button>
-                  <button className="px-3.5 py-1.5 rounded-xl bg-[#F4F6F8] text-[#1A1918] text-xs font-bold">
+                  <button className="px-3 py-1.5 rounded-xl bg-[#F4F6F8] text-[#1A1918] text-xs font-bold">
                     Web Aprobadas
                   </button>
-                  <button className="px-3.5 py-1.5 rounded-xl bg-[#F4F6F8] text-[#1A1918] text-xs font-bold">
+                  <button className="px-3 py-1.5 rounded-xl bg-[#F4F6F8] text-[#1A1918] text-xs font-bold">
                     Manuales
                   </button>
                   <button
@@ -1792,7 +1895,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       setVentaManualMetodo('efectivo');
                       setIsModalVentaManualOpen(true);
                     }}
-                    className="px-4 py-2 rounded-xl bg-[#141312] hover:bg-black text-[#F5E6BE] text-xs font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all"
+                    className="px-3.5 sm:px-4 py-2 rounded-xl bg-[#141312] hover:bg-black text-[#F5E6BE] text-xs font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all"
                   >
                     <Plus className="w-3.5 h-3.5 text-[#C59A4D]" />
                     <span>+ REGISTRAR VENTA MANUAL</span>
@@ -1802,7 +1905,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               {/* Ventas Table or Empty state */}
               {ventas.length === 0 ? (
-                <div className="bg-white rounded-3xl p-12 border border-[#E5E9EE] text-center space-y-3">
+                <div className="bg-white rounded-3xl p-8 sm:p-12 border border-[#E5E9EE] text-center space-y-3">
                   <TrendingUp className="w-10 h-10 mx-auto text-[#C9BFB0]" />
                   <h3 className="font-extrabold text-[#1A1918]">
                     No se encontraron ventas registradas
@@ -1812,9 +1915,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </p>
                 </div>
               ) : (
-                <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
+                <div className="bg-white rounded-2xl sm:rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
+                    <table className="w-full min-w-[620px] text-left text-xs">
                       <thead className="bg-[#FAF8F5] border-b border-[#EAE5DC] text-[10px] font-black uppercase text-[#7A7368] tracking-wider">
                         <tr>
                           <th className="py-3.5 px-4">Código</th>
@@ -1964,7 +2067,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
+                    <table className="w-full min-w-[620px] text-left text-xs">
                       <thead className="bg-[#FAF8F5] border-b border-[#EAE5DC] text-[10px] font-black uppercase text-[#7A7368] tracking-wider">
                         <tr>
                           <th className="py-3.5 px-4">Concepto / Descripción</th>
@@ -2156,7 +2259,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {/* Tabla de Movimientos */}
               <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+                  <table className="w-full min-w-[700px] text-left text-xs">
                     <thead className="bg-[#FAF8F5] border-b border-[#EAE5DC] text-[10px] font-black uppercase text-[#7A7368] tracking-wider">
                       <tr>
                         <th className="py-3.5 px-5">FECHA Y HORA</th>
@@ -2407,19 +2510,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   .map((pedido) => (
                     <div
                       key={pedido.id || pedido.codigo}
-                      className="bg-white rounded-3xl p-6 border border-[#E5E9EE] shadow-xs space-y-4"
+                      className="bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-6 border border-[#E5E9EE] shadow-xs space-y-4"
                     >
                       {/* Order Header bar */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#F0EAE1] gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-2xl bg-[#141312] text-[#E6C687] flex items-center justify-center font-black text-xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 sm:pb-4 border-b border-[#F0EAE1] gap-2.5 sm:gap-3">
+                        <div className="flex items-center gap-2.5 sm:gap-3">
+                          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-[#141312] text-[#E6C687] flex items-center justify-center font-black text-xs shrink-0">
                             ALX
                           </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-black text-sm text-[#1A1918]">{pedido.codigo}</span>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                              <span className="font-black text-xs sm:text-sm text-[#1A1918]">{pedido.codigo}</span>
                               <span
-                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                                className={`px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase ${
                                   pedido.estado === 'pendiente'
                                     ? 'bg-amber-100 text-amber-900'
                                     : pedido.estado === 'aprobado' || pedido.estado === 'aceptado'
@@ -2432,27 +2535,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 {pedido.estado}
                               </span>
                             </div>
-                            <span className="text-[11px] text-[#7A7368]">
+                            <span className="text-[10px] sm:text-[11px] text-[#7A7368] block">
                               {pedido.creado_en ? new Date(pedido.creado_en).toLocaleString('es-PA') : 'Reciente'}
                             </span>
                           </div>
                         </div>
 
                         {/* Status selector & Direct Action buttons */}
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                           {pedido.estado !== 'aprobado' && pedido.estado !== 'entregado' && (
                             <button
                               type="button"
                               disabled={orderActionLoadingId === (pedido.id || pedido.codigo)}
                               onClick={() => handleAprobarPedido(pedido)}
-                              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] sm:text-xs flex items-center gap-1 shadow-sm transition-all active:scale-95 cursor-pointer disabled:opacity-50"
                               title="Aceptar pedido: descuenta stock automáticamente de inventario y registra la venta en Ventas"
                             >
                               <Check className="w-3.5 h-3.5 stroke-[3]" />
                               <span>
                                 {orderActionLoadingId === (pedido.id || pedido.codigo)
                                   ? 'Aceptando...'
-                                  : 'ACEPTAR PEDIDO'}
+                                  : 'ACEPTAR'}
                               </span>
                             </button>
                           )}
@@ -2462,7 +2565,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               type="button"
                               disabled={orderActionLoadingId === (pedido.id || pedido.codigo)}
                               onClick={() => handleRechazarPedido(pedido)}
-                              className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-extrabold text-xs flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                              className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-extrabold text-[11px] sm:text-xs flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
                               title="Rechazar pedido"
                             >
                               <XCircle className="w-3.5 h-3.5" />
@@ -2475,7 +2578,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             onChange={(e) =>
                               handleUpdateOrderStatus(pedido.id || '', e.target.value)
                             }
-                            className="bg-[#FAF8F5] text-xs font-bold text-[#1A1918] px-3 py-1.5 rounded-xl border border-[#E5DFD5] focus:outline-none"
+                            className="bg-[#FAF8F5] text-[11px] sm:text-xs font-bold text-[#1A1918] px-2.5 py-1.5 rounded-xl border border-[#E5DFD5] focus:outline-none"
                           >
                             <option value="pendiente">Pendiente</option>
                             <option value="aprobado">Aprobado</option>
@@ -2487,17 +2590,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           <button
                             type="button"
                             onClick={() => handleEliminarPedido(pedido.id || pedido.codigo, pedido.codigo)}
-                            className="px-2.5 py-1.5 rounded-xl text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                            className="px-2 py-1.5 rounded-xl text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 font-bold text-[11px] sm:text-xs flex items-center gap-1 transition-colors cursor-pointer"
                             title="Eliminar este pedido permanentemente"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
-                            <span>Eliminar</span>
+                            <span className="hidden sm:inline">Eliminar</span>
                           </button>
                         </div>
                       </div>
 
                       {/* 3 Columns details */}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs">
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 text-xs">
                         {/* Col 1: Datos del Cliente */}
                         <div className="space-y-1.5">
                           <span className="text-[10px] font-black uppercase text-[#9C9488] block">
@@ -2884,7 +2987,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {/* Table (Image 5) */}
               <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+                  <table className="w-full min-w-[650px] text-left text-xs">
                     <thead className="bg-[#FAF8F5] border-b border-[#E5E9EE] text-[#7A7368] font-bold uppercase tracking-wider text-[10px]">
                       <tr>
                         <th className="py-4 px-6">PRODUCTO</th>
@@ -3141,7 +3244,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   />
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                   {(['todos', 'disponibles', 'stock-bajo', 'agotados'] as const).map((tab) => (
                     <button
                       key={tab}
@@ -3508,33 +3611,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              {/* Tarjeta Directa para Guardar Usuario de Supabase Authentication */}
+              {/* Tarjeta Directa para Crear Usuario en Supabase Authentication */}
               <div className="bg-[#141312] text-white rounded-3xl p-6 sm:p-7 border border-[#2B2722] shadow-xl space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#26221E]">
                   <div>
                     <h3 className="text-base font-black text-white flex items-center gap-2">
                       <KeyRound className="w-4 h-4 text-[#C59A4D]" />
-                      <span>Guardar Usuario de Supabase Authentication como Dueño o Trabajador</span>
+                      <span>Crear Usuario Directo en Supabase Authentication</span>
                     </h3>
                     <p className="text-xs text-[#A69F93] mt-1">
-                      ¿Creaste una cuenta con correo y contraseña en el menú <code className="text-[#E6C687] font-mono">Authentication</code> de Supabase? Ingresa el correo aquí para guardarlo como <strong>Dueño / Admin</strong> o como <strong>Trabajador</strong>.
+                      Crea usuarios directamente desde aquí: se guardan en <strong>Authentication</strong> y en la base de datos con el rol que elijas (<strong>👑 Dueño</strong> o <strong>💼 Trabajador</strong>) para iniciar sesión al instante.
                     </p>
                   </div>
-                  <span className="px-3 py-1 rounded-xl bg-[#26221E] text-[#E6C687] text-[11px] font-mono border border-[#3A332B] self-start sm:self-auto">
-                    Sincronización Inmediata
+                  <span className="px-3 py-1 rounded-xl bg-emerald-500/10 text-emerald-400 text-[11px] font-mono border border-emerald-500/30 self-start sm:self-auto flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Supabase Auth Activo
                   </span>
                 </div>
 
                 <form onSubmit={handleGuardarUsuarioAuthDirecto} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
                   {/* Correo */}
-                  <div className="md:col-span-5 space-y-1">
+                  <div className="md:col-span-4 space-y-1">
                     <label className="text-[11px] font-bold text-[#A69F93] block">
-                      CORREO ELECTRÓNICO (REGISTRADO EN AUTHENTICATION):
+                      CORREO ELECTRÓNICO (LOGIN):
                     </label>
                     <input
                       type="email"
                       required
-                      placeholder="ej: pedro76porro@gmail.com"
+                      placeholder="ej: trabajador@alexstore.com"
                       value={authEmailInput}
                       onChange={(e) => setAuthEmailInput(e.target.value)}
                       className="w-full bg-[#1C1A17] text-xs text-white placeholder-[#6E685F] px-4 py-2.5 rounded-xl border border-[#2D2822] focus:outline-none focus:border-[#C59A4D]"
@@ -3544,43 +3648,237 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   {/* Nombre */}
                   <div className="md:col-span-3 space-y-1">
                     <label className="text-[11px] font-bold text-[#A69F93] block">
-                      NOMBRE DEL USUARIO:
+                      NOMBRE DEL COLABORADOR:
                     </label>
                     <input
                       type="text"
-                      placeholder="Ej: Pedro Porro"
+                      required
+                      placeholder="Ej: Daniel Martínez"
                       value={authNombreInput}
                       onChange={(e) => setAuthNombreInput(e.target.value)}
                       className="w-full bg-[#1C1A17] text-xs text-white placeholder-[#6E685F] px-4 py-2.5 rounded-xl border border-[#2D2822] focus:outline-none focus:border-[#C59A4D]"
                     />
                   </div>
 
+                  {/* Contraseña */}
+                  <div className="md:col-span-3 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-[#A69F93] block">
+                        CONTRASEÑA:
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleGenerateAuthPassword}
+                        className="text-[10px] text-[#C59A4D] hover:underline flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <Sparkles className="w-2.5 h-2.5" />
+                        <span>Generar</span>
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={authShowPassword ? 'text' : 'password'}
+                        required
+                        placeholder="Mín. 6 caracteres"
+                        value={authPasswordInput}
+                        onChange={(e) => setAuthPasswordInput(e.target.value)}
+                        className="w-full bg-[#1C1A17] text-xs text-white placeholder-[#6E685F] pl-3 pr-8 py-2.5 rounded-xl border border-[#2D2822] focus:outline-none focus:border-[#C59A4D] font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setAuthShowPassword(!authShowPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#A69F93] hover:text-white p-0.5 cursor-pointer"
+                        title={authShowPassword ? 'Ocultar' : 'Ver'}
+                      >
+                        {authShowPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Selector de Rol */}
                   <div className="md:col-span-2 space-y-1">
                     <label className="text-[11px] font-bold text-[#A69F93] block">
-                      GUARDAR COMO:
+                      ROL A ASIGNAR:
                     </label>
                     <select
                       value={authRolSelected}
                       onChange={(e) => setAuthRolSelected(e.target.value as UserRole)}
                       className="w-full bg-[#1C1A17] text-xs font-bold text-[#E6C687] px-3 py-2.5 rounded-xl border border-[#2D2822] focus:outline-none focus:border-[#C59A4D]"
                     >
-                      <option value="dueno">👑 Dueño / Admin</option>
                       <option value="cajero">💼 Trabajador</option>
+                      <option value="dueno">👑 Dueño / Admin</option>
                     </select>
                   </div>
 
-                  {/* Botón Guardar */}
-                  <div className="md:col-span-2">
+                  {/* Botón Guardar / Crear */}
+                  <div className="md:col-span-12 pt-1 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                    <span className="text-[11px] text-[#8C8375]">
+                      ¿La cuenta ya existía previamente en Supabase? Deja la contraseña en blanco para solo vincular el rol.
+                    </span>
                     <button
                       type="submit"
                       disabled={savingAuthRole}
-                      className="w-full py-2.5 px-3 rounded-xl bg-[#C59A4D] hover:bg-[#D4A95B] text-black font-black text-xs uppercase tracking-wider transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
+                      className="w-full sm:w-auto py-2.5 px-6 rounded-xl bg-[#C59A4D] hover:bg-[#D4A95B] text-black font-black text-xs uppercase tracking-wider transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2 shrink-0"
                     >
-                      {savingAuthRole ? 'GUARDANDO...' : 'GUARDAR ROL'}
+                      <UserPlus className="w-3.5 h-3.5 text-black" />
+                      <span>{savingAuthRole ? 'CREANDO EN SUPABASE...' : 'CREAR USUARIO EN SUPABASE AUTH'}</span>
                     </button>
                   </div>
                 </form>
+              </div>
+
+              {/* Tarjeta de Capacidad y Espacio en Supabase (Storage & Tablas) */}
+              <div className="bg-[#141312] text-white rounded-3xl p-6 sm:p-7 border border-[#2B2722] shadow-xl space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#26221E]">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-[#C59A4D] flex items-center gap-1.5">
+                      <Database className="w-3.5 h-3.5" />
+                      ESTADO DE ALMACENAMIENTO & ESPACIO DISPONIBLE (SUPABASE)
+                    </span>
+                    <h3 className="text-base font-black text-white font-heading mt-0.5">
+                      Capacidad Restante en Storage y en Tablas de Base de Datos
+                    </h3>
+                  </div>
+                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                    <button
+                      onClick={reloadAllData}
+                      className="px-3 py-1.5 rounded-xl bg-[#26221E] hover:bg-[#322C27] text-white text-xs font-bold flex items-center gap-1.5 border border-[#3A332B] transition-colors cursor-pointer"
+                      title="Actualizar mediciones"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                      <span>Actualizar Métricas</span>
+                    </button>
+                    <button
+                      onClick={() => setIsModalSqlAuthOpen(true)}
+                      className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-[#E6C687] text-xs font-bold flex items-center gap-1.5 border border-amber-500/30 transition-colors cursor-pointer"
+                      title="Ver consultas SQL de tamaño"
+                    >
+                      <Database className="w-3.5 h-3.5 text-[#C59A4D]" />
+                      <span>Ver SQL de Tablas</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* 1. Storage de Archivos (Fotos & Comprobantes) */}
+                  <div className="p-4 rounded-2xl bg-[#1C1A17] border border-[#2E2822] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-[#C59A4D]/20 text-[#C59A4D] flex items-center justify-center font-bold">
+                          <UploadCloud className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-extrabold text-white block">Storage de Archivos (Fotos y Recibos)</span>
+                          <span className="text-[10px] text-[#A69F93]">Límite gratuito Supabase: 1,024 MB (1.00 GB)</span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs font-black text-white block">{metricasEspacio.mbStorageUsado} MB / {metricasEspacio.mbStorageTotal} MB</span>
+                        <span className="text-[10px] text-emerald-400 font-bold">{metricasEspacio.mbStorageLibre} MB libres ({((metricasEspacio.mbStorageLibre / metricasEspacio.mbStorageTotal) * 100).toFixed(1)}%)</span>
+                      </div>
+                    </div>
+
+                    <div className="w-full bg-[#2A251F] h-2.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-[#C59A4D] h-full rounded-full transition-all duration-500"
+                        style={{ width: `${Math.max(2, metricasEspacio.porcentajeStorageUsado)}%` }}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
+                      <div className="bg-[#141312] p-2.5 rounded-xl border border-[#26221E]">
+                        <span className="text-[#8C8375] block text-[10px]">Fotos de Productos:</span>
+                        <strong className="text-white font-extrabold block">{metricasEspacio.totalFotosProductos} fotos</strong>
+                        <span className="text-[9px] text-emerald-400">~{metricasEspacio.productosRestantesEstimados.toLocaleString()} fotos más restantes</span>
+                      </div>
+                      <div className="bg-[#141312] p-2.5 rounded-xl border border-[#26221E]">
+                        <span className="text-[#8C8375] block text-[10px]">Comprobantes de Pago:</span>
+                        <strong className="text-white font-extrabold block">{metricasEspacio.totalComprobantes} recibos</strong>
+                        <span className="text-[9px] text-emerald-400">~{metricasEspacio.fotosRestantesEstimadas.toLocaleString()} comprobantes más</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 2. Base de Datos PostgreSQL (Tablas y Filas) */}
+                  <div className="p-4 rounded-2xl bg-[#1C1A17] border border-[#2E2822] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold">
+                          <Database className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-extrabold text-white block">Base de Datos PostgreSQL (Tablas)</span>
+                          <span className="text-[10px] text-[#A69F93]">Límite gratuito Supabase: 500 MB</span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs font-black text-white block">{metricasEspacio.mbBaseDatosUsado} MB / {metricasEspacio.mbBaseDatosTotal} MB</span>
+                        <span className="text-[10px] text-emerald-400 font-bold">{metricasEspacio.mbBaseDatosLibre} MB libres ({((metricasEspacio.mbBaseDatosLibre / metricasEspacio.mbBaseDatosTotal) * 100).toFixed(1)}%)</span>
+                      </div>
+                    </div>
+
+                    <div className="w-full bg-[#2A251F] h-2.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-sky-500 h-full rounded-full transition-all duration-500"
+                        style={{ width: `${Math.max(2, metricasEspacio.porcentajeBaseDatosUsado)}%` }}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
+                      <div className="bg-[#141312] p-2.5 rounded-xl border border-[#26221E]">
+                        <span className="text-[#8C8375] block text-[10px]">Filas Totales en Tablas:</span>
+                        <strong className="text-sky-400 font-extrabold block">{metricasEspacio.totalFilasTablas} registros</strong>
+                        <span className="text-[9px] text-[#A69F93]">Pedidos, ventas, gastos, etc.</span>
+                      </div>
+                      <div className="bg-[#141312] p-2.5 rounded-xl border border-[#26221E]">
+                        <span className="text-[#8C8375] block text-[10px]">Capacidad Restante:</span>
+                        <strong className="text-emerald-400 font-extrabold block">{(100 - metricasEspacio.porcentajeBaseDatosUsado).toFixed(1)}% disponible</strong>
+                        <span className="text-[9px] text-emerald-300">Capacidad para +500,000 pedidos</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Desglose de Filas por Tabla */}
+                <div className="pt-2 border-t border-[#26221E]">
+                  <span className="text-[10px] font-black uppercase text-[#8C8375] tracking-wider block mb-2">
+                    CONTEO DE FILAS EN TIEMPO REAL POR TABLA:
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 text-center text-xs">
+                    <div className="p-2 rounded-xl bg-[#1C1A17] border border-[#2E2822]">
+                      <span className="text-[10px] text-[#8C8375] block">📦 Productos</span>
+                      <strong className="text-white font-extrabold">{productos.length}</strong>
+                    </div>
+                    <div className="p-2 rounded-xl bg-[#1C1A17] border border-[#2E2822]">
+                      <span className="text-[10px] text-[#8C8375] block">🏷️ Categorías</span>
+                      <strong className="text-white font-extrabold">{categorias.length}</strong>
+                    </div>
+                    <div className="p-2 rounded-xl bg-[#1C1A17] border border-[#2E2822]">
+                      <span className="text-[10px] text-[#8C8375] block">📋 Pedidos</span>
+                      <strong className="text-white font-extrabold">{pedidos.length}</strong>
+                    </div>
+                    <div className="p-2 rounded-xl bg-[#1C1A17] border border-[#2E2822]">
+                      <span className="text-[10px] text-[#8C8375] block">💰 Ventas</span>
+                      <strong className="text-white font-extrabold">{ventas.length}</strong>
+                    </div>
+                    <div className="p-2 rounded-xl bg-[#1C1A17] border border-[#2E2822]">
+                      <span className="text-[10px] text-[#8C8375] block">📉 Gastos</span>
+                      <strong className="text-white font-extrabold">{gastos.length}</strong>
+                    </div>
+                    <div className="p-2 rounded-xl bg-[#1C1A17] border border-[#2E2822]">
+                      <span className="text-[10px] text-[#8C8375] block">📊 Inventario</span>
+                      <strong className="text-white font-extrabold">{productos.length}</strong>
+                    </div>
+                    <div className="p-2 rounded-xl bg-[#1C1A17] border border-[#2E2822]">
+                      <span className="text-[10px] text-[#8C8375] block">👥 Usuarios</span>
+                      <strong className="text-white font-extrabold">{usuarios.length}</strong>
+                    </div>
+                    <div className="p-2 rounded-xl bg-[#1C1A17] border border-[#2E2822]">
+                      <span className="text-[10px] text-[#8C8375] block">🛡️ Auditoría</span>
+                      <strong className="text-white font-extrabold">{movimientos.length}</strong>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Filtros */}
@@ -3816,7 +4114,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-2xl bg-white rounded-3xl p-5 sm:p-6 space-y-4 shadow-2xl border border-[#E5DFD5] overflow-hidden"
+            className="relative w-full max-w-2xl bg-white rounded-3xl p-4 sm:p-6 space-y-4 shadow-2xl border border-[#E5DFD5] max-h-[92dvh] overflow-y-auto"
           >
             {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-[#F0EAE1]">
@@ -3981,7 +4279,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* Modal Registrar Gasto */}
       {isModalGastoOpen && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-4 sm:space-y-5 border border-[#E5DFD5] shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto my-auto">
+          <div className="bg-white rounded-3xl w-full max-w-md p-4 sm:p-6 space-y-4 sm:space-y-5 border border-[#E5DFD5] shadow-2xl animate-fade-in max-h-[90dvh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between pb-3 border-b border-[#F0EAE1]">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
@@ -4091,7 +4389,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* Modal Registrar Venta Manual (con opción de Efectivo exclusiva) */}
       {isModalVentaManualOpen && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl w-full max-w-lg p-5 sm:p-6 space-y-4 sm:space-y-5 border border-[#E5DFD5] shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto my-auto">
+          <div className="bg-white rounded-3xl w-full max-w-lg p-4 sm:p-6 space-y-4 sm:space-y-5 border border-[#E5DFD5] shadow-2xl animate-fade-in max-h-[90dvh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between pb-3 border-b border-[#F0EAE1]">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
@@ -4202,47 +4500,125 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="font-extrabold text-[#1A1918] block mb-1">
-                    Monto Total en USD ($) *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    required
-                    placeholder="0.00"
-                    value={ventaManualMonto}
-                    onChange={(e) => setVentaManualMonto(e.target.value)}
-                    className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] font-black text-sm"
-                  />
-                </div>
+              {/* Producto Asociado y control de existencias */}
+              <div>
+                <label className="font-extrabold text-[#1A1918] block mb-1">
+                  Producto Asociado (Opcional)
+                </label>
+                <select
+                  value={ventaManualProductoId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setVentaManualProductoId(id);
+                    setVentaManualVarianteId('');
+                    const prod = productos.find((p) => p.id === id);
+                    if (prod) {
+                      const qty = Math.max(1, parseInt(ventaManualCantidad) || 1);
+                      setVentaManualMonto((prod.precio * qty).toFixed(2));
+                    }
+                  }}
+                  className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                >
+                  <option value="">Ninguno / Venta libre</option>
+                  {productos.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nombre} (${p.precio}) - Stock: {p.stock ?? 0}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-                <div>
-                  <label className="font-extrabold text-[#1A1918] block mb-1">
-                    Producto Asociado (Opcional)
-                  </label>
-                  <select
-                    value={ventaManualProductoId}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      setVentaManualProductoId(id);
-                      const prod = productos.find((p) => p.id === id);
-                      if (prod && (!ventaManualMonto || parseFloat(ventaManualMonto) <= 0)) {
-                        setVentaManualMonto(String(prod.precio));
-                      }
-                    }}
-                    className="w-full bg-[#FAF8F5] px-3 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none"
-                  >
-                    <option value="">Ninguno / Venta libre</option>
-                    {productos.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.nombre} (${p.precio})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              {/* Si hay un producto seleccionado, mostrar detalles de inventario, variantes y cantidad */}
+              {(() => {
+                const selectedProd = productos.find((p) => p.id === ventaManualProductoId);
+                if (!selectedProd) return null;
+
+                const stockActual = selectedProd.stock ?? 0;
+                const hasVariantes = Array.isArray(selectedProd.variantes) && selectedProd.variantes.length > 0;
+
+                return (
+                  <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-amber-200/80 space-y-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-[#1A1918]">Inventario disponible:</span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full font-black text-[11px] ${
+                          stockActual <= 0
+                            ? 'bg-rose-100 text-rose-800'
+                            : stockActual < 5
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-emerald-100 text-emerald-800'
+                        }`}
+                      >
+                        {stockActual} unidades disponibles
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="font-extrabold text-[#1A1918] block mb-1">
+                          Cantidad a vender *
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          required
+                          value={ventaManualCantidad}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setVentaManualCantidad(val);
+                            const parsed = parseInt(val) || 1;
+                            setVentaManualMonto((selectedProd.precio * Math.max(1, parsed)).toFixed(2));
+                          }}
+                          className="w-full bg-white px-3 py-2 rounded-xl border border-amber-300 focus:outline-none font-black text-sm"
+                        />
+                        <span className="text-[10px] text-[#7A7368] mt-0.5 block">
+                          Precio unitario: ${selectedProd.precio.toFixed(2)}
+                        </span>
+                      </div>
+
+                      {hasVariantes && (
+                        <div>
+                          <label className="font-extrabold text-[#1A1918] block mb-1">
+                            Talla / Variante
+                          </label>
+                          <select
+                            value={ventaManualVarianteId}
+                            onChange={(e) => setVentaManualVarianteId(e.target.value)}
+                            className="w-full bg-white px-3 py-2 rounded-xl border border-amber-300 focus:outline-none text-xs"
+                          >
+                            <option value="">Estándar / Todas</option>
+                            {selectedProd.variantes?.map((v: any) => (
+                              <option key={v.id || v.titulo} value={v.id || v.titulo}>
+                                {v.titulo || v.nombre} (Stock: {v.stock ?? stockActual})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="text-[11px] text-amber-900 font-medium flex items-center gap-1.5">
+                      <span>📉</span>
+                      <span>Se descontará automáticamente del inventario y del stock del producto al guardar.</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div>
+                <label className="font-extrabold text-[#1A1918] block mb-1">
+                  Monto Total en USD ($) *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  required
+                  placeholder="0.00"
+                  value={ventaManualMonto}
+                  onChange={(e) => setVentaManualMonto(e.target.value)}
+                  className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] font-black text-base"
+                />
               </div>
 
               <div>

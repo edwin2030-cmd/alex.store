@@ -510,7 +510,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-md">
       {/* Centering wrapper that allows natural top-to-bottom scroll without clipping inputs */}
       <div className="min-h-full flex items-start justify-center p-2.5 sm:p-6 py-4 sm:py-10">
-        <div className="relative w-full max-w-2xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-[#E5DFD5] overflow-hidden my-auto animate-fade-in">
+        <div className="relative w-full max-w-2xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-[#E5DFD5] max-h-[92dvh] overflow-y-auto my-auto animate-fade-in">
           {/* Modal Header */}
           <div className="p-4 sm:p-7 border-b border-[#F0EAE1] flex items-start justify-between gap-3 bg-[#FCFAF7]">
             <div>

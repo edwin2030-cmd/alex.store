@@ -361,6 +361,33 @@ CREATE POLICY "Acceso total a inventario" ON public.inventario FOR ALL USING (tr
 ALTER TABLE public.categorias ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Acceso total a categorias" ON public.categorias;
 CREATE POLICY "Acceso total a categorias" ON public.categorias FOR ALL USING (true) WITH CHECK (true);
+
+-- ==============================================================================
+-- 10. TABLA USUARIOS Y CONSULTA DE ESPACIO EN DISCO (BASE DE DATOS Y STORAGE)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.usuarios (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT NOT NULL UNIQUE,
+  nombre TEXT NOT NULL,
+  rol TEXT NOT NULL DEFAULT 'cajero',
+  activo BOOLEAN NOT NULL DEFAULT true,
+  creado_por TEXT DEFAULT 'Dueño',
+  actualizado_por TEXT,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT now(),
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.usuarios ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Acceso total a usuarios" ON public.usuarios;
+CREATE POLICY "Acceso total a usuarios" ON public.usuarios FOR ALL USING (true) WITH CHECK (true);
+GRANT ALL ON public.usuarios TO anon, authenticated;
+
+-- Consulta para verificar tamaño exacto de tus tablas en el SQL Editor de Supabase:
+-- SELECT table_name AS tabla,
+--        pg_size_pretty(pg_total_relation_size(quote_ident(table_name))) AS tamano_en_disco
+-- FROM information_schema.tables 
+-- WHERE table_schema = 'public' 
+-- ORDER BY pg_total_relation_size(quote_ident(table_name)) DESC;
 `;
 
   const handleCopy = () => {
@@ -382,7 +409,7 @@ CREATE POLICY "Acceso total a categorias" ON public.categorias FOR ALL USING (tr
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm">
       <div className="min-h-full flex items-center justify-center p-3 sm:p-4 py-8">
-        <div className="relative w-full max-w-3xl bg-[#141312] text-white rounded-3xl p-6 sm:p-8 shadow-2xl border border-[#2D2822] space-y-6 my-auto animate-fade-in">
+        <div className="relative w-full max-w-3xl bg-[#141312] text-white rounded-3xl p-4 sm:p-8 shadow-2xl border border-[#2D2822] space-y-5 sm:space-y-6 my-auto animate-fade-in max-h-[92dvh] overflow-y-auto">
           {/* Header */}
           <div className="flex items-start justify-between pb-4 border-b border-[#26221E]">
             <div className="flex items-center gap-3">

@@ -75,7 +75,7 @@ export const ModalEditarRol: React.FC<ModalEditarRolProps> = ({
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm">
       <div className="min-h-full flex items-center justify-center p-3 sm:p-4 py-8">
-        <div className="relative w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 shadow-2xl border border-[#E5DFD5] space-y-6 my-auto animate-fade-in">
+        <div className="relative w-full max-w-md bg-white rounded-3xl p-4 sm:p-8 shadow-2xl border border-[#E5DFD5] space-y-5 sm:space-y-6 my-auto animate-fade-in max-h-[92dvh] overflow-y-auto">
           {/* Header */}
           <div className="flex items-start justify-between pb-4 border-b border-[#F0EAE1]">
             <div className="flex items-center gap-3">
@@ -185,18 +185,18 @@ export const ModalEditarRol: React.FC<ModalEditarRolProps> = ({
               />
             </div>
 
-            <div className="pt-3 border-t border-[#F0EAE1] flex items-center justify-end gap-2.5">
+            <div className="pt-3 border-t border-[#F0EAE1] flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-2.5">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2.5 rounded-xl text-xs font-bold text-[#7A7368] hover:text-[#1A1918] cursor-pointer"
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold text-[#7A7368] hover:text-[#1A1918] cursor-pointer text-center"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="px-6 py-2.5 rounded-xl bg-[#141312] hover:bg-black text-[#E6C687] text-xs font-black uppercase tracking-wider disabled:opacity-50 cursor-pointer shadow-sm"
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-[#141312] hover:bg-black text-[#E6C687] text-xs font-black uppercase tracking-wider disabled:opacity-50 cursor-pointer shadow-sm text-center justify-center"
               >
                 {loading ? 'Guardando...' : 'Guardar Cambios'}
               </button>

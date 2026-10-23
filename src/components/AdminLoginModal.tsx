@@ -207,7 +207,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/90 backdrop-blur-md">
       <div className="min-h-full flex items-center justify-center p-3 sm:p-4 py-4 sm:py-8">
-        <div className="relative w-full max-w-md bg-[#131211] border border-[#26221E] rounded-3xl p-5 sm:p-8 shadow-2xl space-y-4 sm:space-y-5 my-auto animate-fade-in">
+        <div className="relative w-full max-w-md bg-[#131211] border border-[#26221E] rounded-3xl p-4 sm:p-8 shadow-2xl space-y-4 sm:space-y-5 my-auto animate-fade-in max-h-[92dvh] overflow-y-auto">
           {/* Botón cerrar */}
           <button
             onClick={onClose}

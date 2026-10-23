@@ -229,7 +229,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
           {/* Footer Checkout Summary */}
           {items.length > 0 && (
-            <div className="p-4 sm:p-6 border-t border-[#EFEAE2] bg-[#FAF8F5] space-y-3 sm:space-y-4">
+            <div className="p-4 sm:p-6 pb-6 sm:pb-6 border-t border-[#EFEAE2] bg-[#FAF8F5] space-y-3 sm:space-y-4 pb-safe">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] sm:text-xs font-black tracking-wider uppercase text-[#7A7368]">
                   TOTAL DEL PEDIDO
@@ -241,9 +241,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
               <button
                 onClick={() => onProceedToCheckout()}
-                className="w-full py-3.5 sm:py-4 rounded-2xl bg-[#141312] hover:bg-black text-white font-extrabold text-[11px] sm:text-xs tracking-wider uppercase flex items-center justify-center gap-2 shadow-xl transition-all active:scale-98 cursor-pointer"
+                className="w-full py-3.5 sm:py-4 px-3 rounded-2xl bg-[#141312] hover:bg-black text-white font-extrabold text-[10px] sm:text-xs tracking-wider uppercase flex items-center justify-center gap-2 shadow-xl transition-all active:scale-98 cursor-pointer text-center leading-tight"
               >
-                <Landmark className="w-4 h-4 text-[#E6C687]" />
+                <Landmark className="w-4 h-4 text-[#E6C687] shrink-0" />
                 <span>FINALIZAR PEDIDO (TRANSFERENCIA / YAPPY)</span>
               </button>
             </div>

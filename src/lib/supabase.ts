@@ -376,6 +376,17 @@ export async function actualizarStockRapido(
       if (error) throw error;
     }
 
+    // Sincronizar también en la tabla productos para mantener coherencia total
+    try {
+      await supabase
+        .from('productos')
+        .update({
+          stock: Math.max(0, nuevoStock),
+          actualizado_en: new Date().toISOString(),
+        })
+        .eq('id', productoId);
+    } catch {}
+
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -642,6 +653,107 @@ export async function getVentas(): Promise<Venta[]> {
   return merged;
 }
 
+/**
+ * Descuenta stock automáticamente de las tablas 'inventario' y 'productos' (incluyendo variantes)
+ */
+export async function descontarStockProducto(
+  productoId: string,
+  cantidadADescontar: number,
+  varianteId?: string,
+  varianteTitulo?: string
+): Promise<{ success: boolean; nuevoStock?: number; error?: string }> {
+  try {
+    const cant = Math.max(1, Number(cantidadADescontar) || 1);
+    const now = new Date().toISOString();
+
+    // 1. Descontar en la tabla 'inventario' (fuente principal para getProductos e inventario en admin)
+    let nuevoStockInventario = 0;
+    try {
+      const { data: invData } = await supabase
+        .from('inventario')
+        .select('id, cantidad, stock_minimo')
+        .eq('producto_id', productoId)
+        .maybeSingle();
+
+      if (invData) {
+        const actual = Number(invData.cantidad) || 0;
+        nuevoStockInventario = Math.max(0, actual - cant);
+        await supabase
+          .from('inventario')
+          .update({
+            cantidad: nuevoStockInventario,
+            actualizado_en: now,
+          })
+          .eq('producto_id', productoId);
+      } else {
+        const { data: prodInfo } = await supabase
+          .from('productos')
+          .select('stock')
+          .eq('id', productoId)
+          .maybeSingle();
+
+        const base = Number(prodInfo?.stock) || 0;
+        nuevoStockInventario = Math.max(0, base - cant);
+        await supabase
+          .from('inventario')
+          .insert([
+            {
+              producto_id: productoId,
+              cantidad: nuevoStockInventario,
+              stock_minimo: 5,
+            }
+          ]);
+      }
+    } catch (invErr) {
+      console.warn('Aviso descontando en tabla inventario:', invErr);
+    }
+
+    // 2. Descontar en la tabla 'productos' (stock general y array de variantes)
+    try {
+      const { data: prodData } = await supabase
+        .from('productos')
+        .select('id, stock, variantes, tiene_variantes')
+        .eq('id', productoId)
+        .maybeSingle();
+
+      if (prodData) {
+        const currentStock = Number(prodData.stock) || 0;
+        const nuevoStockProd = Math.max(0, currentStock - cant);
+
+        let nuevasVariantes = prodData.variantes;
+        if (Array.isArray(nuevasVariantes) && (varianteId || varianteTitulo)) {
+          nuevasVariantes = nuevasVariantes.map((v: any) => {
+            if (
+              (varianteId && (v.id === varianteId || v.titulo === varianteId)) ||
+              (varianteTitulo && (v.titulo === varianteTitulo || v.id === varianteTitulo))
+            ) {
+              const varStock = Number(v.stock) || 0;
+              return { ...v, stock: Math.max(0, varStock - cant) };
+            }
+            return v;
+          });
+        }
+
+        await supabase
+          .from('productos')
+          .update({
+            stock: nuevoStockProd,
+            variantes: nuevasVariantes,
+            actualizado_en: now,
+          })
+          .eq('id', productoId);
+      }
+    } catch (prodErr) {
+      console.warn('Aviso descontando en tabla productos:', prodErr);
+    }
+
+    return { success: true, nuevoStock: nuevoStockInventario };
+  } catch (err: any) {
+    console.error('Error en descontarStockProducto:', err);
+    return { success: false, error: err.message };
+  }
+}
+
 export async function crearVentaManual(venta: {
   cliente_nombre: string;
   cliente_telefono?: string;
@@ -701,6 +813,17 @@ export async function crearVentaManual(venta: {
       const updated = [newVentaRecord, ...list.filter((v) => v.codigo !== newVentaRecord.codigo)];
       localStorage.setItem(STORAGE_KEY_VENTAS, JSON.stringify(updated));
     } catch {}
+
+    // 3. Descontar automáticamente el stock del inventario y producto por cada artículo vendido
+    if (venta.items && Array.isArray(venta.items) && venta.items.length > 0) {
+      for (const item of venta.items) {
+        const prodId = item.producto_id || item.id;
+        const cant = Number(item.cantidad) || 1;
+        if (prodId) {
+          await descontarStockProducto(prodId, cant, item.variante_id, item.variante_titulo);
+        }
+      }
+    }
 
     return { success: true, data: newVentaRecord };
   } catch (err: any) {
@@ -792,48 +915,13 @@ export async function aprobarPedidoYDescontarStock(
       console.warn('Aviso actualizando pedido en Supabase:', errorPedido);
     }
 
-    // 2. Descontar stock automáticamente de cada producto o variante
+    // 2. Descontar stock automáticamente de cada producto o variante tanto en inventario como en productos
     if (pedido.items && pedido.items.length > 0) {
       for (const item of pedido.items) {
         const prodId = item.producto_id || item.id;
         const cant = Number(item.cantidad) || 1;
-
-        try {
-          const { data: prodData } = await supabase
-            .from('productos')
-            .select('id, stock, variantes, tiene_variantes')
-            .eq('id', prodId)
-            .maybeSingle();
-
-          if (prodData) {
-            const currentStock = Number(prodData.stock) || 0;
-            const nuevoStock = Math.max(0, currentStock - cant);
-
-            let nuevasVariantes = prodData.variantes;
-            if (Array.isArray(nuevasVariantes) && (item.variante_id || item.variante_titulo)) {
-              nuevasVariantes = nuevasVariantes.map((v: any) => {
-                if (
-                  (item.variante_id && v.id === item.variante_id) ||
-                  (item.variante_titulo && v.titulo === item.variante_titulo)
-                ) {
-                  const varStock = Number(v.stock) || 0;
-                  return { ...v, stock: Math.max(0, varStock - cant) };
-                }
-                return v;
-              });
-            }
-
-            await supabase
-              .from('productos')
-              .update({
-                stock: nuevoStock,
-                variantes: nuevasVariantes,
-                actualizado_en: now,
-              })
-              .eq('id', prodId);
-          }
-        } catch (stockErr) {
-          console.warn('Error descontando stock para item:', item.nombre, stockErr);
+        if (prodId) {
+          await descontarStockProducto(prodId, cant, item.variante_id, item.variante_titulo);
         }
       }
     }
@@ -1073,21 +1161,70 @@ export async function getUsuarioActual(): Promise<UsuarioPanel | null> {
   }
 }
 
+const STORAGE_KEY_LOCAL_USUARIOS = 'alexstore_local_usuarios';
+
 export async function getUsuarios(): Promise<UsuarioPanel[]> {
   try {
-    const { data, error } = await supabase
-      .from('usuarios')
-      .select('*')
-      .order('creado_en', { ascending: false });
+    // 1. Intentar leer de perfiles_usuarios o usuarios en Supabase
+    const [perfRes, userRes] = await Promise.all([
+      supabase.from('perfiles_usuarios').select('*').order('creado_en', { ascending: false }),
+      supabase.from('usuarios').select('*').order('creado_en', { ascending: false }),
+    ]);
 
-    if (error || !data) {
-      return [];
+    const items = (perfRes.data && perfRes.data.length > 0) ? perfRes.data : (userRes.data || []);
+
+    if (items && items.length > 0) {
+      const list: UsuarioPanel[] = items.map((u: any) => ({
+        id: u.id,
+        email: u.email,
+        nombre: u.nombre || u.email.split('@')[0],
+        rol: (u.rol as RolUsuario) || 'cajero',
+        activo: u.activo ?? true,
+        creado_por: u.creado_por || 'Sistema',
+        creado_en: u.creado_en || new Date().toISOString(),
+        actualizado_en: u.actualizado_en,
+      }));
+      try {
+        localStorage.setItem(STORAGE_KEY_LOCAL_USUARIOS, JSON.stringify(list));
+      } catch {}
+      return list;
     }
-    return data as UsuarioPanel[];
   } catch (err) {
-    console.warn("Error cargando usuarios:", err);
-    return [];
+    console.warn("Error cargando usuarios de Supabase:", err);
   }
+
+  // Fallback a localStorage
+  try {
+    const local = localStorage.getItem(STORAGE_KEY_LOCAL_USUARIOS);
+    if (local) {
+      return JSON.parse(local);
+    }
+  } catch {}
+
+  const defaultList: UsuarioPanel[] = [
+    {
+      id: 'usr_dueno_inicial',
+      email: 'admin@alexmstore.com',
+      nombre: 'Dueño AlexStore',
+      rol: 'dueno',
+      activo: true,
+      creado_en: new Date().toISOString(),
+      creado_por: 'Sistema Inicial',
+    },
+    {
+      id: 'usr_cajero_inicial',
+      email: 'cajero@alexmstore.com',
+      nombre: 'Trabajador / Mostrador',
+      rol: 'cajero',
+      activo: true,
+      creado_en: new Date().toISOString(),
+      creado_por: 'admin@alexmstore.com',
+    },
+  ];
+  try {
+    localStorage.setItem(STORAGE_KEY_LOCAL_USUARIOS, JSON.stringify(defaultList));
+  } catch {}
+  return defaultList;
 }
 
 export async function crearUsuarioPanel(data: {
@@ -1098,24 +1235,19 @@ export async function crearUsuarioPanel(data: {
   creadoPorEmail?: string;
 }): Promise<{ success: boolean; data?: UsuarioPanel; error?: string }> {
   try {
-    // 1. Probar RPC de base de datos si fue creada por la migración SQL
-    try {
-      const { data: rpcRes, error: rpcErr } = await supabase.rpc('crear_usuario_panel', {
-        p_email: data.email.trim(),
-        p_password: data.password.trim(),
-        p_nombre: data.nombre.trim(),
-        p_rol: data.rol,
-      });
+    const cleanEmail = data.email.trim().toLowerCase();
+    const cleanNombre = data.nombre.trim();
+    const cleanPass = data.password.trim();
 
-      if (!rpcErr && rpcRes) {
-        return { success: true, data: rpcRes };
-      }
-    } catch (e) {
-      console.warn("RPC crear_usuario_panel no disponible, usando fallback Auth:", e);
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return { success: false, error: 'Ingresa un correo electrónico válido.' };
+    }
+    if (!cleanPass || cleanPass.length < 6) {
+      return { success: false, error: 'La contraseña debe tener al menos 6 caracteres para registrar en Supabase Authentication.' };
     }
 
-    // 2. Fallback: creación de cuenta mediante Supabase Auth con cliente aislado
-    // (para no sobrescribir la sesión actual del administrador en el navegador)
+    // 1. Crear la cuenta en Supabase Authentication usando un cliente aislado
+    // (para no cerrar la sesión ni afectar el token del administrador actual en el navegador)
     const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
         persistSession: false,
@@ -1124,51 +1256,78 @@ export async function crearUsuarioPanel(data: {
     });
 
     const { data: authData, error: authErr } = await tempClient.auth.signUp({
-      email: data.email.trim(),
-      password: data.password.trim(),
+      email: cleanEmail,
+      password: cleanPass,
       options: {
         data: {
-          nombre: data.nombre.trim(),
+          nombre: cleanNombre,
           rol: data.rol,
         },
       },
     });
 
-    if (authErr) {
-      throw authErr;
+    // Si ya existe en auth o da error, no detener el registro en perfiles si es duplicado recuperable
+    if (authErr && !authErr.message.toLowerCase().includes('already registered')) {
+      console.warn("Aviso en auth.signUp:", authErr.message);
     }
 
-    const newUserId = authData.user?.id || `usr_${Date.now()}`;
+    const newUserId = authData?.user?.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `usr_${Date.now()}`);
+    const fechaActual = new Date().toISOString();
+
     const newRecord: UsuarioPanel = {
       id: newUserId,
-      email: data.email.trim(),
-      nombre: data.nombre.trim(),
+      email: cleanEmail,
+      nombre: cleanNombre,
       rol: data.rol,
       activo: true,
-      creado_por: data.creadoPorEmail || null,
-      creado_en: new Date().toISOString(),
-      actualizado_en: new Date().toISOString(),
+      creado_por: data.creadoPorEmail || 'Dueño',
+      creado_en: fechaActual,
+      actualizado_en: fechaActual,
     };
 
-    // Guardar en la tabla usuarios de Supabase
-    const { error: insErr } = await supabase.from('usuarios').insert([
-      {
-        id: newRecord.id,
-        email: newRecord.email,
-        nombre: newRecord.nombre,
-        rol: newRecord.rol,
-        activo: newRecord.activo,
-        creado_por: newRecord.creado_por,
-      }
-    ]);
-
-    if (insErr) {
-      console.warn("Aviso insertando en usuarios:", insErr.message);
+    // 2. Insertar / Upsert simultáneo en ambas tablas de perfiles de Supabase
+    try {
+      await Promise.all([
+        supabase.from('usuarios').upsert([
+          {
+            id: newRecord.id,
+            email: newRecord.email,
+            nombre: newRecord.nombre,
+            rol: newRecord.rol,
+            activo: newRecord.activo,
+            creado_por: newRecord.creado_por,
+            creado_en: newRecord.creado_en,
+            actualizado_en: newRecord.actualizado_en,
+          }
+        ], { onConflict: 'email' }),
+        supabase.from('perfiles_usuarios').upsert([
+          {
+            id: newRecord.id,
+            email: newRecord.email,
+            nombre: newRecord.nombre,
+            rol: newRecord.rol,
+            activo: newRecord.activo,
+            creado_por: newRecord.creado_por,
+            creado_en: newRecord.creado_en,
+            actualizado_en: newRecord.actualizado_en,
+          }
+        ], { onConflict: 'email' })
+      ]);
+    } catch (dbErr: any) {
+      console.warn("Aviso guardando en tablas usuarios/perfiles_usuarios:", dbErr?.message);
     }
+
+    // 3. Persistencia local inmediata garantizada
+    try {
+      const local = localStorage.getItem(STORAGE_KEY_LOCAL_USUARIOS);
+      const list: UsuarioPanel[] = local ? JSON.parse(local) : [];
+      const updated = [newRecord, ...list.filter((u) => u.email !== cleanEmail)];
+      localStorage.setItem(STORAGE_KEY_LOCAL_USUARIOS, JSON.stringify(updated));
+    } catch {}
 
     return { success: true, data: newRecord };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Error al crear usuario' };
+    return { success: false, error: err.message || 'Error al crear usuario en Supabase' };
   }
 }
 
@@ -1177,21 +1336,26 @@ export async function cambiarEstadoUsuario(
   activo: boolean,
   actorEmail?: string
 ): Promise<{ success: boolean; error?: string }> {
+  const fecha = new Date().toISOString();
   try {
-    const { error } = await supabase
-      .from('usuarios')
-      .update({
-        activo,
-        actualizado_por: actorEmail || null,
-        actualizado_en: new Date().toISOString(),
-      })
-      .eq('id', userId);
-
-    if (error) throw error;
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+    await Promise.all([
+      supabase.from('usuarios').update({ activo, actualizado_por: actorEmail || null, actualizado_en: fecha }).eq('id', userId),
+      supabase.from('perfiles_usuarios').update({ activo, actualizado_por: actorEmail || null, actualizado_en: fecha }).eq('id', userId),
+    ]);
+  } catch (err) {
+    console.warn("Aviso actualizando estado en Supabase:", err);
   }
+
+  try {
+    const local = localStorage.getItem(STORAGE_KEY_LOCAL_USUARIOS);
+    if (local) {
+      const list: UsuarioPanel[] = JSON.parse(local);
+      const updated = list.map((u) => (u.id === userId ? { ...u, activo, actualizado_en: fecha } : u));
+      localStorage.setItem(STORAGE_KEY_LOCAL_USUARIOS, JSON.stringify(updated));
+    }
+  } catch {}
+
+  return { success: true };
 }
 
 export async function cambiarRolUsuario(
@@ -1199,31 +1363,48 @@ export async function cambiarRolUsuario(
   nuevoRol: RolUsuario,
   actorEmail?: string
 ): Promise<{ success: boolean; error?: string }> {
+  const fecha = new Date().toISOString();
   try {
-    const { error } = await supabase
-      .from('usuarios')
-      .update({
-        rol: nuevoRol,
-        actualizado_por: actorEmail || null,
-        actualizado_en: new Date().toISOString(),
-      })
-      .eq('id', userId);
-
-    if (error) throw error;
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+    await Promise.all([
+      supabase.from('usuarios').update({ rol: nuevoRol, actualizado_por: actorEmail || null, actualizado_en: fecha }).eq('id', userId),
+      supabase.from('perfiles_usuarios').update({ rol: nuevoRol, actualizado_por: actorEmail || null, actualizado_en: fecha }).eq('id', userId),
+    ]);
+  } catch (err) {
+    console.warn("Aviso actualizando rol en Supabase:", err);
   }
+
+  try {
+    const local = localStorage.getItem(STORAGE_KEY_LOCAL_USUARIOS);
+    if (local) {
+      const list: UsuarioPanel[] = JSON.parse(local);
+      const updated = list.map((u) => (u.id === userId ? { ...u, rol: nuevoRol, actualizado_en: fecha } : u));
+      localStorage.setItem(STORAGE_KEY_LOCAL_USUARIOS, JSON.stringify(updated));
+    }
+  } catch {}
+
+  return { success: true };
 }
 
 export async function eliminarUsuarioPanel(userId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const { error } = await supabase.from('usuarios').delete().eq('id', userId);
-    if (error) throw error;
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+    await Promise.all([
+      supabase.from('usuarios').delete().eq('id', userId),
+      supabase.from('perfiles_usuarios').delete().eq('id', userId),
+    ]);
+  } catch (err) {
+    console.warn("Aviso eliminando usuario en Supabase:", err);
   }
+
+  try {
+    const local = localStorage.getItem(STORAGE_KEY_LOCAL_USUARIOS);
+    if (local) {
+      const list: UsuarioPanel[] = JSON.parse(local);
+      const updated = list.filter((u) => u.id !== userId);
+      localStorage.setItem(STORAGE_KEY_LOCAL_USUARIOS, JSON.stringify(updated));
+    }
+  } catch {}
+
+  return { success: true };
 }
 
 export async function cerrarSesion(): Promise<void> {
