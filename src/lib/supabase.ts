@@ -108,7 +108,7 @@ export async function getProductos(): Promise<Producto[]> {
     const [prodRes, invRes, detRes] = await Promise.all([
       supabase.from('productos').select('*').order('creado_en', { ascending: false }),
       supabase.from('inventario').select('*'),
-      supabase.from('detalles_productos').select('*').catch(() => ({ data: null })),
+      Promise.resolve(supabase.from('detalles_productos').select('*')).catch(() => ({ data: null, error: null } as any)),
     ]);
 
     if (prodRes.error || !prodRes.data) {
@@ -117,7 +117,7 @@ export async function getProductos(): Promise<Producto[]> {
 
     const stockMap: Record<string, { cantidad: number; stock_minimo: number }> = {};
     if (invRes.data && Array.isArray(invRes.data)) {
-      invRes.data.forEach((inv) => {
+      invRes.data.forEach((inv: any) => {
         stockMap[inv.producto_id] = {
           cantidad: inv.cantidad,
           stock_minimo: inv.stock_minimo ?? 5,
@@ -135,7 +135,7 @@ export async function getProductos(): Promise<Producto[]> {
       });
     }
 
-    return prodRes.data.map((p) => {
+    return prodRes.data.map((p: any) => {
       const det = detallesMap[p.id];
       const tallas = (Array.isArray(p.tallas) && p.tallas.length > 0) ? p.tallas : (det?.tallas || []);
       const colores = (Array.isArray(p.colores) && p.colores.length > 0) ? p.colores : (det?.colores || []);
@@ -326,9 +326,6 @@ export async function actualizarProducto(
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message || 'Error al actualizar producto' };
-  }
-}
-    return { success: false, error: err.message };
   }
 }
 

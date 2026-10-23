@@ -783,16 +783,89 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
+  const handleCrearVentaManualSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const montoNum = parseFloat(ventaManualMonto);
+    if (!ventaManualCliente.trim() || isNaN(montoNum) || montoNum <= 0) {
+      alert('Ingresa el nombre del cliente y un monto válido mayor a $0.');
+      return;
+    }
+
+    setSubmittingVentaManual(true);
+    try {
+      const selectedProd = productos.find((p) => p.id === ventaManualProductoId);
+      const items = selectedProd
+        ? [
+            {
+              id: selectedProd.id,
+              producto_id: selectedProd.id,
+              nombre: selectedProd.nombre,
+              precio: montoNum,
+              cantidad: 1,
+            },
+          ]
+        : [];
+
+      const res = await crearVentaManual({
+        cliente_nombre: ventaManualCliente.trim(),
+        cliente_telefono: ventaManualTelefono.trim() || undefined,
+        metodo_pago: ventaManualMetodo,
+        total: montoNum,
+        items,
+        tipo: 'manual',
+        notas: ventaManualNotas.trim() || (selectedProd ? `Producto: ${selectedProd.nombre}` : undefined),
+      });
+
+      if (res.success && res.data) {
+        const nuevaVenta = res.data;
+        setVentas((prev) => [nuevaVenta, ...prev.filter((v) => v.codigo !== nuevaVenta.codigo)]);
+        setIsModalVentaManualOpen(false);
+        setVentaManualCliente('');
+        setVentaManualTelefono('');
+        setVentaManualMonto('');
+        setVentaManualProductoId('');
+        setVentaManualNotas('');
+        setVentaManualMetodo('efectivo');
+
+        // Registrar auditoría
+        registrarMovimiento({
+          usuario_id: currentUser?.id,
+          usuario_nombre: currentUser?.nombre || currentUser?.email || 'Admin',
+          usuario_email: currentUser?.email || '',
+          rol: currentUser?.rol || 'cajero',
+          accion: 'Registró Venta Manual',
+          modulo: 'ventas',
+          detalles: `Venta manual por $${montoNum.toFixed(2)} (${ventaManualMetodo.toUpperCase()}) para ${ventaManualCliente.trim()} (Tel: ${ventaManualTelefono.trim() || 'N/A'}).`,
+        }).then(() => getMovimientosTrabajadores().then(setMovimientos));
+
+        setUserFeedback({
+          type: 'success',
+          msg: `¡Venta manual ${nuevaVenta.codigo} registrada con éxito por $${montoNum.toFixed(2)} (${ventaManualMetodo.toUpperCase()})!`,
+        });
+        setTimeout(() => setUserFeedback(null), 4500);
+      } else {
+        alert(res.error || 'Error al registrar la venta manual.');
+      }
+    } catch (err: any) {
+      alert('Error: ' + err?.message);
+    } finally {
+      setSubmittingVentaManual(false);
+    }
+  };
+
   const handleEliminarCliente = async (cliente: ClienteResumen) => {
-    if (!confirm(`¿Estás seguro de eliminar al cliente "${cliente.nombre}" (${cliente.telefono}) y sus pedidos asociados?`)) return;
+    if (!confirm(`¿Estás seguro de eliminar permanentemente al cliente con teléfono "${cliente.telefono}" (${cliente.nombre}) y todos sus registros de compras y ventas de Supabase?`)) return;
     const res = await eliminarCliente(cliente.telefono || cliente.nombre);
     if (res.success) {
       setPedidos((prev) =>
         prev.filter((p) => p.cliente_telefono !== cliente.telefono && p.cliente_nombre !== cliente.nombre)
       );
+      setVentas((prev) =>
+        prev.filter((v) => v.cliente_telefono !== cliente.telefono && v.cliente_nombre !== cliente.nombre)
+      );
       setUserFeedback({
         type: 'success',
-        msg: `Cliente "${cliente.nombre}" eliminado correctamente.`,
+        msg: `Cliente con teléfono "${cliente.telefono}" (${cliente.nombre}) eliminado correctamente de Supabase y de la tienda.`,
       });
       setTimeout(() => setUserFeedback(null), 3500);
     } else {
@@ -1709,23 +1782,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <RefreshCw className="w-3.5 h-3.5" />
                   </button>
                   <button
-                    onClick={async () => {
-                      const cliente = prompt('Nombre del cliente:');
-                      if (!cliente) return;
-                      const monto = prompt('Monto total ($):', '50');
-                      if (!monto) return;
-                      await crearVentaManual({
-                        cliente_nombre: cliente,
-                        metodo_pago: 'efectivo',
-                        total: parseFloat(monto) || 50,
-                        items: [],
-                        tipo: 'manual',
-                      });
-                      await reloadAllData();
+                    type="button"
+                    onClick={() => {
+                      setVentaManualCliente('');
+                      setVentaManualTelefono('');
+                      setVentaManualMonto('');
+                      setVentaManualProductoId('');
+                      setVentaManualNotas('');
+                      setVentaManualMetodo('efectivo');
+                      setIsModalVentaManualOpen(true);
                     }}
-                    className="px-4 py-2 rounded-xl bg-[#141312] hover:bg-black text-[#F5E6BE] text-xs font-black uppercase tracking-wider"
+                    className="px-4 py-2 rounded-xl bg-[#141312] hover:bg-black text-[#F5E6BE] text-xs font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all"
                   >
-                    + REGISTRAR VENTA MANUAL
+                    <Plus className="w-3.5 h-3.5 text-[#C59A4D]" />
+                    <span>+ REGISTRAR VENTA MANUAL</span>
                   </button>
                 </div>
               </div>
@@ -3253,11 +3323,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {/* Table */}
               <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[650px] text-left border-collapse">
+                  <table className="w-full min-w-[700px] text-left border-collapse">
                   <thead>
                     <tr className="border-b border-[#E5E9EE] bg-[#FAF8F5] text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
-                      <th className="py-3 px-6">Cliente</th>
-                      <th className="py-3 px-6">Contacto WhatsApp</th>
+                      <th className="py-3 px-6">Teléfono (ID Cliente)</th>
+                      <th className="py-3 px-6">Nombre del Cliente</th>
                       <th className="py-3 px-6">Dirección Habitual</th>
                       <th className="py-3 px-6">Pedidos Totales</th>
                       <th className="py-3 px-6">Total Comprado</th>
@@ -3274,16 +3344,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       .map((cli, idx) => (
                         <tr key={idx} className="hover:bg-[#FCFAF7] transition-colors">
                           <td className="py-4 px-6">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-xl bg-amber-50 text-[#C59A4D] flex items-center justify-center shrink-0">
+                                <Phone className="w-3.5 h-3.5" />
+                              </div>
+                              <div>
+                                <span className="font-mono font-black text-sm text-[#1A1918] block">
+                                  {cli.telefono || 'Sin teléfono'}
+                                </span>
+                                <span className="text-[10px] text-[#8C8375]">Registro por Teléfono</span>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="py-4 px-6">
                             <strong className="font-extrabold text-[#1A1918] block text-sm">
                               {cli.nombre}
                             </strong>
                             <span className="text-[10px] text-[#7A7368]">
                               Cliente AlexStore
                             </span>
-                          </td>
-
-                          <td className="py-4 px-6 font-mono font-bold text-[#1A1918]">
-                            {cli.telefono}
                           </td>
 
                           <td className="py-4 px-6 text-[#7A7368] max-w-xs truncate">
@@ -4001,6 +4081,198 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 >
                   <Wallet className="w-3.5 h-3.5" />
                   <span>{submittingGasto ? 'Guardando...' : 'GUARDAR Y DEDUCIR'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Registrar Venta Manual (con opción de Efectivo exclusiva) */}
+      {isModalVentaManualOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-lg p-5 sm:p-6 space-y-4 sm:space-y-5 border border-[#E5DFD5] shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto my-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-[#F0EAE1]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
+                  <Receipt className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-[#1A1918]">Registrar Venta Manual (Tienda Física / Caja)</h3>
+                  <p className="text-[11px] text-[#7A7368]">Opción exclusiva del panel administrativo para cobros directos</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsModalVentaManualOpen(false)}
+                className="p-1.5 rounded-full hover:bg-[#FAF8F5] text-[#7A7368] cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCrearVentaManualSubmit} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-extrabold text-[#1A1918] block mb-1">
+                    Nombre del Cliente *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej: Carlos González"
+                    value={ventaManualCliente}
+                    onChange={(e) => setVentaManualCliente(e.target.value)}
+                    className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-extrabold text-[#1A1918] block mb-1 flex items-center gap-1">
+                    <Phone className="w-3 h-3 text-[#C59A4D]" />
+                    <span>Teléfono (ID del Cliente) *</span>
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    placeholder="Ej: 6621-2802"
+                    value={ventaManualTelefono}
+                    onChange={(e) => setVentaManualTelefono(e.target.value)}
+                    className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] font-mono font-bold"
+                  />
+                </div>
+              </div>
+
+              {/* Selector de Método de Pago con Efectivo destacado */}
+              <div>
+                <label className="font-extrabold text-[#1A1918] block mb-1.5">
+                  Método de Pago (Efectivo disponible solo en este panel) *
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setVentaManualMetodo('efectivo')}
+                    className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                      ventaManualMetodo === 'efectivo'
+                        ? 'bg-emerald-600 text-white border-emerald-600 font-black shadow-md scale-98'
+                        : 'bg-[#FAF8F5] border-[#E5DFD5] text-[#1A1918] hover:border-emerald-500'
+                    }`}
+                  >
+                    <span className="text-base">💵</span>
+                    <span className="text-[11px] font-extrabold">Efectivo (Caja)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setVentaManualMetodo('yappy')}
+                    className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                      ventaManualMetodo === 'yappy'
+                        ? 'bg-[#141312] text-[#E6C687] border-[#141312] font-black shadow-md scale-98'
+                        : 'bg-[#FAF8F5] border-[#E5DFD5] text-[#1A1918] hover:border-[#141312]'
+                    }`}
+                  >
+                    <span className="text-base">📱</span>
+                    <span className="text-[11px] font-extrabold">Yappy</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setVentaManualMetodo('transferencia')}
+                    className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                      ventaManualMetodo === 'transferencia'
+                        ? 'bg-[#141312] text-[#E6C687] border-[#141312] font-black shadow-md scale-98'
+                        : 'bg-[#FAF8F5] border-[#E5DFD5] text-[#1A1918] hover:border-[#141312]'
+                    }`}
+                  >
+                    <span className="text-base">🏦</span>
+                    <span className="text-[11px] font-extrabold">Transferencia</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setVentaManualMetodo('tarjeta')}
+                    className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                      ventaManualMetodo === 'tarjeta'
+                        ? 'bg-[#141312] text-[#E6C687] border-[#141312] font-black shadow-md scale-98'
+                        : 'bg-[#FAF8F5] border-[#E5DFD5] text-[#1A1918] hover:border-[#141312]'
+                    }`}
+                  >
+                    <span className="text-base">💳</span>
+                    <span className="text-[11px] font-extrabold">Tarjeta / POS</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-extrabold text-[#1A1918] block mb-1">
+                    Monto Total en USD ($) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    required
+                    placeholder="0.00"
+                    value={ventaManualMonto}
+                    onChange={(e) => setVentaManualMonto(e.target.value)}
+                    className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] font-black text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-extrabold text-[#1A1918] block mb-1">
+                    Producto Asociado (Opcional)
+                  </label>
+                  <select
+                    value={ventaManualProductoId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setVentaManualProductoId(id);
+                      const prod = productos.find((p) => p.id === id);
+                      if (prod && (!ventaManualMonto || parseFloat(ventaManualMonto) <= 0)) {
+                        setVentaManualMonto(String(prod.precio));
+                      }
+                    }}
+                    className="w-full bg-[#FAF8F5] px-3 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none"
+                  >
+                    <option value="">Ninguno / Venta libre</option>
+                    {productos.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nombre} (${p.precio})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="font-extrabold text-[#1A1918] block mb-1">
+                  Notas o detalles de la venta (opcional)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Detalles de entrega presencial, cambio entregado, tallas entregadas, etc."
+                  value={ventaManualNotas}
+                  onChange={(e) => setVentaManualNotas(e.target.value)}
+                  className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none resize-none"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsModalVentaManualOpen(false)}
+                  className="px-4 py-2.5 rounded-xl text-[#7A7368] hover:text-[#1A1918] font-bold cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingVentaManual}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer"
+                >
+                  <Receipt className="w-3.5 h-3.5" />
+                  <span>{submittingVentaManual ? 'Registrando...' : 'GUARDAR VENTA MANUAL'}</span>
                 </button>
               </div>
             </form>
