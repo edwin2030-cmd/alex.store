@@ -31,7 +31,7 @@ interface CheckoutModalProps {
   onClose: () => void;
   items: ItemCarrito[];
   onOrderCompleted: () => void;
-  initialMethod?: 'transferencia' | 'yappy';
+  initialMethod?: 'transferencia' | 'yappy' | 'whatsapp';
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
@@ -57,7 +57,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [nombre, setNombre] = useState('');
   const [telefono, setTelefono] = useState('');
   const [direccion, setDireccion] = useState('');
-  const [metodoPago, setMetodoPago] = useState<'transferencia' | 'yappy'>(initialMethod);
+  const [metodoPago, setMetodoPago] = useState<'transferencia' | 'yappy' | 'whatsapp'>(initialMethod);
   const [bancoSeleccionado, setBancoSeleccionado] = useState<'banco_general' | 'bac'>('banco_general');
   const [nota, setNota] = useState('');
 
@@ -294,9 +294,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       lineas.push(`• *Instrucciones especiales:* ${nota.trim()}`);
     }
     lineas.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    lineas.push(`💳 *MÉTODO DE PAGO UTILIZADO:*`);
+    lineas.push(`💳 *MÉTODO DE PAGO / MODALIDAD:*`);
     lineas.push(`• *Canal:* ${metodoStr}`);
-    if (metodoPago === 'transferencia') {
+    if (metodoPago === 'whatsapp') {
+      lineas.push(`• *Modalidad:* Coordinar por WhatsApp (Abono / Contra Entrega)`);
+      lineas.push(`• *Atención:* Pago directo o contra entrega al recibir el pedido`);
+    } else if (metodoPago === 'transferencia') {
       if (bancoSeleccionado === 'banco_general') {
         lineas.push(`• *Banco:* Banco General (Panamá)`);
         lineas.push(`• *Cuenta de Ahorros:* 0439000024206`);
@@ -304,12 +307,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         lineas.push(`• *Banco:* BAC Credomatic`);
         lineas.push(`• *Cuenta de Ahorros:* 117537266`);
       }
+      lineas.push(`• *Beneficiario / Titular:* AlexStore (Graphycalexpty)`);
+      lineas.push(`• *Verificación:* Pago completado con comprobante`);
     } else {
       lineas.push(`• *Aplicación:* Yappy Panamá`);
       lineas.push(`• *Directorio Oficial:* @GRAPHYCALEXPTY`);
+      lineas.push(`• *Beneficiario / Titular:* AlexStore (Graphycalexpty)`);
+      lineas.push(`• *Verificación:* Pago completado con comprobante`);
     }
-    lineas.push(`• *Beneficiario / Titular:* AlexStore (Graphycalexpty)`);
-    lineas.push(`• *Verificación:* Pago completado con comprobante`);
     lineas.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     lineas.push(`🛍️ *DESGLOSE DETALLADO DE ARTÍCULOS:*`);
 
@@ -333,10 +338,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     lineas.push(`• *Subtotal de Compra:* $${subtotal.toFixed(2)} USD`);
     lineas.push(`• *Descuento:* $${descuento.toFixed(2)} USD`);
     lineas.push(`• *Costo de Envío:* ${costoEnvio > 0 ? `$${costoEnvio.toFixed(2)} USD` : 'Coordinado / Sin costo adicional'}`);
-    lineas.push(`💰 *TOTAL FINAL PAGADO:* $${pedido.total.toFixed(2)} USD`);
+    lineas.push(`💰 *TOTAL DE LA ORDEN:* $${pedido.total.toFixed(2)} USD`);
     lineas.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    lineas.push(`📸 *COMPROBANTE DE PAGO (FOTO):*`);
-    if (comprobanteUrl && comprobanteUrl.startsWith('http')) {
+    lineas.push(`📸 *COMPROBANTE / FORMA DE PAGO:*`);
+    if (metodoPago === 'whatsapp') {
+      lineas.push(`💬 *Modalidad elegida:* Coordinar pago / abono / contra entrega directamente por este chat.`);
+    } else if (comprobanteUrl && comprobanteUrl.startsWith('http')) {
       lineas.push(`🔗 *LINK DE LA FOTO DEL COMPROBANTE:*`);
       lineas.push(`${comprobanteUrl}`);
       lineas.push(`👆 *(Toca el link para abrir la foto del comprobante en alta resolución)*`);
@@ -345,7 +352,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
     lineas.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     lineas.push(
-      `✨ *Estimado equipo de AlexStore, he realizado el pago y completado los datos de mi orden. Quedo atento a la confirmación de la guía de envío y número de rastreo. ¡Muchas gracias!*`
+      metodoPago === 'whatsapp'
+        ? `✨ *Hola equipo de AlexStore, he realizado este pedido desde la web para coordinar el pago (abono / contra entrega / consulta) y acordar los detalles de despacho. ¡Muchas gracias!*`
+        : `✨ *Estimado equipo de AlexStore, he realizado el pago y completado los datos de mi orden. Quedo atento a la confirmación de la guía de envío y número de rastreo. ¡Muchas gracias!*`
     );
 
     return lineas.join('\n');
@@ -365,8 +374,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       return;
     }
 
-    // Require payment receipt photo for Yappy and Transferencia to ensure the link is sent
-    if (!comprobanteFile && !comprobantePreview && !comprobantePublicUrl) {
+    // Require payment receipt photo only for Yappy and Transferencia
+    if (metodoPago !== 'whatsapp' && !comprobanteFile && !comprobantePreview && !comprobantePublicUrl) {
       setValidationError(
         '📸 Por favor selecciona o sube la foto del comprobante de tu pago para poder generar y enviar el link a WhatsApp.'
       );
@@ -378,7 +387,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const codigoPedido = `ALX-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const detalleMetodo =
-      metodoPago === 'transferencia'
+      metodoPago === 'whatsapp'
+        ? 'Pedir y Consultar / Pagar por WhatsApp (Abono / Contra Entrega)'
+        : metodoPago === 'transferencia'
         ? bancoSeleccionado === 'banco_general'
           ? 'Transferencia - Banco General (0439000024206)'
           : 'Transferencia - BAC Credomatic (117537266)'
@@ -874,7 +885,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {/* Botón Opción Yappy */}
                   <button
                     type="button"
@@ -882,21 +893,21 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       setMetodoPago('yappy');
                       setValidationError(null);
                     }}
-                    className={`p-4 rounded-2xl border-2 text-left transition-all cursor-pointer relative ${
+                    className={`p-3.5 sm:p-4 rounded-2xl border-2 text-left transition-all cursor-pointer relative ${
                       metodoPago === 'yappy'
                         ? 'border-[#0284C7] bg-[#F0F8FF] shadow-md ring-2 ring-[#0284C7]/20'
                         : 'border-[#E5DFD5] bg-white hover:border-[#0284C7]/50'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
-                      <span className="px-2.5 py-0.5 rounded-md bg-[#0284C7] text-white text-[10px] font-black uppercase tracking-wider">
+                      <span className="px-2 py-0.5 rounded-md bg-[#0284C7] text-white text-[9px] font-black uppercase tracking-wider">
                         DIRECTORIO
                       </span>
-                      <Smartphone className="w-5 h-5 text-[#0284C7]" />
+                      <Smartphone className="w-4 h-4 text-[#0284C7]" />
                     </div>
-                    <p className="font-black text-sm text-[#0F172A]">Pagar por Yappy</p>
-                    <p className="text-[11px] text-[#475569] mt-0.5 font-medium">
-                      Directorio <strong>@GRAPHYCALEXPTY</strong>
+                    <p className="font-black text-xs sm:text-sm text-[#0F172A]">Pagar por Yappy</p>
+                    <p className="text-[10px] text-[#475569] mt-0.5 font-medium truncate">
+                      @GRAPHYCALEXPTY
                     </p>
                     {metodoPago === 'yappy' && (
                       <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-[#0284C7]" />
@@ -910,24 +921,52 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       setMetodoPago('transferencia');
                       setValidationError(null);
                     }}
-                    className={`p-4 rounded-2xl border-2 text-left transition-all cursor-pointer relative ${
+                    className={`p-3.5 sm:p-4 rounded-2xl border-2 text-left transition-all cursor-pointer relative ${
                       metodoPago === 'transferencia'
                         ? 'border-[#C59A4D] bg-[#FCFBF8] shadow-md ring-2 ring-[#C59A4D]/20'
                         : 'border-[#E5DFD5] bg-white hover:border-[#C59A4D]/50'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
-                      <span className="px-2.5 py-0.5 rounded-md bg-[#141312] text-white text-[10px] font-black uppercase tracking-wider">
+                      <span className="px-2 py-0.5 rounded-md bg-[#141312] text-white text-[9px] font-black uppercase tracking-wider">
                         BANCO
                       </span>
-                      <Landmark className="w-5 h-5 text-[#C59A4D]" />
+                      <Landmark className="w-4 h-4 text-[#C59A4D]" />
                     </div>
-                    <p className="font-black text-sm text-[#1A1918]">Transferencia Bancaria</p>
-                    <p className="text-[11px] text-[#7A7368] mt-0.5 font-medium">
-                      Banco General • BAC Credomatic
+                    <p className="font-black text-xs sm:text-sm text-[#1A1918]">Transferencia</p>
+                    <p className="text-[10px] text-[#7A7368] mt-0.5 font-medium truncate">
+                      B. General / BAC
                     </p>
                     {metodoPago === 'transferencia' && (
                       <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-[#C59A4D]" />
+                    )}
+                  </button>
+
+                  {/* Botón Opción WhatsApp (Consultar / Pagar / Abono) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMetodoPago('whatsapp');
+                      setValidationError(null);
+                    }}
+                    className={`p-3.5 sm:p-4 rounded-2xl border-2 text-left transition-all cursor-pointer relative ${
+                      metodoPago === 'whatsapp'
+                        ? 'border-emerald-600 bg-emerald-50/70 shadow-md ring-2 ring-emerald-600/20'
+                        : 'border-[#E5DFD5] bg-white hover:border-emerald-600/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white text-[9px] font-black uppercase tracking-wider">
+                        WHATSAPP
+                      </span>
+                      <MessageCircle className="w-4 h-4 text-emerald-600 fill-current" />
+                    </div>
+                    <p className="font-black text-xs sm:text-sm text-emerald-950">Pedir por WhatsApp</p>
+                    <p className="text-[10px] text-emerald-700 mt-0.5 font-medium truncate">
+                      Abono / Contra Entrega
+                    </p>
+                    {metodoPago === 'whatsapp' && (
+                      <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-600" />
                     )}
                   </button>
                 </div>
@@ -1228,6 +1267,34 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     </p>
                   </div>
                 )}
+
+                {/* ======================= DETALLES DE WHATSAPP ======================= */}
+                {metodoPago === 'whatsapp' && (
+                  <div className="p-4 sm:p-5 rounded-2xl bg-emerald-50/80 border border-emerald-200 space-y-3 text-xs shadow-xs">
+                    <div className="flex items-center gap-2.5 pb-2.5 border-b border-emerald-200">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black">
+                        <MessageCircle className="w-4 h-4 fill-current" />
+                      </div>
+                      <div>
+                        <span className="font-black text-sm text-emerald-950 block">
+                          PEDIR Y COORDINAR POR WHATSAPP
+                        </span>
+                        <span className="text-[10px] text-emerald-700 font-bold">
+                          Atención inmediata con asesor AlexStore • 66212802
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 text-emerald-900 leading-relaxed text-xs">
+                      <p>
+                        ✨ <strong>Paga a tu ritmo:</strong> Puedes apartar con un <strong>abono</strong> (la mitad o menos) y terminar de pagar cuando recibas el producto (<strong>contra entrega</strong>), o coordinar transferencia y efectivo directamente.
+                      </p>
+                      <p className="text-[11px] text-emerald-800">
+                        Al presionar el botón inferior, tu pedido quedará guardado y se enviará la orden detallada con tus productos a nuestro chat de WhatsApp para coordinar la entrega.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* SECCIÓN 4: COMPROBANTE DE PAGO (PREVISUALIZAR Y CAMBIAR IMAGEN) */}
@@ -1237,9 +1304,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     <span className="w-5 h-5 rounded-full bg-[#1A1918] text-white text-[10px] font-black flex items-center justify-center">
                       4
                     </span>
-                    COMPROBANTE O CAPTURA DE PAGO
+                    {metodoPago === 'whatsapp' ? 'COMPROBANTE O REFERENCIA (OPCIONAL)' : 'COMPROBANTE O CAPTURA DE PAGO'}
                   </h3>
-                  <span className="text-[10px] text-[#9C9488] font-bold">JPG, PNG o WEBP</span>
+                  <span className="text-[10px] text-[#9C9488] font-bold">
+                    {metodoPago === 'whatsapp' ? 'Opcional' : 'JPG, PNG o WEBP'}
+                  </span>
                 </div>
 
                 {/* Si ya hay imagen montada -> MOSTRARLA CLARAMENTE Y PERMITIR CAMBIARLA O QUITARLA */}
@@ -1509,14 +1578,20 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         MÉTODO & COMPROBANTE
                       </span>
                       <p className="font-bold text-[#1A1918]">
-                        {metodoPago === 'transferencia'
+                        {metodoPago === 'whatsapp'
+                          ? 'Coordinar por WhatsApp'
+                          : metodoPago === 'transferencia'
                           ? bancoSeleccionado === 'banco_general'
                             ? 'Banco General (Panamá)'
                             : 'BAC Credomatic'
                           : 'Yappy (@GRAPHYCALEXPTY)'}
                       </p>
                       <p className="text-[11px] font-semibold flex items-center gap-1">
-                        {comprobantePreview ? (
+                        {metodoPago === 'whatsapp' ? (
+                          <span className="text-emerald-700 flex items-center gap-1">
+                            <Check className="w-3 h-3 text-emerald-600 stroke-[3]" /> Coordinación directa por chat
+                          </span>
+                        ) : comprobantePreview ? (
                           <span className="text-emerald-700 flex items-center gap-1">
                             <Check className="w-3 h-3 text-emerald-600 stroke-[3]" /> Comprobante adjuntado
                           </span>
@@ -1560,6 +1635,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       ? 'PROCESANDO PEDIDO...'
                       : isUploadingProof
                       ? 'SUBIENDO FOTO DEL COMPROBANTE...'
+                      : metodoPago === 'whatsapp'
+                      ? 'ENVIAR PEDIDO A WHATSAPP (66212802)'
                       : 'CONFIRMAR Y ENVIAR A WHATSAPP (66212802)'}
                   </span>
                   <ArrowRight className="w-4 h-4 shrink-0" />

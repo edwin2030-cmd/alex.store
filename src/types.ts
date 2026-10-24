@@ -117,7 +117,7 @@ export interface Pedido {
   cliente_nombre: string;
   cliente_telefono: string;
   cliente_direccion?: string;
-  metodo_pago: 'transferencia' | 'yappy' | 'efectivo';
+  metodo_pago: 'transferencia' | 'yappy' | 'efectivo' | 'contra_entrega' | 'whatsapp' | string;
   comprobante_url?: string | null;
   comprobante_path?: string | null;
   total: number;
@@ -140,10 +140,33 @@ export interface Venta {
   pedido_id?: string | null;
   cliente_nombre: string;
   cliente_telefono?: string | null;
-  metodo_pago: string;
+  metodo_pago: 'efectivo' | 'yappy' | 'transferencia' | 'contra_entrega' | 'abono' | string;
   total: number;
+  // Campos para control de abonos (pagos parciales) y contra entrega
+  monto_abonado?: number;
+  saldo_pendiente?: number;
+  estado_pago?: 'completo' | 'abono_pendiente' | 'contra_entrega_pendiente';
   items: any[];
   tipo: 'web' | 'manual';
+  notas?: string | null;
+  creado_en?: string;
+}
+
+// ==========================================
+// CONTROL DE APERTURA Y CIERRE DE CAJA
+// ==========================================
+export interface RegistroCaja {
+  id: string;
+  estado: 'abierta' | 'cerrada';
+  monto_inicial: number;
+  fecha_apertura: string;
+  abierto_por: string;
+  usuario_id?: string | null;
+  monto_esperado?: number;
+  monto_final_real?: number;
+  diferencia?: number;
+  fecha_cierre?: string | null;
+  cerrado_por?: string | null;
   notas?: string | null;
   creado_en?: string;
 }

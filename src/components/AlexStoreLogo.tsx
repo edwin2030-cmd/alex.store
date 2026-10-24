@@ -27,8 +27,15 @@ export const AlexStoreLogo: React.FC<AlexStoreLogoProps> = ({
       clearTimeout(clickTimeoutRef.current);
     }
 
+    if (window?.navigator?.vibrate) {
+      try { window.navigator.vibrate(20); } catch {}
+    }
+
     if (clickCountRef.current >= 10) {
       clickCountRef.current = 0;
+      if (window?.navigator?.vibrate) {
+        try { window.navigator.vibrate([40, 30, 60]); } catch {}
+      }
       targetCallback();
     } else {
       // 2.5 segundos de margen entre clics para permitir alcanzar los 10 toques en celular y PC

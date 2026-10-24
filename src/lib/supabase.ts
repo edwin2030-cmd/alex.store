@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { CATEGORIAS_INICIALES } from '../data/initialData';
-import { Categoria, Producto, Pedido, Venta, Gasto, UsuarioPanel, RolUsuario, EstadoPedido, MovimientoTrabajador } from '../types';
+import { Categoria, Producto, Pedido, Venta, Gasto, UsuarioPanel, RolUsuario, EstadoPedido, MovimientoTrabajador, RegistroCaja } from '../types';
 
 export const SUPABASE_URL = "https://hbfhuwsizuhdqhyojmzk.supabase.co";
 export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhiZmh1d3NpenVoZHFoeW9qbXprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNzUyMzIsImV4cCI6MjEwNzY1MTIzMn0.Oa1a4o14nRXnMaLHp_6NKSe9avx8ADwPd6ezlx7I53E";
@@ -516,7 +516,7 @@ export async function crearPedido(pedido: Pedido): Promise<{ success: boolean; d
 }
 
 export async function actualizarEstadoPedido(
-  id: string,
+  idOrCodigo: string,
   nuevoEstado: string,
   revisadoPor?: string,
   estadoPago?: 'pendiente_revision' | 'verificado' | 'rechazado'
@@ -540,12 +540,22 @@ export async function actualizarEstadoPedido(
       updatePayload.estado_pago = 'rechazado';
     }
 
-    const { error } = await supabase
-      .from('pedidos')
-      .update(updatePayload)
-      .eq('id', id);
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCodigo);
+    let error = null;
 
-    if (error) throw error;
+    if (isUuid) {
+      const res = await supabase.from('pedidos').update(updatePayload).eq('id', idOrCodigo);
+      error = res.error;
+    } else {
+      const res = await supabase.from('pedidos').update(updatePayload).eq('codigo', idOrCodigo);
+      error = res.error;
+    }
+
+    if (error) {
+      // Reintento por el otro campo en caso de discrepancia
+      await supabase.from('pedidos').update(updatePayload).eq('codigo', idOrCodigo);
+    }
+
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -553,22 +563,24 @@ export async function actualizarEstadoPedido(
 }
 
 export async function actualizarEstadoPagoPedido(
-  id: string,
+  idOrCodigo: string,
   nuevoEstadoPago: 'pendiente_revision' | 'verificado' | 'rechazado',
   revisadoPor?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { error } = await supabase
-      .from('pedidos')
-      .update({
-        estado_pago: nuevoEstadoPago,
-        revisado_por: revisadoPor || null,
-        revisado_en: new Date().toISOString(),
-        actualizado_en: new Date().toISOString(),
-      })
-      .eq('id', id);
+    const updatePayload = {
+      estado_pago: nuevoEstadoPago,
+      revisado_por: revisadoPor || null,
+      revisado_en: new Date().toISOString(),
+      actualizado_en: new Date().toISOString(),
+    };
 
-    if (error) throw error;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCodigo);
+    if (isUuid) {
+      await supabase.from('pedidos').update(updatePayload).eq('id', idOrCodigo);
+    }
+    await supabase.from('pedidos').update(updatePayload).eq('codigo', idOrCodigo);
+
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -576,32 +588,37 @@ export async function actualizarEstadoPagoPedido(
 }
 
 export async function vincularComprobanteAPedido(
-  pedidoId: string,
+  idOrCodigo: string,
   comprobanteUrl: string,
   comprobantePath?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { error } = await supabase
-      .from('pedidos')
-      .update({
-        comprobante_url: comprobanteUrl,
-        comprobante_path: comprobantePath || null,
-        estado_pago: 'pendiente_revision',
-        actualizado_en: new Date().toISOString(),
-      })
-      .eq('id', pedidoId);
+    const updatePayload = {
+      comprobante_url: comprobanteUrl,
+      comprobante_path: comprobantePath || null,
+      estado_pago: 'pendiente_revision',
+      actualizado_en: new Date().toISOString(),
+    };
 
-    if (error) throw error;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCodigo);
+    if (isUuid) {
+      await supabase.from('pedidos').update(updatePayload).eq('id', idOrCodigo);
+    }
+    await supabase.from('pedidos').update(updatePayload).eq('codigo', idOrCodigo);
+
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
 }
 
-export async function eliminarPedido(id: string): Promise<{ success: boolean; error?: string }> {
+export async function eliminarPedido(idOrCodigo: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const { error } = await supabase.from('pedidos').delete().eq('id', id);
-    if (error) throw error;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCodigo);
+    if (isUuid) {
+      await supabase.from('pedidos').delete().eq('id', idOrCodigo);
+    }
+    await supabase.from('pedidos').delete().eq('codigo', idOrCodigo);
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -621,11 +638,55 @@ export async function getVentas(): Promise<Venta[]> {
       .select('*')
       .order('creado_en', { ascending: false });
 
-    if (!error && data && data.length > 0) {
+    if (!error && data) {
       remoteList = data as Venta[];
     }
   } catch (err) {
     console.warn('Aviso cargando ventas de Supabase:', err);
+  }
+
+  // Sincronizar SIEMPRE con TODOS los pedidos aprobados o entregados en Supabase
+  // para que si un pedido fue aceptado en un dispositivo, aparezca inmediatamente en todos los demás
+  try {
+    const { data: pedsAprobados } = await supabase
+      .from('pedidos')
+      .select('*')
+      .in('estado', ['aprobado', 'entregado', 'aceptado'])
+      .order('creado_en', { ascending: false });
+
+    if (pedsAprobados && Array.isArray(pedsAprobados)) {
+      pedsAprobados.forEach((p) => {
+        const cleanCode = (p.codigo || '').replace(/[^0-9]/g, '') || Math.floor(1000 + Math.random() * 9000);
+        const codVenta = `VNT-${cleanCode}`;
+        const alreadyInRemote = remoteList.some(
+          (v) =>
+            (v.pedido_id && v.pedido_id === p.id) ||
+            v.codigo === codVenta ||
+            (v.codigo && p.codigo && v.codigo.includes(cleanCode))
+        );
+        if (!alreadyInRemote) {
+          const synthVenta: Venta = {
+            id: p.id || `vnt_${cleanCode}`,
+            codigo: codVenta,
+            pedido_id: p.id,
+            cliente_nombre: p.cliente_nombre,
+            cliente_telefono: p.cliente_telefono || null,
+            metodo_pago: p.metodo_pago,
+            total: Number(p.total) || 0,
+            monto_abonado: Number(p.total) || 0,
+            saldo_pendiente: 0,
+            estado_pago: 'completo',
+            items: p.items || [],
+            tipo: 'web',
+            notas: `Venta generada del pedido ${p.codigo}.`,
+            creado_en: p.actualizado_en || p.creado_en || new Date().toISOString(),
+          };
+          remoteList.push(synthVenta);
+        }
+      });
+    }
+  } catch (pedErr) {
+    console.warn('Aviso sincronizando pedidos aprobados a ventas:', pedErr);
   }
 
   // Respaldo en localStorage para disponibilidad ininterrumpida
@@ -759,6 +820,9 @@ export async function crearVentaManual(venta: {
   cliente_telefono?: string;
   metodo_pago: string;
   total: number;
+  monto_abonado?: number;
+  saldo_pendiente?: number;
+  estado_pago?: 'completo' | 'abono_pendiente' | 'contra_entrega_pendiente';
   items: any[];
   tipo?: 'web' | 'manual';
   notas?: string;
@@ -766,13 +830,32 @@ export async function crearVentaManual(venta: {
   try {
     const codigo = `VNT-${Math.floor(1000 + Math.random() * 9000)}`;
     const now = new Date().toISOString();
+    const totalNum = Number(venta.total) || 0;
+    const abonadoNum =
+      venta.monto_abonado !== undefined
+        ? Number(venta.monto_abonado)
+        : venta.metodo_pago === 'contra_entrega'
+        ? 0
+        : totalNum;
+    const saldoPendiente = Math.max(0, totalNum - abonadoNum);
+    const estadoPago =
+      venta.estado_pago ||
+      (venta.metodo_pago === 'abono' && saldoPendiente > 0
+        ? 'abono_pendiente'
+        : venta.metodo_pago === 'contra_entrega'
+        ? 'contra_entrega_pendiente'
+        : 'completo');
+
     const newVentaRecord: Venta = {
       id: `vnt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       codigo,
       cliente_nombre: venta.cliente_nombre.trim(),
       cliente_telefono: venta.cliente_telefono?.trim() || null,
       metodo_pago: venta.metodo_pago || 'efectivo',
-      total: Number(venta.total) || 0,
+      total: totalNum,
+      monto_abonado: abonadoNum,
+      saldo_pendiente: saldoPendiente,
+      estado_pago: estadoPago,
       items: venta.items || [],
       tipo: venta.tipo || 'manual',
       notas: venta.notas?.trim() || null,
@@ -790,6 +873,9 @@ export async function crearVentaManual(venta: {
             cliente_telefono: newVentaRecord.cliente_telefono,
             metodo_pago: newVentaRecord.metodo_pago,
             total: newVentaRecord.total,
+            monto_abonado: newVentaRecord.monto_abonado,
+            saldo_pendiente: newVentaRecord.saldo_pendiente,
+            estado_pago: newVentaRecord.estado_pago,
             items: newVentaRecord.items,
             tipo: newVentaRecord.tipo,
             notas: newVentaRecord.notas,
@@ -828,6 +914,60 @@ export async function crearVentaManual(venta: {
     return { success: true, data: newVentaRecord };
   } catch (err: any) {
     return { success: false, error: err.message || 'Error guardando venta manual' };
+  }
+}
+
+/**
+ * Liquida el saldo pendiente de una venta (abono o contra entrega completada al recibir)
+ */
+export async function liquidarSaldoVenta(
+  idOrCodigo: string,
+  liquidadoPor?: string
+): Promise<{ success: boolean; data?: Venta; error?: string }> {
+  try {
+    const ventas = await getVentas();
+    const venta = ventas.find((v) => v.id === idOrCodigo || v.codigo === idOrCodigo);
+    if (!venta) return { success: false, error: 'Venta no encontrada' };
+
+    const total = Number(venta.total) || 0;
+    const now = new Date().toISOString();
+    const updatePayload = {
+      monto_abonado: total,
+      saldo_pendiente: 0,
+      estado_pago: 'completo',
+      notas: (venta.notas ? venta.notas + ' • ' : '') + `Cobro completado / Liquidado por: ${liquidadoPor || 'Caja'}. (${new Date().toLocaleString('es-PA')})`,
+    };
+
+    // Actualizar en Supabase
+    try {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCodigo);
+      const q = supabase.from('ventas').update(updatePayload);
+      if (isUuid) {
+        await q.eq('id', idOrCodigo);
+      } else {
+        await q.eq('codigo', idOrCodigo);
+      }
+    } catch (e) {
+      console.warn('Aviso liquidando saldo en Supabase:', e);
+    }
+
+    // Actualizar localmente
+    const updatedVenta: Venta = {
+      ...venta,
+      ...updatePayload,
+      estado_pago: 'completo',
+    };
+
+    try {
+      const local = localStorage.getItem(STORAGE_KEY_VENTAS);
+      const list: Venta[] = local ? JSON.parse(local) : [];
+      const updatedList = list.map((v) => (v.id === idOrCodigo || v.codigo === idOrCodigo ? updatedVenta : v));
+      localStorage.setItem(STORAGE_KEY_VENTAS, JSON.stringify(updatedList));
+    } catch {}
+
+    return { success: true, data: updatedVenta };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Error liquidando saldo' };
   }
 }
 
@@ -900,19 +1040,20 @@ export async function aprobarPedidoYDescontarStock(
     const now = new Date().toISOString();
 
     // 1. Actualizar estado del pedido a 'aprobado' y estado_pago a 'verificado'
-    const { error: errorPedido } = await supabase
-      .from('pedidos')
-      .update({
-        estado: 'aprobado',
-        estado_pago: 'verificado',
-        revisado_por: aprobadoPor || 'Administrador',
-        revisado_en: now,
-        actualizado_en: now,
-      })
-      .eq('id', pedidoId);
+    const updateOrderPayload = {
+      estado: 'aprobado',
+      estado_pago: 'verificado',
+      revisado_por: aprobadoPor || 'Administrador',
+      revisado_en: now,
+      actualizado_en: now,
+    };
 
-    if (errorPedido) {
-      console.warn('Aviso actualizando pedido en Supabase:', errorPedido);
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pedidoId);
+    if (isUuid) {
+      await supabase.from('pedidos').update(updateOrderPayload).eq('id', pedidoId);
+    }
+    if (pedido.codigo) {
+      await supabase.from('pedidos').update(updateOrderPayload).eq('codigo', pedido.codigo);
     }
 
     // 2. Descontar stock automáticamente de cada producto o variante tanto en inventario como en productos
@@ -938,6 +1079,9 @@ export async function aprobarPedidoYDescontarStock(
       cliente_telefono: pedido.cliente_telefono || null,
       metodo_pago: pedido.metodo_pago,
       total: Number(pedido.total) || 0,
+      monto_abonado: Number(pedido.total) || 0,
+      saldo_pendiente: 0,
+      estado_pago: 'completo',
       items: pedido.items,
       tipo: 'web',
       notas: `Venta generada automáticamente al aprobar el pedido ${pedido.codigo}. Aprobado por: ${aprobadoPor || 'Admin'}`,
@@ -945,20 +1089,32 @@ export async function aprobarPedidoYDescontarStock(
     };
 
     try {
-      await supabase.from('ventas').insert([
-        {
-          codigo: ventaRecord.codigo,
-          pedido_id: ventaRecord.pedido_id,
-          cliente_nombre: ventaRecord.cliente_nombre,
-          cliente_telefono: ventaRecord.cliente_telefono,
-          metodo_pago: ventaRecord.metodo_pago,
-          total: ventaRecord.total,
-          items: ventaRecord.items,
-          tipo: ventaRecord.tipo,
-          notas: ventaRecord.notas,
-          creado_en: ventaRecord.creado_en,
-        }
-      ]);
+      const insertPayload: any = {
+        codigo: ventaRecord.codigo,
+        pedido_id: isUuid ? pedidoId : (pedido.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pedido.id) ? pedido.id : null),
+        cliente_nombre: ventaRecord.cliente_nombre,
+        cliente_telefono: ventaRecord.cliente_telefono,
+        metodo_pago: ventaRecord.metodo_pago,
+        total: ventaRecord.total,
+        monto_abonado: ventaRecord.total,
+        saldo_pendiente: 0,
+        estado_pago: 'completo',
+        items: ventaRecord.items,
+        tipo: ventaRecord.tipo,
+        notas: ventaRecord.notas,
+        creado_en: ventaRecord.creado_en,
+      };
+
+      const { data, error } = await supabase.from('ventas').insert([insertPayload]).select().maybeSingle();
+      if (error && (error.message.includes('monto_abonado') || error.message.includes('saldo_pendiente') || error.message.includes('estado_pago'))) {
+        delete insertPayload.monto_abonado;
+        delete insertPayload.saldo_pendiente;
+        delete insertPayload.estado_pago;
+        await supabase.from('ventas').insert([insertPayload]);
+      }
+      if (data?.id) {
+        ventaRecord.id = data.id;
+      }
     } catch (vErr) {
       console.warn('Aviso insertando venta en Supabase:', vErr);
     }
@@ -1031,22 +1187,21 @@ export async function crearGasto(gasto: {
     creado_en: new Date().toISOString(),
   };
 
-  // 1. Intentar guardar en Supabase si la tabla existe
+  // 1. Intentar guardar en Supabase si la tabla existe (sin forzar ID inválido)
   try {
+    const insertPayload: any = {
+      concepto: newGastoRecord.concepto,
+      monto: newGastoRecord.monto,
+      categoria: newGastoRecord.categoria,
+      fecha: newGastoRecord.fecha,
+      notas: newGastoRecord.notas,
+      creado_por: newGastoRecord.creado_por,
+      creado_en: newGastoRecord.creado_en,
+    };
+
     const { data, error } = await supabase
       .from('gastos')
-      .insert([
-        {
-          id: newId,
-          concepto: newGastoRecord.concepto,
-          monto: newGastoRecord.monto,
-          categoria: newGastoRecord.categoria,
-          fecha: newGastoRecord.fecha,
-          notas: newGastoRecord.notas,
-          creado_por: newGastoRecord.creado_por,
-          creado_en: newGastoRecord.creado_en,
-        },
-      ])
+      .insert([insertPayload])
       .select()
       .maybeSingle();
 
@@ -1076,7 +1231,12 @@ export async function crearGasto(gasto: {
 
 export async function eliminarGasto(id: string): Promise<{ success: boolean; error?: string }> {
   try {
-    await supabase.from('gastos').delete().eq('id', id);
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    if (isUuid) {
+      await supabase.from('gastos').delete().eq('id', id);
+    } else {
+      await supabase.from('gastos').delete().eq('concepto', id);
+    }
   } catch (err) {
     console.warn('Aviso eliminando de Supabase:', err);
   }
@@ -1088,6 +1248,189 @@ export async function eliminarGasto(id: string): Promise<{ success: boolean; err
       const filtered = list.filter((g) => g.id !== id);
       localStorage.setItem(STORAGE_KEY_GASTOS, JSON.stringify(filtered));
     }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+// ==========================================
+// CONTROL DE APERTURA Y CIERRE DE CAJA
+// ==========================================
+const STORAGE_KEY_CAJA_ACTUAL = 'alexstore_local_caja_activa';
+const STORAGE_KEY_CAJA_HISTORIAL = 'alexstore_local_caja_historial';
+
+export async function getSesionCajaActiva(): Promise<RegistroCaja | null> {
+  try {
+    const { data, error } = await supabase
+      .from('registros_caja')
+      .select('*')
+      .eq('estado', 'abierta')
+      .order('fecha_apertura', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && data) {
+      try {
+        localStorage.setItem(STORAGE_KEY_CAJA_ACTUAL, JSON.stringify(data));
+      } catch {}
+      return data as RegistroCaja;
+    }
+  } catch (err) {
+    console.warn('Aviso consultando registros_caja en Supabase:', err);
+  }
+
+  try {
+    const local = localStorage.getItem(STORAGE_KEY_CAJA_ACTUAL);
+    if (local) return JSON.parse(local);
+  } catch {}
+
+  return null;
+}
+
+export async function getHistorialCaja(limit = 100): Promise<RegistroCaja[]> {
+  try {
+    const { data, error } = await supabase
+      .from('registros_caja')
+      .select('*')
+      .order('fecha_apertura', { ascending: false })
+      .limit(limit);
+
+    if (!error && data && data.length > 0) {
+      try {
+        localStorage.setItem(STORAGE_KEY_CAJA_HISTORIAL, JSON.stringify(data));
+      } catch {}
+      return data as RegistroCaja[];
+    }
+  } catch (err) {
+    console.warn('Aviso consultando historial de caja en Supabase:', err);
+  }
+
+  try {
+    const local = localStorage.getItem(STORAGE_KEY_CAJA_HISTORIAL);
+    if (local) return JSON.parse(local);
+  } catch {}
+
+  return [];
+}
+
+export async function abrirCaja(params: {
+  monto_inicial: number;
+  abierto_por: string;
+  usuario_id?: string | null;
+  notas?: string;
+}): Promise<{ success: boolean; data?: RegistroCaja; error?: string }> {
+  try {
+    const now = new Date().toISOString();
+    const newSession: RegistroCaja = {
+      id: `caja_${Date.now()}`,
+      estado: 'abierta',
+      monto_inicial: Number(params.monto_inicial) || 0,
+      fecha_apertura: now,
+      abierto_por: params.abierto_por,
+      usuario_id: params.usuario_id || null,
+      notas: params.notas || null,
+      creado_en: now,
+    };
+
+    try {
+      const { data, error } = await supabase
+        .from('registros_caja')
+        .insert([
+          {
+            estado: 'abierta',
+            monto_inicial: newSession.monto_inicial,
+            fecha_apertura: newSession.fecha_apertura,
+            abierto_por: newSession.abierto_por,
+            usuario_id: newSession.usuario_id,
+            notas: newSession.notas,
+            creado_en: newSession.creado_en,
+          }
+        ])
+        .select()
+        .maybeSingle();
+
+      if (!error && data) {
+        newSession.id = data.id || newSession.id;
+      }
+    } catch (e) {
+      console.warn('Aviso guardando apertura de caja en Supabase:', e);
+    }
+
+    try {
+      localStorage.setItem(STORAGE_KEY_CAJA_ACTUAL, JSON.stringify(newSession));
+      const hist = await getHistorialCaja();
+      const updated = [newSession, ...hist.filter(h => h.id !== newSession.id)];
+      localStorage.setItem(STORAGE_KEY_CAJA_HISTORIAL, JSON.stringify(updated));
+    } catch {}
+
+    // Registrar en auditoría
+    await registrarMovimiento({
+      usuario_id: params.usuario_id,
+      usuario_nombre: params.abierto_por,
+      usuario_email: '',
+      rol: 'cajero',
+      accion: 'Apertura de Caja',
+      modulo: 'caja',
+      detalles: `Abrió turno de caja con fondo inicial de $${Number(params.monto_inicial).toFixed(2)}.`,
+    });
+
+    return { success: true, data: newSession };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function cerrarCaja(params: {
+  sesionId: string;
+  monto_final_real: number;
+  monto_esperado: number;
+  diferencia: number;
+  cerrado_por: string;
+  notas?: string;
+}): Promise<{ success: boolean; data?: RegistroCaja; error?: string }> {
+  try {
+    const now = new Date().toISOString();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.sesionId);
+
+    const updatePayload = {
+      estado: 'cerrada',
+      monto_final_real: Number(params.monto_final_real) || 0,
+      monto_esperado: Number(params.monto_esperado) || 0,
+      diferencia: Number(params.diferencia) || 0,
+      fecha_cierre: now,
+      cerrado_por: params.cerrado_por,
+      notas: params.notas || null,
+    };
+
+    try {
+      if (isUuid) {
+        await supabase.from('registros_caja').update(updatePayload).eq('id', params.sesionId);
+      } else {
+        await supabase.from('registros_caja').update(updatePayload).eq('estado', 'abierta');
+      }
+    } catch (e) {
+      console.warn('Aviso cerrando caja en Supabase:', e);
+    }
+
+    // Actualizar almacenamiento local
+    try {
+      localStorage.removeItem(STORAGE_KEY_CAJA_ACTUAL);
+      const hist = await getHistorialCaja();
+      const updated = hist.map(h => (h.id === params.sesionId || h.estado === 'abierta') ? { ...h, ...updatePayload } : h);
+      localStorage.setItem(STORAGE_KEY_CAJA_HISTORIAL, JSON.stringify(updated));
+    } catch {}
+
+    // Registrar en auditoría
+    await registrarMovimiento({
+      usuario_nombre: params.cerrado_por,
+      usuario_email: '',
+      rol: 'cajero',
+      accion: 'Cierre de Caja',
+      modulo: 'caja',
+      detalles: `Cerró turno de caja. Esperado: $${params.monto_esperado.toFixed(2)}, Contado: $${params.monto_final_real.toFixed(2)}, Diferencia: $${params.diferencia.toFixed(2)}.`,
+    });
+
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };

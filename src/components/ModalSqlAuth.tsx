@@ -320,7 +320,7 @@ DROP POLICY IF EXISTS "Acceso total a detalles_productos" ON public.detalles_pro
 CREATE POLICY "Acceso total a detalles_productos" ON public.detalles_productos FOR ALL USING (true) WITH CHECK (true);
 
 -- ==============================================================================
--- 8. TABLA DE VENTAS Y FACTURACIÓN (WEB Y MANUALES EN EFECTIVO)
+-- 8. TABLA DE VENTAS Y FACTURACIÓN (WEB, MANUALES, ABONOS Y CONTRA ENTREGA)
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.ventas (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -330,17 +330,48 @@ CREATE TABLE IF NOT EXISTS public.ventas (
   cliente_telefono TEXT,
   metodo_pago TEXT NOT NULL DEFAULT 'efectivo',
   total NUMERIC(10,2) NOT NULL DEFAULT 0,
+  monto_abonado NUMERIC(10,2) DEFAULT 0,
+  saldo_pendiente NUMERIC(10,2) DEFAULT 0,
+  estado_pago TEXT DEFAULT 'completo',
   items JSONB DEFAULT '[]'::jsonb,
   tipo TEXT NOT NULL DEFAULT 'manual',
   notas TEXT,
   creado_en TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS monto_abonado NUMERIC(10,2) DEFAULT 0;
+ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS saldo_pendiente NUMERIC(10,2) DEFAULT 0;
+ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS estado_pago TEXT DEFAULT 'completo';
+
 ALTER TABLE public.ventas ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Acceso total a ventas" ON public.ventas;
 CREATE POLICY "Acceso total a ventas" ON public.ventas FOR ALL USING (true) WITH CHECK (true);
 CREATE INDEX IF NOT EXISTS idx_ventas_creado_en ON public.ventas (creado_en DESC);
 CREATE INDEX IF NOT EXISTS idx_ventas_cliente_tel ON public.ventas (cliente_telefono);
+
+-- ==============================================================================
+-- 8B. TABLA DE CONTROL DE APERTURAS Y CIERRES DE CAJA (CORTE DE TURNO)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.registros_caja (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  estado TEXT NOT NULL DEFAULT 'abierta' CHECK (estado IN ('abierta', 'cerrada')),
+  monto_inicial NUMERIC(10,2) NOT NULL DEFAULT 0,
+  fecha_apertura TIMESTAMPTZ NOT NULL DEFAULT now(),
+  abierto_por TEXT NOT NULL,
+  usuario_id TEXT,
+  monto_esperado NUMERIC(10,2) DEFAULT 0,
+  monto_final_real NUMERIC(10,2) DEFAULT 0,
+  diferencia NUMERIC(10,2) DEFAULT 0,
+  fecha_cierre TIMESTAMPTZ,
+  cerrado_por TEXT,
+  notas TEXT,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.registros_caja ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Acceso total a registros_caja" ON public.registros_caja;
+CREATE POLICY "Acceso total a registros_caja" ON public.registros_caja FOR ALL USING (true) WITH CHECK (true);
+CREATE INDEX IF NOT EXISTS idx_registros_caja_apertura ON public.registros_caja (fecha_apertura DESC);
 
 -- ==============================================================================
 -- 9. PERMISOS TOTALES DE ELIMINACIÓN REAL (DELETE) EN SUPABASE

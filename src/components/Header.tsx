@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Search, ShoppingBag, SlidersHorizontal } from 'lucide-react';
 import { AlexStoreLogo } from './AlexStoreLogo';
 
@@ -23,6 +23,40 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAdminLogin,
   onToggleFilters,
 }) => {
+  const brandTapCountRef = useRef(0);
+  const brandTapTimeoutRef = useRef<any>(null);
+
+  const handleBrandTextTap = () => {
+    if (!onOpenAdminLogin) {
+      onViewChange('catalogo');
+      return;
+    }
+
+    brandTapCountRef.current += 1;
+    if (brandTapTimeoutRef.current) {
+      clearTimeout(brandTapTimeoutRef.current);
+    }
+
+    if (window?.navigator?.vibrate) {
+      try { window.navigator.vibrate(20); } catch {}
+    }
+
+    if (brandTapCountRef.current >= 10) {
+      brandTapCountRef.current = 0;
+      if (window?.navigator?.vibrate) {
+        try { window.navigator.vibrate([40, 30, 60]); } catch {}
+      }
+      onOpenAdminLogin();
+    } else {
+      brandTapTimeoutRef.current = setTimeout(() => {
+        brandTapCountRef.current = 0;
+      }, 2500);
+
+      if (brandTapCountRef.current === 1) {
+        onViewChange('catalogo');
+      }
+    }
+  };
   return (
     <header className="sticky top-0 z-40 bg-[#FAF8F5]/95 backdrop-blur-md border-b border-[#EAE5DC] w-full">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
@@ -30,8 +64,8 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-2 sm:gap-3 select-none shrink-0">
           <AlexStoreLogo size="md" onTenClicks={onOpenAdminLogin} />
           <div
-            onClick={() => onViewChange('catalogo')}
-            className="flex flex-col cursor-pointer group"
+            onClick={handleBrandTextTap}
+            className="flex flex-col cursor-pointer group touch-manipulation active:scale-95 transition-transform"
           >
             <span className="font-extrabold text-lg sm:text-2xl tracking-tight leading-none text-[#1A1918]">
               Alex<span className="text-[#C59A4D]">Store</span>

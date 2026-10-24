@@ -1,6 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlexStoreLogo } from './AlexStoreLogo';
-import { Categoria, Producto, Pedido, Venta, Gasto, UsuarioPanel, UserRole, ClienteResumen, MovimientoTrabajador } from '../types';
+import {
+  Categoria,
+  Producto,
+  Pedido,
+  Venta,
+  Gasto,
+  UsuarioPanel,
+  UserRole,
+  ClienteResumen,
+  MovimientoTrabajador,
+  RegistroCaja,
+} from '../types';
 import {
   getProductos,
   getCategorias,
@@ -19,6 +30,7 @@ import {
   descargarArchivo,
   subirFotoStorage,
   crearVentaManual,
+  liquidarSaldoVenta,
   eliminarPedido,
   eliminarVenta,
   eliminarCliente,
@@ -27,6 +39,10 @@ import {
   eliminarMovimiento,
   limpiarHistorialMovimientos,
   crearUsuarioPanel,
+  getSesionCajaActiva,
+  getHistorialCaja,
+  abrirCaja,
+  cerrarCaja,
 } from '../lib/supabase';
 import {
   ROLE_PERMISSIONS,
@@ -104,6 +120,7 @@ export type AdminSection =
   | 'dashboard'
   | 'pedidos'
   | 'ventas'
+  | 'caja'
   | 'gastos'
   | 'movimientos'
   | 'productos'
@@ -152,17 +169,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [nuevoGastoNotas, setNuevoGastoNotas] = useState('');
   const [submittingGasto, setSubmittingGasto] = useState(false);
 
-  // Modal Registrar Venta Manual (con opción Efectivo exclusiva)
+  // Control de Apertura y Cierre de Caja
+  const [sesionCaja, setSesionCaja] = useState<RegistroCaja | null>(null);
+  const [historialCaja, setHistorialCaja] = useState<RegistroCaja[]>([]);
+  const [isModalAbrirCajaOpen, setIsModalAbrirCajaOpen] = useState(false);
+  const [isModalCerrarCajaOpen, setIsModalCerrarCajaOpen] = useState(false);
+  const [montoAperturaCaja, setMontoAperturaCaja] = useState('50.00');
+  const [notasAperturaCaja, setNotasAperturaCaja] = useState('');
+  const [montoCierreReal, setMontoCierreReal] = useState('');
+  const [notasCierreCaja, setNotasCierreCaja] = useState('');
+  const [isCajaSubmitting, setIsCajaSubmitting] = useState(false);
+
+  // Modal Registrar Venta Manual (con Efectivo, Yappy, Transferencia y Abono / Contra Entrega)
   const [isModalVentaManualOpen, setIsModalVentaManualOpen] = useState(false);
   const [ventaManualCliente, setVentaManualCliente] = useState('');
   const [ventaManualTelefono, setVentaManualTelefono] = useState('');
-  const [ventaManualMetodo, setVentaManualMetodo] = useState<'efectivo' | 'yappy' | 'transferencia' | 'tarjeta'>('efectivo');
+  const [ventaManualMetodo, setVentaManualMetodo] = useState<'efectivo' | 'yappy' | 'transferencia' | 'abono_contraentrega'>('efectivo');
+  const [ventaManualTipoAbono, setVentaManualTipoAbono] = useState<'mitad' | 'personalizado' | 'cero'>('mitad');
+  const [ventaManualMontoAbonado, setVentaManualMontoAbonado] = useState('');
   const [ventaManualMonto, setVentaManualMonto] = useState('');
   const [ventaManualProductoId, setVentaManualProductoId] = useState('');
   const [ventaManualCantidad, setVentaManualCantidad] = useState('1');
   const [ventaManualVarianteId, setVentaManualVarianteId] = useState('');
   const [ventaManualNotas, setVentaManualNotas] = useState('');
   const [submittingVentaManual, setSubmittingVentaManual] = useState(false);
+  const [liquidandoVentaId, setLiquidandoVentaId] = useState<string | null>(null);
 
   const [viewingProofUrl, setViewingProofUrl] = useState<string | null>(null);
   const [selectedOrderForProof, setSelectedOrderForProof] = useState<Pedido | null>(null);
@@ -204,7 +235,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const reloadAllData = async () => {
     setLoading(true);
     try {
-      const [prods, cats, peds, vnts, usrs, gsts, movs] = await Promise.all([
+      const [prods, cats, peds, vnts, usrs, gsts, movs, cajaActiva, histCaja] = await Promise.all([
         getProductos(),
         getCategorias(),
         getPedidos(),
@@ -212,6 +243,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         getUsuariosList(),
         getGastos(),
         getMovimientosTrabajadores(),
+        getSesionCajaActiva(),
+        getHistorialCaja(),
       ]);
       setProductos(prods);
       setCategorias(cats);
@@ -220,6 +253,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setUsuarios(usrs);
       setGastos(gsts);
       setMovimientos(movs);
+      setSesionCaja(cajaActiva);
+      setHistorialCaja(histCaja);
     } catch (e) {
       console.error("Error cargando panel admin:", e);
     } finally {
@@ -413,6 +448,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     newStatus: string
   ) => {
     const targetPed = pedidos.find((p) => p.id === orderId || p.codigo === orderId);
+    if (newStatus === 'aprobado' && targetPed && targetPed.estado !== 'aprobado' && targetPed.estado !== 'entregado') {
+      await handleAprobarPedido(targetPed);
+      return;
+    }
     await actualizarEstadoPedido(orderId, newStatus as any);
     setPedidos((prev) =>
       prev.map((p) => (p.id === orderId ? { ...p, estado: newStatus as any } : p))
@@ -872,22 +911,51 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               cantidad: cantNum,
               variante_id: ventaManualVarianteId || undefined,
               variante_titulo: selectedVarTitulo || undefined,
+              imagen_url: selectedProd.imagen_url || (selectedProd.imagenes && selectedProd.imagenes[0]) || undefined,
             },
           ]
         : [];
 
+      // Cálculo de abono y saldo pendiente
+      let montoAbonado = montoNum;
+      let metodoReal: string = ventaManualMetodo;
+      if (ventaManualMetodo === 'abono_contraentrega') {
+        if (ventaManualTipoAbono === 'mitad') {
+          montoAbonado = Math.round((montoNum / 2) * 100) / 100;
+          metodoReal = 'abono';
+        } else if (ventaManualTipoAbono === 'cero') {
+          montoAbonado = 0;
+          metodoReal = 'contra_entrega';
+        } else {
+          const customAb = parseFloat(ventaManualMontoAbonado);
+          montoAbonado = isNaN(customAb) ? 0 : Math.min(montoNum, Math.max(0, customAb));
+          metodoReal = montoAbonado > 0 ? 'abono' : 'contra_entrega';
+        }
+      }
+
+      const saldoPendiente = Math.max(0, montoNum - montoAbonado);
+      const estadoPago =
+        saldoPendiente === 0
+          ? 'completo'
+          : montoAbonado > 0
+          ? 'abono_pendiente'
+          : 'contra_entrega_pendiente';
+
       const res = await crearVentaManual({
         cliente_nombre: ventaManualCliente.trim(),
         cliente_telefono: ventaManualTelefono.trim() || undefined,
-        metodo_pago: ventaManualMetodo,
+        metodo_pago: metodoReal,
         total: montoNum,
+        monto_abonado: montoAbonado,
+        saldo_pendiente: saldoPendiente,
+        estado_pago: estadoPago,
         items,
         tipo: 'manual',
         notas:
           ventaManualNotas.trim() ||
           (selectedProd
-            ? `Producto: ${selectedProd.nombre}${selectedVarTitulo ? ` (${selectedVarTitulo})` : ''} x${cantNum}`
-            : undefined),
+            ? `Producto: ${selectedProd.nombre}${selectedVarTitulo ? ` (${selectedVarTitulo})` : ''} x${cantNum}${saldoPendiente > 0 ? ` • Abonó: $${montoAbonado.toFixed(2)}, Saldo al entregar: $${saldoPendiente.toFixed(2)}` : ''}`
+            : saldoPendiente > 0 ? `Abonó: $${montoAbonado.toFixed(2)}, Saldo al entregar: $${saldoPendiente.toFixed(2)}` : undefined),
       });
 
       if (res.success && res.data) {
@@ -921,6 +989,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         setVentaManualCliente('');
         setVentaManualTelefono('');
         setVentaManualMonto('');
+        setVentaManualMontoAbonado('');
+        setVentaManualTipoAbono('mitad');
         setVentaManualProductoId('');
         setVentaManualCantidad('1');
         setVentaManualVarianteId('');
@@ -938,12 +1008,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           rol: currentUser?.rol || 'cajero',
           accion: 'Registró Venta Manual',
           modulo: 'ventas',
-          detalles: `Venta manual por $${montoNum.toFixed(2)} (${ventaManualMetodo.toUpperCase()}) para ${ventaManualCliente.trim()} (Tel: ${ventaManualTelefono.trim() || 'N/A'})${selectedProd ? ` - Descontó ${cantNum} un. de "${selectedProd.nombre}"` : ''}.`,
+          detalles: `Venta manual por $${montoNum.toFixed(2)} (${metodoReal.toUpperCase()}) para ${ventaManualCliente.trim()} (Tel: ${ventaManualTelefono.trim() || 'N/A'})${saldoPendiente > 0 ? ` [Abonado: $${montoAbonado.toFixed(2)} | Pendiente: $${saldoPendiente.toFixed(2)}]` : ''}${selectedProd ? ` - Descontó ${cantNum} un. de "${selectedProd.nombre}"` : ''}.`,
         }).then(() => getMovimientosTrabajadores().then(setMovimientos));
 
         setUserFeedback({
           type: 'success',
-          msg: `¡Venta manual ${nuevaVenta.codigo} registrada con éxito por $${montoNum.toFixed(2)} (${ventaManualMetodo.toUpperCase()})! Se descontó automáticamente del inventario.`,
+          msg: `¡Venta manual ${nuevaVenta.codigo} registrada con éxito! ${saldoPendiente > 0 ? `(Abono: $${montoAbonado.toFixed(2)} - Saldo por cobrar: $${saldoPendiente.toFixed(2)})` : ''} Se descontó automáticamente del inventario.`,
         });
         setTimeout(() => setUserFeedback(null), 4500);
       } else {
@@ -953,6 +1023,122 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       alert('Error: ' + err?.message);
     } finally {
       setSubmittingVentaManual(false);
+    }
+  };
+
+  const handleLiquidarVenta = async (idOrCodigo: string) => {
+    if (!confirm('¿Confirmas que el cliente ya recibió el producto y terminó de pagar el saldo pendiente?')) return;
+    setLiquidandoVentaId(idOrCodigo);
+    try {
+      const res = await liquidarSaldoVenta(idOrCodigo, currentUser?.nombre || 'Caja');
+      if (res.success && res.data) {
+        setVentas((prev) => prev.map((v) => (v.id === idOrCodigo || v.codigo === idOrCodigo ? res.data! : v)));
+        setUserFeedback({
+          type: 'success',
+          msg: `¡Venta ${idOrCodigo} liquidada y completada con éxito! El saldo pendiente ha sido cobrado al entregar el producto.`,
+        });
+        setTimeout(() => setUserFeedback(null), 4500);
+        reloadAllData();
+      } else {
+        alert(res.error || 'Error al liquidar saldo.');
+      }
+    } catch (e: any) {
+      alert('Error: ' + e?.message);
+    } finally {
+      setLiquidandoVentaId(null);
+    }
+  };
+
+  const handleAbrirCajaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const inicial = parseFloat(montoAperturaCaja);
+    if (isNaN(inicial) || inicial < 0) {
+      alert('Por favor ingresa un monto inicial válido.');
+      return;
+    }
+    setIsCajaSubmitting(true);
+    try {
+      const res = await abrirCaja({
+        monto_inicial: inicial,
+        abierto_por: currentUser?.nombre || currentUser?.email || 'Cajero',
+        usuario_id: currentUser?.id,
+        notas: notasAperturaCaja.trim() || undefined,
+      });
+      if (res.success && res.data) {
+        setSesionCaja(res.data);
+        setIsModalAbrirCajaOpen(false);
+        setNotasAperturaCaja('');
+        setUserFeedback({
+          type: 'success',
+          msg: `¡Turno de caja abierto correctamente con fondo inicial de $${inicial.toFixed(2)}!`,
+        });
+        setTimeout(() => setUserFeedback(null), 4500);
+        reloadAllData();
+      } else {
+        alert(res.error || 'Error al abrir caja.');
+      }
+    } catch (err: any) {
+      alert('Error: ' + err?.message);
+    } finally {
+      setIsCajaSubmitting(false);
+    }
+  };
+
+  const handleCerrarCajaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sesionCaja) return;
+    const real = parseFloat(montoCierreReal);
+    if (isNaN(real) || real < 0) {
+      alert('Por favor ingresa el dinero en efectivo contado en gaveta.');
+      return;
+    }
+    setIsCajaSubmitting(true);
+    try {
+      const fechaInicio = sesionCaja.fecha_apertura ? new Date(sesionCaja.fecha_apertura).getTime() : 0;
+      const ventasEfectivoTurno = ventas
+        .filter(
+          (v) =>
+            (v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega') &&
+            v.creado_en &&
+            new Date(v.creado_en).getTime() >= fechaInicio
+        )
+        .reduce((acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0), 0);
+
+      const gastosEfectivoTurno = gastos
+        .filter((g) => g.creado_en && new Date(g.creado_en).getTime() >= fechaInicio)
+        .reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
+
+      const inicial = Number(sesionCaja.monto_inicial) || 0;
+      const esperado = inicial + ventasEfectivoTurno - gastosEfectivoTurno;
+      const diferencia = real - esperado;
+
+      const res = await cerrarCaja({
+        sesionId: sesionCaja.id,
+        monto_final_real: real,
+        monto_esperado: esperado,
+        diferencia,
+        cerrado_por: currentUser?.nombre || currentUser?.email || 'Cajero',
+        notas: notasCierreCaja.trim() || undefined,
+      });
+
+      if (res.success) {
+        setSesionCaja(null);
+        setIsModalCerrarCajaOpen(false);
+        setMontoCierreReal('');
+        setNotasCierreCaja('');
+        setUserFeedback({
+          type: 'success',
+          msg: `¡Turno de caja cerrado y guardado! Contado: $${real.toFixed(2)}, Esperado: $${esperado.toFixed(2)}, Diferencia: $${diferencia.toFixed(2)}.`,
+        });
+        setTimeout(() => setUserFeedback(null), 5000);
+        reloadAllData();
+      } else {
+        alert(res.error || 'Error al cerrar caja.');
+      }
+    } catch (err: any) {
+      alert('Error: ' + err?.message);
+    } finally {
+      setIsCajaSubmitting(false);
     }
   };
 
@@ -1004,7 +1190,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     { id: 'dashboard' as const, label: 'DASHBOARD', icon: LayoutDashboard, badge: 0 },
     { id: 'pedidos' as const, label: 'PEDIDOS & COMPROBANTES', icon: Receipt, badge: pedidosPendientes },
     { id: 'ventas' as const, label: 'VENTAS & FACTURACIÓN', icon: TrendingUp, badge: 0 },
-    { id: 'gastos' as const, label: 'GASTOS & BALANCE', icon: Wallet, badge: 0 },
+    { id: 'caja' as const, label: 'CONTROL DE CAJA', icon: Wallet, badge: sesionCaja?.estado === 'abierta' ? 1 : 0 },
+    { id: 'gastos' as const, label: 'GASTOS & BALANCE', icon: FileCheck, badge: 0 },
     { id: 'movimientos' as const, label: 'REGISTRO DE MOVIMIENTOS', icon: Activity, badge: 0 },
     { id: 'productos' as const, label: 'PRODUCTOS', icon: Package, badge: 0 },
     { id: 'categorias' as const, label: 'CATEGORÍAS', icon: Layers, badge: 0 },
@@ -1018,7 +1205,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   );
 
   return (
-    <div className="min-h-screen bg-[#F4F6F8] text-[#1A1918] flex flex-col lg:flex-row font-sans">
+    <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col lg:flex-row font-sans">
       {/* Mobile & Tablet Top Header (Optimized for Android & iOS with 3-rayitas Menu button) */}
       <div className="lg:hidden bg-[#0F0E0D] text-white border-b border-[#26221E] sticky top-0 z-30">
         <div className="px-3.5 py-3 flex items-center justify-between gap-2">
@@ -1328,6 +1515,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {activeSection === 'dashboard' && 'Dashboard General'}
               {activeSection === 'pedidos' && 'Gestión de Pedidos & Comprobantes'}
               {activeSection === 'ventas' && 'Módulo de Ventas & Facturación'}
+              {activeSection === 'caja' && 'Control de Caja & Arqueos'}
               {activeSection === 'gastos' && 'Control de Gastos & Balance Neto'}
               {activeSection === 'movimientos' && 'Registro de Movimientos & Auditoría'}
               {activeSection === 'productos' && 'Gestión de Productos'}
@@ -1340,6 +1528,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {activeSection === 'dashboard' && 'Métricas operativas y financieras generales de AlexStore'}
               {activeSection === 'pedidos' && 'Verifica comprobantes de pago por Yappy y Transferencias, y aprueba compras'}
               {activeSection === 'ventas' && 'Ventas web aprobadas y registro de ventas manuales de mostrador'}
+              {activeSection === 'caja' && 'Apertura de turno con fondo inicial, control de efectivo en gaveta y arqueo de cierre guardado'}
               {activeSection === 'gastos' && 'Registra gastos operativos y de mercancía, descontándolos en vivo del total ganado para dar la ganancia neta'}
               {activeSection === 'movimientos' && 'Historial cronológico de turnos, aprobaciones y ajustes de stock'}
               {activeSection === 'productos' && 'Administra catálogo, precios, fotos e inventario en public.productos'}
@@ -1827,62 +2016,87 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           {/* ======================================================== */}
           {activeSection === 'ventas' && (
             <div className="space-y-6">
-              {/* 4 Stat Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE]">
-                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">INGRESOS TOTALES</span>
-                  <span className="text-2xl sm:text-3xl font-black text-[#1A1918] block my-2">${ingresosTotales}</span>
-                  <span className="text-[11px] font-bold text-emerald-600">Acumulado histórico</span>
-                </div>
+              {/* Stat Cards: If Cajero -> Operational counts only (NO MONEY). If Dueño/Admin -> Financial metrics */}
+              {userRole === 'cajero' ? (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
+                    <span className="text-[10px] font-black uppercase text-slate-500 block">PEDIDOS RECIBIDOS</span>
+                    <span className="text-2xl sm:text-3xl font-black text-slate-900 block my-2">{pedidos.length}</span>
+                    <span className="text-[11px] font-bold text-slate-600">Total en sistema</span>
+                  </div>
 
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE]">
-                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">VENTAS ESTE MES</span>
-                  <span className="text-2xl sm:text-3xl font-black text-[#1A1918] block my-2">${ingresosTotales}</span>
-                  <span className="text-[11px] text-[#7A7368]">{ventas.length} transacciones</span>
-                </div>
+                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
+                    <span className="text-[10px] font-black uppercase text-slate-500 block">PEDIDOS ACEPTADOS</span>
+                    <span className="text-2xl sm:text-3xl font-black text-emerald-600 block my-2">
+                      {pedidos.filter((p) => p.estado === 'aprobado' || p.estado === 'aceptado').length}
+                    </span>
+                    <span className="text-[11px] font-bold text-emerald-700">Listos / Despachados</span>
+                  </div>
 
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE]">
-                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">TOTAL TRANSACCIONES</span>
-                  <span className="text-2xl sm:text-3xl font-black text-[#1A1918] block my-2">{ventas.length}</span>
-                  <span className="text-[11px] text-[#7A7368]">Web + Manuales</span>
-                </div>
+                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
+                    <span className="text-[10px] font-black uppercase text-slate-500 block">PEDIDOS PENDIENTES</span>
+                    <span className="text-2xl sm:text-3xl font-black text-amber-600 block my-2">
+                      {pedidos.filter((p) => p.estado === 'pendiente').length}
+                    </span>
+                    <span className="text-[11px] font-bold text-amber-700">Por revisar comprobante</span>
+                  </div>
 
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE]">
-                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">TICKET PROMEDIO</span>
-                  <span className="text-2xl sm:text-3xl font-black text-[#C59A4D] block my-2">
-                    ${ventas.length > 0 ? Math.round(ingresosTotales / ventas.length) : 0}
-                  </span>
-                  <span className="text-[11px] text-[#7A7368]">Por cada venta</span>
+                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
+                    <span className="text-[10px] font-black uppercase text-slate-500 block">VENTAS REALIZADAS</span>
+                    <span className="text-2xl sm:text-3xl font-black text-sky-600 block my-2">{ventas.length}</span>
+                    <span className="text-[11px] font-bold text-sky-700">Web y mostrador</span>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
+                    <span className="text-[10px] font-black uppercase text-slate-500 block">INGRESOS TOTALES</span>
+                    <span className="text-2xl sm:text-3xl font-black text-slate-900 block my-2">${ingresosTotales.toFixed(2)}</span>
+                    <span className="text-[11px] font-bold text-emerald-600">Acumulado histórico</span>
+                  </div>
+
+                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
+                    <span className="text-[10px] font-black uppercase text-slate-500 block">VENTAS ESTE MES</span>
+                    <span className="text-2xl sm:text-3xl font-black text-slate-900 block my-2">${ingresosTotales.toFixed(2)}</span>
+                    <span className="text-[11px] text-slate-500">{ventas.length} transacciones</span>
+                  </div>
+
+                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
+                    <span className="text-[10px] font-black uppercase text-slate-500 block">TOTAL TRANSACCIONES</span>
+                    <span className="text-2xl sm:text-3xl font-black text-slate-900 block my-2">{ventas.length}</span>
+                    <span className="text-[11px] text-slate-500">Web + Manuales</span>
+                  </div>
+
+                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
+                    <span className="text-[10px] font-black uppercase text-slate-500 block">TICKET PROMEDIO</span>
+                    <span className="text-2xl sm:text-3xl font-black text-[#C59A4D] block my-2">
+                      ${ventas.length > 0 ? Math.round(ingresosTotales / ventas.length) : 0}
+                    </span>
+                    <span className="text-[11px] text-slate-500">Por cada venta</span>
+                  </div>
+                </div>
+              )}
 
               {/* Filters bar */}
-              <div className="bg-white rounded-3xl p-4 border border-[#E5E9EE] flex flex-wrap items-center justify-between gap-3">
+              <div className="bg-white rounded-3xl p-4 border border-slate-200 flex flex-wrap items-center justify-between gap-3 shadow-sm">
                 <div className="relative flex-1 min-w-[200px] max-w-sm">
-                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8C8375]" />
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <input
                     type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Buscar venta, cliente o código..."
-                    className="w-full bg-[#FAF8F5] text-xs px-10 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none"
+                    className="w-full bg-slate-50 text-xs px-10 py-2.5 rounded-2xl border border-slate-200 focus:outline-none focus:bg-white"
                   />
                 </div>
 
                 <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                  <button className="px-3 py-1.5 rounded-xl bg-[#141312] text-white text-xs font-bold">
-                    Todas ({ventas.length})
-                  </button>
-                  <button className="px-3 py-1.5 rounded-xl bg-[#F4F6F8] text-[#1A1918] text-xs font-bold">
-                    Web Aprobadas
-                  </button>
-                  <button className="px-3 py-1.5 rounded-xl bg-[#F4F6F8] text-[#1A1918] text-xs font-bold">
-                    Manuales
-                  </button>
                   <button
                     onClick={reloadAllData}
-                    className="p-2 rounded-xl border border-[#D5DCE4] text-[#1A1918]"
-                    title="Recargar"
+                    className="p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700"
+                    title="Recargar ventas"
                   >
-                    <RefreshCw className="w-3.5 h-3.5" />
+                    <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
                   </button>
                   <button
                     type="button"
@@ -1890,14 +2104,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       setVentaManualCliente('');
                       setVentaManualTelefono('');
                       setVentaManualMonto('');
+                      setVentaManualMontoAbonado('');
+                      setVentaManualTipoAbono('mitad');
                       setVentaManualProductoId('');
                       setVentaManualNotas('');
                       setVentaManualMetodo('efectivo');
                       setIsModalVentaManualOpen(true);
                     }}
-                    className="px-3.5 sm:px-4 py-2 rounded-xl bg-[#141312] hover:bg-black text-[#F5E6BE] text-xs font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all"
+                    className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-black text-[#F5E6BE] text-xs font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all"
                   >
-                    <Plus className="w-3.5 h-3.5 text-[#C59A4D]" />
+                    <Plus className="w-4 h-4 text-[#C59A4D]" />
                     <span>+ REGISTRAR VENTA MANUAL</span>
                   </button>
                 </div>
@@ -1905,77 +2121,396 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               {/* Ventas Table or Empty state */}
               {ventas.length === 0 ? (
-                <div className="bg-white rounded-3xl p-8 sm:p-12 border border-[#E5E9EE] text-center space-y-3">
-                  <TrendingUp className="w-10 h-10 mx-auto text-[#C9BFB0]" />
-                  <h3 className="font-extrabold text-[#1A1918]">
+                <div className="bg-white rounded-3xl p-8 sm:p-12 border border-slate-200 text-center space-y-3 shadow-sm">
+                  <TrendingUp className="w-10 h-10 mx-auto text-slate-300" />
+                  <h3 className="font-extrabold text-slate-900">
                     No se encontraron ventas registradas
                   </h3>
-                  <p className="text-xs text-[#7A7368] max-w-md mx-auto">
+                  <p className="text-xs text-slate-500 max-w-md mx-auto">
                     Al aceptar y aprobar pedidos web verificados, se registrarán automáticamente aquí descontando del inventario. También puedes pulsar en &quot;Registrar Venta Manual&quot;.
                   </p>
                 </div>
               ) : (
-                <div className="bg-white rounded-2xl sm:rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
+                <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[620px] text-left text-xs">
-                      <thead className="bg-[#FAF8F5] border-b border-[#EAE5DC] text-[10px] font-black uppercase text-[#7A7368] tracking-wider">
+                    <table className="w-full min-w-[700px] text-left text-xs">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-black uppercase text-slate-500 tracking-wider">
                         <tr>
                           <th className="py-3.5 px-4">Código</th>
                           <th className="py-3.5 px-4">Cliente</th>
                           <th className="py-3.5 px-4">Teléfono</th>
-                          <th className="py-3.5 px-4">Método</th>
+                          <th className="py-3.5 px-4">Método / Estado</th>
                           <th className="py-3.5 px-4">Tipo</th>
                           <th className="py-3.5 px-4">Fecha</th>
-                          <th className="py-3.5 px-4 text-right">Total</th>
+                          <th className="py-3.5 px-4 text-right">
+                            {userRole === 'cajero' ? 'Artículos' : 'Total'}
+                          </th>
                           <th className="py-3.5 px-4 text-center">Acciones</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-[#F2EDE4]">
-                        {ventas.map((v) => (
-                          <tr key={v.id || v.codigo} className="hover:bg-[#FCFAF7] transition-colors">
-                            <td className="py-3.5 px-4 font-mono font-bold text-[#1A1918]">
-                              {v.codigo}
-                            </td>
-                            <td className="py-3.5 px-4 font-extrabold text-[#1A1918]">
-                              {v.cliente_nombre}
-                            </td>
-                            <td className="py-3.5 px-4 text-[#7A7368]">
-                              {v.cliente_telefono || '—'}
-                            </td>
-                            <td className="py-3.5 px-4 uppercase font-bold text-[#5A554D]">
-                              {v.metodo_pago}
-                            </td>
+                      <tbody className="divide-y divide-slate-100">
+                        {ventas
+                          .filter((v) => {
+                            if (!searchQuery.trim()) return true;
+                            const q = searchQuery.toLowerCase();
+                            return (
+                              v.codigo.toLowerCase().includes(q) ||
+                              v.cliente_nombre.toLowerCase().includes(q) ||
+                              (v.cliente_telefono && v.cliente_telefono.includes(q))
+                            );
+                          })
+                          .map((v) => {
+                            const hasSaldo = Boolean(v.saldo_pendiente && v.saldo_pendiente > 0 && v.estado_pago !== 'completo');
+
+                            return (
+                              <tr key={v.id || v.codigo} className="hover:bg-slate-50/70 transition-colors">
+                                <td className="py-3.5 px-4 font-mono font-bold text-slate-900">
+                                  {v.codigo}
+                                </td>
+                                <td className="py-3.5 px-4 font-extrabold text-slate-900">
+                                  {v.cliente_nombre}
+                                </td>
+                                <td className="py-3.5 px-4 text-slate-600 font-mono text-[11px]">
+                                  {v.cliente_telefono || '—'}
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <div className="space-y-0.5">
+                                    <span className="font-bold text-slate-800 uppercase block text-[11px]">
+                                      {v.metodo_pago === 'abono'
+                                        ? 'Abono Parcial'
+                                        : v.metodo_pago === 'contra_entrega'
+                                        ? 'Contra Entrega'
+                                        : v.metodo_pago}
+                                    </span>
+                                    {hasSaldo ? (
+                                      userRole === 'cajero' ? (
+                                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 font-extrabold text-[9px] inline-block">
+                                          ⏳ Saldo pendiente por cobrar
+                                        </span>
+                                      ) : (
+                                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 font-extrabold text-[9px] inline-block">
+                                          ⏳ Debe: ${v.saldo_pendiente?.toFixed(2)} USD
+                                        </span>
+                                      )
+                                    ) : (
+                                      <span className="text-[9px] text-emerald-700 font-bold inline-flex items-center gap-1">
+                                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                        Completado
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                                      v.tipo === 'web'
+                                        ? 'bg-emerald-100 text-emerald-900'
+                                        : 'bg-slate-100 text-slate-800'
+                                    }`}
+                                  >
+                                    {v.tipo || 'web'}
+                                  </span>
+                                </td>
+                                <td className="py-3.5 px-4 text-slate-500 text-[11px]">
+                                  {v.creado_en ? new Date(v.creado_en).toLocaleString('es-PA') : 'Reciente'}
+                                </td>
+                                <td className="py-3.5 px-4 text-right">
+                                  {userRole === 'cajero' ? (
+                                    <span className="font-bold text-slate-700">
+                                      {v.items?.length || 1} prenda(s)
+                                    </span>
+                                  ) : (
+                                    <div>
+                                      <span className="font-black text-sm text-slate-900 block">
+                                        ${Number(v.total).toFixed(2)}
+                                      </span>
+                                      {hasSaldo && (
+                                        <span className="text-[10px] text-emerald-700 font-bold block">
+                                          Abonó: ${Number(v.monto_abonado || 0).toFixed(2)}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="py-3.5 px-4 text-center">
+                                  <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                    {hasSaldo && (
+                                      <button
+                                        type="button"
+                                        disabled={liquidandoVentaId === (v.id || v.codigo)}
+                                        onClick={() => handleLiquidarVenta(v.id || v.codigo)}
+                                        className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] sm:text-xs flex items-center gap-1 shadow-sm transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                                        title="Cobrar saldo al entregar el producto"
+                                      >
+                                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                        <span>
+                                          {liquidandoVentaId === (v.id || v.codigo)
+                                            ? 'Cobrando...'
+                                            : 'COBRAR SALDO'}
+                                        </span>
+                                      </button>
+                                    )}
+
+                                    {canModifyUser(userRole, { rol: 'dueno' } as any) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEliminarVenta(v.id || v.codigo)}
+                                        className="px-2 py-1 rounded-lg text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 font-bold text-xs inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                        title="Eliminar registro de venta permanentemente de Supabase"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                        <span>Eliminar</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ======================================================== */}
+          {/* CONTROL DE APERTURA Y CIERRE DE CAJA */}
+          {/* ======================================================== */}
+          {activeSection === 'caja' && (
+            <div className="space-y-6">
+              {/* Status Banner */}
+              <div
+                className={`rounded-3xl p-6 sm:p-7 border shadow-sm transition-all ${
+                  sesionCaja && sesionCaja.estado === 'abierta'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                    : 'bg-white border-slate-200 text-slate-900'
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div
+                      className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+                        sesionCaja && sesionCaja.estado === 'abierta'
+                          ? 'bg-emerald-600 text-white shadow-md'
+                          : 'bg-slate-100 text-slate-600 border border-slate-200'
+                      }`}
+                    >
+                      <Wallet className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`w-2.5 h-2.5 rounded-full ${
+                            sesionCaja && sesionCaja.estado === 'abierta'
+                              ? 'bg-emerald-500 animate-pulse'
+                              : 'bg-slate-400'
+                          }`}
+                        />
+                        <span className="text-[10px] font-black uppercase tracking-wider">
+                          {sesionCaja && sesionCaja.estado === 'abierta'
+                            ? 'TURNO DE CAJA ACTIVO'
+                            : 'CAJA CERRADA'}
+                        </span>
+                      </div>
+                      <h2 className="text-xl sm:text-2xl font-black mt-1">
+                        {sesionCaja && sesionCaja.estado === 'abierta'
+                          ? `Turno abierto por ${sesionCaja.abierto_por}`
+                          : 'No hay turno activo en este momento'}
+                      </h2>
+                      <p className="text-xs opacity-75 mt-0.5">
+                        {sesionCaja && sesionCaja.estado === 'abierta'
+                          ? `Iniciado el ${new Date(sesionCaja.fecha_apertura).toLocaleString('es-PA')}. Fondo inicial: $${Number(sesionCaja.monto_inicial).toFixed(2)} USD.`
+                          : 'Inicia el turno de caja indicando el fondo inicial en gaveta para registrar cobros y cuadres.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <button
+                      onClick={reloadAllData}
+                      className="p-2.5 rounded-2xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 transition-colors shadow-xs"
+                      title="Actualizar datos"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                    </button>
+
+                    {sesionCaja && sesionCaja.estado === 'abierta' ? (
+                      <button
+                        onClick={() => {
+                          setMontoCierreReal('');
+                          setNotasCierreCaja('');
+                          setIsModalCerrarCajaOpen(true);
+                        }}
+                        className="px-5 py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md cursor-pointer transition-all active:scale-95"
+                      >
+                        <Lock className="w-4 h-4" />
+                        <span>CERRAR TURNO / HACER ARQUEO</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setMontoAperturaCaja('50.00');
+                          setNotasAperturaCaja('');
+                          setIsModalAbrirCajaOpen(true);
+                        }}
+                        className="px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md cursor-pointer transition-all active:scale-95"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>ABRIR TURNO DE CAJA</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Resumen del turno actual si está abierto */}
+                {sesionCaja && sesionCaja.estado === 'abierta' && userRole !== 'cajero' && (() => {
+                  const fechaInicio = sesionCaja.fecha_apertura ? new Date(sesionCaja.fecha_apertura).getTime() : 0;
+                  const ventasEfectivoTurno = ventas
+                    .filter(
+                      (v) =>
+                        (v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega') &&
+                        v.creado_en &&
+                        new Date(v.creado_en).getTime() >= fechaInicio
+                    )
+                    .reduce((acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0), 0);
+
+                  const gastosEfectivoTurno = gastos
+                    .filter((g) => g.creado_en && new Date(g.creado_en).getTime() >= fechaInicio)
+                    .reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
+
+                  const esperado = (Number(sesionCaja.monto_inicial) || 0) + ventasEfectivoTurno - gastosEfectivoTurno;
+
+                  return (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-5 mt-5 border-t border-emerald-200/80 text-xs">
+                      <div className="bg-white/80 p-3 rounded-xl border border-emerald-200">
+                        <span className="text-slate-500 font-bold block text-[10px] uppercase">Fondo Inicial</span>
+                        <strong className="text-base text-slate-900 font-black">${Number(sesionCaja.monto_inicial).toFixed(2)}</strong>
+                      </div>
+                      <div className="bg-white/80 p-3 rounded-xl border border-emerald-200">
+                        <span className="text-slate-500 font-bold block text-[10px] uppercase">Efectivo Cobrado</span>
+                        <strong className="text-base text-emerald-700 font-black">+${ventasEfectivoTurno.toFixed(2)}</strong>
+                      </div>
+                      <div className="bg-white/80 p-3 rounded-xl border border-emerald-200">
+                        <span className="text-slate-500 font-bold block text-[10px] uppercase">Salidas / Gastos</span>
+                        <strong className="text-base text-rose-600 font-black">-${gastosEfectivoTurno.toFixed(2)}</strong>
+                      </div>
+                      <div className="bg-white p-3 rounded-xl border border-emerald-300 shadow-xs">
+                        <span className="text-emerald-800 font-extrabold block text-[10px] uppercase">Esperado en Gaveta</span>
+                        <strong className="text-base text-emerald-900 font-black">${esperado.toFixed(2)} USD</strong>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Historial de Turnos de Caja */}
+              <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm space-y-4 p-5 sm:p-6">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div>
+                    <h3 className="font-black text-sm text-slate-900">Historial de Turnos & Arqueos de Caja</h3>
+                    <p className="text-[11px] text-slate-500">Registro persistente de aperturas, cierres y diferencias de efectivo</p>
+                  </div>
+                  <span className="text-xs font-bold text-slate-500">{historialCaja.length} registros</span>
+                </div>
+
+                {historialCaja.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-slate-400">
+                    No hay turnos de caja registrados aún. Abre la caja para comenzar el primer turno.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[750px] text-left text-xs">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-black uppercase text-slate-500 tracking-wider">
+                        <tr>
+                          <th className="py-3 px-4">Estado</th>
+                          <th className="py-3 px-4">Apertura</th>
+                          <th className="py-3 px-4">Abierto por</th>
+                          <th className="py-3 px-4 text-right">Fondo Inicial</th>
+                          {userRole !== 'cajero' && (
+                            <>
+                              <th className="py-3 px-4 text-right">Esperado</th>
+                              <th className="py-3 px-4 text-right">Contado (Real)</th>
+                              <th className="py-3 px-4 text-right">Diferencia</th>
+                            </>
+                          )}
+                          <th className="py-3 px-4">Cierre</th>
+                          <th className="py-3 px-4">Notas</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {historialCaja.map((reg) => (
+                          <tr key={reg.id} className="hover:bg-slate-50/60 transition-colors">
                             <td className="py-3.5 px-4">
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                                v.tipo === 'web' ? 'bg-emerald-100 text-emerald-900' : 'bg-slate-100 text-slate-800'
-                              }`}>
-                                {v.tipo || 'web'}
+                              <span
+                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                                  reg.estado === 'abierta'
+                                    ? 'bg-emerald-100 text-emerald-900 border border-emerald-200'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}
+                              >
+                                {reg.estado === 'abierta' ? '🟢 Abierta' : 'Cerrada'}
                               </span>
                             </td>
-                            <td className="py-3.5 px-4 text-[#7A7368]">
-                              {v.creado_en ? new Date(v.creado_en).toLocaleString('es-PA') : 'Reciente'}
+                            <td className="py-3.5 px-4 font-mono text-[11px] text-slate-700">
+                              {reg.fecha_apertura ? new Date(reg.fecha_apertura).toLocaleString('es-PA') : '—'}
                             </td>
-                            <td className="py-3.5 px-4 text-right font-black text-sm text-[#1A1918]">
-                              ${Number(v.total).toFixed(2)}
+                            <td className="py-3.5 px-4 font-bold text-slate-900">
+                              {reg.abierto_por}
                             </td>
-                            <td className="py-3.5 px-4 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleEliminarVenta(v.id || v.codigo)}
-                                className="px-2.5 py-1 rounded-lg text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 font-bold text-xs inline-flex items-center gap-1 transition-colors cursor-pointer"
-                                title="Eliminar registro de venta"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                                <span>Eliminar</span>
-                              </button>
+                            <td className="py-3.5 px-4 text-right font-black text-slate-800">
+                              ${Number(reg.monto_inicial || 0).toFixed(2)}
+                            </td>
+                            {userRole !== 'cajero' && (
+                              <>
+                                <td className="py-3.5 px-4 text-right font-medium text-slate-600">
+                                  {reg.monto_esperado !== undefined ? `$${Number(reg.monto_esperado).toFixed(2)}` : '—'}
+                                </td>
+                                <td className="py-3.5 px-4 text-right font-black text-slate-900">
+                                  {reg.monto_final_real !== undefined ? `$${Number(reg.monto_final_real).toFixed(2)}` : '—'}
+                                </td>
+                                <td className="py-3.5 px-4 text-right font-black">
+                                  {reg.diferencia !== undefined ? (
+                                    <span
+                                      className={`px-2 py-0.5 rounded-md text-[11px] font-black ${
+                                        reg.diferencia === 0
+                                          ? 'text-emerald-700 bg-emerald-50'
+                                          : reg.diferencia > 0
+                                          ? 'text-blue-700 bg-blue-50'
+                                          : 'text-rose-700 bg-rose-50'
+                                      }`}
+                                    >
+                                      {reg.diferencia > 0 ? `+${reg.diferencia.toFixed(2)}` : `${reg.diferencia.toFixed(2)}`}
+                                    </span>
+                                  ) : (
+                                    '—'
+                                  )}
+                                </td>
+                              </>
+                            )}
+                            <td className="py-3.5 px-4 text-slate-500 text-[11px]">
+                              {reg.fecha_cierre ? (
+                                <div>
+                                  <span>{new Date(reg.fecha_cierre).toLocaleString('es-PA')}</span>
+                                  {reg.cerrado_por && (
+                                    <span className="block text-[10px] text-slate-400">por {reg.cerrado_por}</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-emerald-600 font-bold">En curso...</span>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-4 text-slate-600 text-[11px] max-w-[200px] truncate">
+                              {reg.notas || '—'}
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )}
 
@@ -2650,8 +3185,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           </div>
 
                           <div className="flex items-baseline justify-between">
-                            <span className="text-[#7A7368]">Monto Total:</span>
-                            <span className="text-xl font-black text-[#1A1918]">${pedido.total}</span>
+                            <span className="text-[#7A7368]">
+                              {userRole === 'cajero' ? 'Artículos:' : 'Monto Total:'}
+                            </span>
+                            {userRole === 'cajero' ? (
+                              <span className="text-base font-black text-slate-800">
+                                {pedido.items?.reduce((s, it) => s + (it.cantidad || 1), 0) || pedido.items?.length || 1} prenda(s)
+                              </span>
+                            ) : (
+                              <span className="text-xl font-black text-[#1A1918]">${pedido.total}</span>
+                            )}
                           </div>
 
                           {/* Estado de validación del comprobante */}
@@ -2864,14 +3407,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   key={idx}
                                   className="flex items-start justify-between gap-2 bg-[#FCFAF7] p-2 rounded-xl border border-[#F0EAE1]"
                                 >
-                                  <div className="flex items-center gap-2 truncate min-w-0">
-                                    {it.imagen_url && (
-                                      <img
-                                        src={it.imagen_url}
-                                        alt=""
-                                        className="w-8 h-9 object-cover rounded bg-white border border-[#EAE5DC] shrink-0"
-                                      />
-                                    )}
+                                  <div className="flex items-center gap-2.5 truncate min-w-0">
+                                    {(() => {
+                                      const prodImg = it.imagen_url || productos.find((p) => p.id === (it.producto_id || it.id))?.imagen_url;
+                                      return prodImg ? (
+                                        <img
+                                          src={prodImg}
+                                          alt={it.nombre}
+                                          className="w-12 h-14 object-cover rounded-xl bg-white border border-[#EAE5DC] shadow-xs shrink-0"
+                                        />
+                                      ) : (
+                                        <div className="w-12 h-14 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0 text-[10px] font-bold">
+                                          Sin foto
+                                        </div>
+                                      );
+                                    })()}
                                     <div className="min-w-0">
                                       <span className="font-bold text-[#1A1918] truncate block text-[11px]">
                                         {it.nombre} <span className="text-[#8C8375]">x{it.cantidad}</span>
@@ -2881,42 +3431,55 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                           {varDesc}
                                         </span>
                                       )}
-                                      <span className="text-[9px] text-[#7A7368] block">
-                                        ${it.precio.toFixed(2)} c/u
+                                      <span className="text-[10px] text-[#7A7368] block">
+                                        {userRole === 'cajero'
+                                          ? `${it.cantidad} unidad(es)`
+                                          : `$${it.precio.toFixed(2)} c/u`}
                                       </span>
                                     </div>
                                   </div>
-                                  <span className="font-black text-[#1A1918] shrink-0 text-xs">
-                                    ${(it.precio * it.cantidad).toFixed(2)}
-                                  </span>
+                                  {userRole !== 'cajero' && (
+                                    <span className="font-black text-[#1A1918] shrink-0 text-xs">
+                                      ${(it.precio * it.cantidad).toFixed(2)}
+                                    </span>
+                                  )}
                                 </div>
                               );
                             })}
                           </div>
 
-                          {/* Desglose Económico Completo del Pedido */}
-                          <div className="pt-2.5 border-t border-[#EAE3D5] space-y-1 text-[11px] text-[#7A7368] bg-[#FAF8F5] p-2 rounded-xl">
-                            <div className="flex justify-between">
-                              <span>Subtotal Artículos:</span>
-                              <span className="font-bold text-[#1A1918]">${(pedido.subtotal || pedido.total).toFixed(2)}</span>
-                            </div>
-                            {(pedido.descuento ?? 0) > 0 && (
-                              <div className="flex justify-between text-emerald-700">
-                                <span>Descuento:</span>
-                                <span className="font-bold">-${Number(pedido.descuento).toFixed(2)}</span>
-                              </div>
-                            )}
-                            <div className="flex justify-between">
-                              <span>Envío:</span>
-                              <span className="font-bold text-[#1A1918]">
-                                {(pedido.costo_envio ?? 0) > 0 ? `$${Number(pedido.costo_envio).toFixed(2)}` : '$0.00'}
+                          {/* Desglose de Artículos (Oculta dinero a cajero) */}
+                          {userRole === 'cajero' ? (
+                            <div className="pt-2 border-t border-[#EAE3D5] text-xs font-bold text-slate-700 bg-[#FAF8F5] p-2.5 rounded-xl flex items-center justify-between">
+                              <span className="text-[11px] text-slate-500 uppercase tracking-wider font-extrabold">Total Prendas:</span>
+                              <span className="font-black text-slate-900 text-sm">
+                                {pedido.items?.reduce((s, it) => s + (it.cantidad || 1), 0) || pedido.items?.length || 1} prenda(s)
                               </span>
                             </div>
-                            <div className="pt-1.5 border-t border-[#EAE3D5] flex justify-between font-black text-xs text-[#1A1918]">
-                              <span>TOTAL FINAL:</span>
-                              <span className="text-[#C59A4D] text-sm">${Number(pedido.total).toFixed(2)}</span>
+                          ) : (
+                            <div className="pt-2.5 border-t border-[#EAE3D5] space-y-1 text-[11px] text-[#7A7368] bg-[#FAF8F5] p-2 rounded-xl">
+                              <div className="flex justify-between">
+                                <span>Subtotal Artículos:</span>
+                                <span className="font-bold text-[#1A1918]">${(pedido.subtotal || pedido.total).toFixed(2)}</span>
+                              </div>
+                              {(pedido.descuento ?? 0) > 0 && (
+                                <div className="flex justify-between text-emerald-700">
+                                  <span>Descuento:</span>
+                                  <span className="font-bold">-${Number(pedido.descuento).toFixed(2)}</span>
+                                </div>
+                              )}
+                              <div className="flex justify-between">
+                                <span>Envío:</span>
+                                <span className="font-bold text-[#1A1918]">
+                                  {(pedido.costo_envio ?? 0) > 0 ? `$${Number(pedido.costo_envio).toFixed(2)}` : '$0.00'}
+                                </span>
+                              </div>
+                              <div className="pt-1.5 border-t border-[#EAE3D5] flex justify-between font-black text-xs text-[#1A1918]">
+                                <span>TOTAL FINAL:</span>
+                                <span className="text-[#C59A4D] text-sm">${Number(pedido.total).toFixed(2)}</span>
+                              </div>
                             </div>
-                          </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -4200,13 +4763,85 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
 
             {/* Image Preview Container */}
-            <div className="bg-[#141312] rounded-2xl p-2 flex items-center justify-center max-h-[60vh] overflow-hidden">
+            <div className="bg-[#141312] rounded-2xl p-2 flex items-center justify-center max-h-[50vh] overflow-hidden">
               <img
                 src={viewingProofUrl}
                 alt="Comprobante en alta resolución"
-                className="max-h-[58vh] w-auto max-w-full object-contain rounded-xl"
+                className="max-h-[48vh] w-auto max-w-full object-contain rounded-xl"
               />
             </div>
+
+            {/* Prendas seleccionadas por el cliente en el pedido con foto y variantes */}
+            {selectedOrderForProof && selectedOrderForProof.items && selectedOrderForProof.items.length > 0 && (
+              <div className="bg-[#FCFAF7] rounded-2xl p-3 border border-[#EAE5DC] space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-black text-[#1A1918] uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5 text-[#C59A4D]" />
+                    Prendas elegidas por el cliente ({selectedOrderForProof.items.length})
+                  </span>
+                  {userRole !== 'cajero' && (
+                    <span className="font-black text-[#C59A4D]">
+                      Total Pedido: ${Number(selectedOrderForProof.total).toFixed(2)}
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
+                  {selectedOrderForProof.items.map((it, idx) => {
+                    const prodImg =
+                      it.imagen_url ||
+                      productos.find((p) => p.id === (it.producto_id || it.id))?.imagen_url;
+                    const varDesc =
+                      it.variante_titulo ||
+                      (it.opciones
+                        ? Object.entries(it.opciones)
+                            .map(([k, v]) => `${k}: ${v}`)
+                            .join(' • ')
+                        : it.talla
+                        ? `Talla: ${it.talla}`
+                        : null);
+
+                    return (
+                      <div
+                        key={idx}
+                        className="flex items-center gap-2.5 bg-white p-2 rounded-xl border border-[#EAE5DC] shadow-xs"
+                      >
+                        {prodImg ? (
+                          <img
+                            src={prodImg}
+                            alt={it.nombre}
+                            className="w-11 h-13 object-cover rounded-lg border border-[#DDD7CC] shrink-0"
+                          />
+                        ) : (
+                          <div className="w-11 h-13 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0 text-[10px] font-bold">
+                            Sin foto
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <span className="font-bold text-xs text-[#1A1918] truncate block">
+                            {it.nombre}
+                          </span>
+                          {varDesc && (
+                            <span className="text-[10px] text-[#C59A4D] font-bold block truncate">
+                              {varDesc}
+                            </span>
+                          )}
+                          <span className="text-[10px] text-[#7A7368] block">
+                            {userRole === 'cajero'
+                              ? `Cantidad: ${it.cantidad}`
+                              : `Cant: ${it.cantidad} • $${it.precio.toFixed(2)} c/u`}
+                          </span>
+                        </div>
+                        {userRole !== 'cajero' && (
+                          <span className="text-xs font-black text-slate-900 shrink-0">
+                            ${(it.precio * it.cantidad).toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Quick status change buttons inside modal */}
             {selectedOrderForProof && (
@@ -4440,10 +5075,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              {/* Selector de Método de Pago con Efectivo destacado */}
+              {/* Selector de Método de Pago (Efectivo, Yappy, Transferencia, Abono / Contra Entrega) */}
               <div>
                 <label className="font-extrabold text-[#1A1918] block mb-1.5">
-                  Método de Pago (Efectivo disponible solo en este panel) *
+                  Método de Pago *
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <button
@@ -4464,8 +5099,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     onClick={() => setVentaManualMetodo('yappy')}
                     className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
                       ventaManualMetodo === 'yappy'
-                        ? 'bg-[#141312] text-[#E6C687] border-[#141312] font-black shadow-md scale-98'
-                        : 'bg-[#FAF8F5] border-[#E5DFD5] text-[#1A1918] hover:border-[#141312]'
+                        ? 'bg-sky-600 text-white border-sky-600 font-black shadow-md scale-98'
+                        : 'bg-[#FAF8F5] border-[#E5DFD5] text-[#1A1918] hover:border-sky-500'
                     }`}
                   >
                     <span className="text-base">📱</span>
@@ -4487,18 +5122,111 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => setVentaManualMetodo('tarjeta')}
+                    onClick={() => {
+                      setVentaManualMetodo('abono_contraentrega');
+                      setVentaManualTipoAbono('mitad');
+                    }}
                     className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
-                      ventaManualMetodo === 'tarjeta'
-                        ? 'bg-[#141312] text-[#E6C687] border-[#141312] font-black shadow-md scale-98'
-                        : 'bg-[#FAF8F5] border-[#E5DFD5] text-[#1A1918] hover:border-[#141312]'
+                      ventaManualMetodo === 'abono_contraentrega'
+                        ? 'bg-amber-500 text-slate-950 border-amber-600 font-black shadow-md scale-98'
+                        : 'bg-[#FAF8F5] border-[#E5DFD5] text-[#1A1918] hover:border-amber-500'
                     }`}
                   >
-                    <span className="text-base">💳</span>
-                    <span className="text-[11px] font-extrabold">Tarjeta / POS</span>
+                    <span className="text-base">🤝</span>
+                    <span className="text-[11px] font-extrabold">Abono / Contra Entrega</span>
                   </button>
                 </div>
               </div>
+
+              {/* Opciones de Abono y saldo si se eligió abono_contraentrega */}
+              {ventaManualMetodo === 'abono_contraentrega' && (
+                <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-50/90 border border-amber-200/90 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-xs text-amber-950 flex items-center gap-1.5">
+                      <span>🤝</span>
+                      <span>Configurar Abono Inicial & Saldo Pendiente</span>
+                    </span>
+                    <span className="text-[10px] text-amber-800 font-bold">
+                      Termina de pagar al recibir
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setVentaManualTipoAbono('mitad')}
+                      className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                        ventaManualTipoAbono === 'mitad'
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'bg-white border border-amber-300 text-slate-700 hover:bg-amber-100/60'
+                      }`}
+                    >
+                      50% (La Mitad)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setVentaManualTipoAbono('personalizado')}
+                      className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                        ventaManualTipoAbono === 'personalizado'
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'bg-white border border-amber-300 text-slate-700 hover:bg-amber-100/60'
+                      }`}
+                    >
+                      Menos / Otro Monto
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setVentaManualTipoAbono('cero')}
+                      className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                        ventaManualTipoAbono === 'cero'
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'bg-white border border-amber-300 text-slate-700 hover:bg-amber-100/60'
+                      }`}
+                    >
+                      0% (Contra Entrega Pura)
+                    </button>
+                  </div>
+
+                  {ventaManualTipoAbono === 'personalizado' && (
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-800 block mb-1">
+                        ¿Cuánto abonó el cliente en este momento? ($)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="Ej: 15.00"
+                        value={ventaManualMontoAbonado}
+                        onChange={(e) => setVentaManualMontoAbonado(e.target.value)}
+                        className="w-full bg-white px-3.5 py-2 rounded-xl border border-amber-300 focus:outline-none font-black text-sm"
+                      />
+                    </div>
+                  )}
+
+                  {(() => {
+                    const totalNum = parseFloat(ventaManualMonto) || 0;
+                    let abonoNum = totalNum;
+                    if (ventaManualTipoAbono === 'mitad') abonoNum = Math.round((totalNum / 2) * 100) / 100;
+                    else if (ventaManualTipoAbono === 'cero') abonoNum = 0;
+                    else abonoNum = Math.min(totalNum, Math.max(0, parseFloat(ventaManualMontoAbonado) || 0));
+                    const pendiente = Math.max(0, totalNum - abonoNum);
+
+                    return (
+                      <div className="flex items-center justify-between text-xs pt-2 border-t border-amber-200">
+                        <div>
+                          <span className="text-slate-500 text-[10px] block font-bold">Abono Inicial recibido:</span>
+                          <strong className="text-slate-900 font-black text-sm">${abonoNum.toFixed(2)} USD</strong>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-amber-900 text-[10px] block font-extrabold">Saldo que pagará al entregar:</span>
+                          <strong className="text-rose-700 font-black text-base">${pendiente.toFixed(2)} USD</strong>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
 
               {/* Producto Asociado y control de existencias */}
               <div>
@@ -4655,6 +5383,245 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal Abrir Caja */}
+      {isModalAbrirCajaOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-4 border border-slate-200 shadow-2xl animate-fade-in my-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
+                  <Wallet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">Apertura de Turno de Caja</h3>
+                  <p className="text-[11px] text-slate-500">Inicia el turno indicando el fondo en gaveta</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsModalAbrirCajaOpen(false)}
+                className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAbrirCajaSubmit} className="space-y-4 text-xs">
+              <div>
+                <label className="font-extrabold text-slate-900 block mb-1.5">
+                  Fondo Inicial en Gaveta (Efectivo Base) *
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-black text-slate-400 text-sm">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    placeholder="50.00"
+                    value={montoAperturaCaja}
+                    onChange={(e) => setMontoAperturaCaja(e.target.value)}
+                    className="w-full bg-slate-50 pl-8 pr-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-emerald-600 font-black text-base text-slate-900"
+                  />
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-[10px] text-slate-400 font-bold">Rápido:</span>
+                  {['20.00', '50.00', '100.00'].map((val) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setMontoAperturaCaja(val)}
+                      className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[10px] transition-colors"
+                    >
+                      ${val}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="font-extrabold text-slate-900 block mb-1">
+                  Notas u Observaciones de Apertura (opcional)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Ej: Turno de la mañana, billetes de $5 y $1..."
+                  value={notasAperturaCaja}
+                  onChange={(e) => setNotasAperturaCaja(e.target.value)}
+                  className="w-full bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-emerald-600 resize-none text-slate-900"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsModalAbrirCajaOpen(false)}
+                  className="px-4 py-2.5 rounded-xl text-slate-500 hover:text-slate-900 font-bold cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCajaSubmitting}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer"
+                >
+                  <Wallet className="w-3.5 h-3.5" />
+                  <span>{isCajaSubmitting ? 'Abriendo...' : 'INICIAR TURNO DE CAJA'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Cerrar Caja / Arqueo */}
+      {isModalCerrarCajaOpen && sesionCaja && (() => {
+        const fechaInicio = sesionCaja.fecha_apertura ? new Date(sesionCaja.fecha_apertura).getTime() : 0;
+        const ventasEfectivoTurno = ventas
+          .filter(
+            (v) =>
+              (v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega') &&
+              v.creado_en &&
+              new Date(v.creado_en).getTime() >= fechaInicio
+          )
+          .reduce((acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0), 0);
+
+        const gastosEfectivoTurno = gastos
+          .filter((g) => g.creado_en && new Date(g.creado_en).getTime() >= fechaInicio)
+          .reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
+
+        const fondoInicial = Number(sesionCaja.monto_inicial) || 0;
+        const esperado = fondoInicial + ventasEfectivoTurno - gastosEfectivoTurno;
+        const real = parseFloat(montoCierreReal);
+        const hasReal = !isNaN(real);
+        const diferencia = hasReal ? real - esperado : 0;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-4 border border-slate-200 shadow-2xl animate-fade-in my-auto">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-800 flex items-center justify-center font-bold">
+                    <Lock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">Cierre de Caja & Arqueo</h3>
+                    <p className="text-[11px] text-slate-500">Conteo físico de efectivo y cuadre final</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsModalCerrarCajaOpen(false)}
+                  className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-800 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Resumen esperado del turno */}
+              {userRole !== 'cajero' ? (
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-2 text-xs">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Fondo Inicial:</span>
+                    <strong className="text-slate-900">${fondoInicial.toFixed(2)}</strong>
+                  </div>
+                  <div className="flex justify-between text-emerald-700">
+                    <span>(+) Ventas Efectivo:</span>
+                    <strong>+${ventasEfectivoTurno.toFixed(2)}</strong>
+                  </div>
+                  <div className="flex justify-between text-rose-600">
+                    <span>(-) Gastos del Turno:</span>
+                    <strong>-${gastosEfectivoTurno.toFixed(2)}</strong>
+                  </div>
+                  <div className="pt-2 border-t border-slate-200 flex justify-between font-black text-slate-900">
+                    <span>Efectivo Esperado en Gaveta:</span>
+                    <span className="text-sm font-black text-emerald-800">${esperado.toFixed(2)} USD</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-xs text-slate-600">
+                  <span>Cuenta el dinero total en efectivo que se encuentra físicamente en la gaveta.</span>
+                </div>
+              )}
+
+              <form onSubmit={handleCerrarCajaSubmit} className="space-y-4 text-xs">
+                <div>
+                  <label className="font-extrabold text-slate-900 block mb-1.5">
+                    Dinero Real Contado en Gaveta (Efectivo) *
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-black text-slate-400 text-sm">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      placeholder="0.00"
+                      value={montoCierreReal}
+                      onChange={(e) => setMontoCierreReal(e.target.value)}
+                      className="w-full bg-slate-50 pl-8 pr-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-rose-600 font-black text-base text-slate-900"
+                    />
+                  </div>
+
+                  {/* Diferencia en tiempo real para Dueño/Admin */}
+                  {hasReal && userRole !== 'cajero' && (
+                    <div
+                      className={`mt-2 p-2.5 rounded-xl text-xs font-bold flex items-center justify-between border ${
+                        Math.abs(diferencia) < 0.01
+                          ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                          : diferencia > 0
+                          ? 'bg-blue-50 text-blue-900 border-blue-200'
+                          : 'bg-rose-50 text-rose-900 border-rose-200'
+                      }`}
+                    >
+                      <span>
+                        {Math.abs(diferencia) < 0.01
+                          ? '✅ Cuadre Exacto'
+                          : diferencia > 0
+                          ? '🟢 Sobrante en Gaveta'
+                          : '🔴 Faltante en Gaveta'}
+                      </span>
+                      <span className="font-black">
+                        {diferencia >= 0 ? `+$${diferencia.toFixed(2)}` : `-$${Math.abs(diferencia).toFixed(2)}`}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="font-extrabold text-slate-900 block mb-1">
+                    Observaciones o Notas de Cierre (opcional)
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="Ej: Justificación de billetes, cambio entregado a dueño..."
+                    value={notasCierreCaja}
+                    onChange={(e) => setNotasCierreCaja(e.target.value)}
+                    className="w-full bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-rose-600 resize-none text-slate-900"
+                  />
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalCerrarCajaOpen(false)}
+                    className="px-4 py-2.5 rounded-xl text-slate-500 hover:text-slate-900 font-bold cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isCajaSubmitting}
+                    className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>{isCajaSubmitting ? 'Cerrando...' : 'GUARDAR CIERRE & ARQUEO'}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modals for creating/editing */}
       <ModalNuevoProducto

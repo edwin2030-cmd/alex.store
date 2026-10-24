@@ -20,7 +20,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, {
   dueno: {
     name: '👑 Dueño (Acceso Total)',
     badgeColor: 'bg-[#C59A4D] text-[#141312] border border-[#B3873B]',
-    sections: ['dashboard', 'pedidos', 'ventas', 'gastos', 'movimientos', 'productos', 'categorias', 'inventario', 'clientes', 'usuarios'],
+    sections: ['dashboard', 'pedidos', 'ventas', 'caja', 'gastos', 'movimientos', 'productos', 'categorias', 'inventario', 'clientes', 'usuarios'],
     canManageUsers: true,
     canViewFinancials: true,
     canManageRoles: true,
@@ -28,7 +28,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, {
   administrador: {
     name: '⚡ Administrador (Operativo y Finanzas)',
     badgeColor: 'bg-indigo-600 text-white border border-indigo-500',
-    sections: ['dashboard', 'pedidos', 'ventas', 'gastos', 'movimientos', 'productos', 'categorias', 'inventario', 'clientes'],
+    sections: ['dashboard', 'pedidos', 'ventas', 'caja', 'gastos', 'movimientos', 'productos', 'categorias', 'inventario', 'clientes'],
     canManageUsers: false,
     canViewFinancials: true,
     canManageRoles: false,
@@ -36,7 +36,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, {
   cajero: {
     name: '💼 Trabajador / Cajero',
     badgeColor: 'bg-emerald-600 text-white border border-emerald-500',
-    sections: ['productos', 'inventario', 'pedidos', 'clientes', 'categorias'],
+    sections: ['pedidos', 'ventas', 'caja', 'productos', 'inventario', 'clientes', 'categorias'],
     canManageUsers: false,
     canViewFinancials: false,
     canManageRoles: false,
