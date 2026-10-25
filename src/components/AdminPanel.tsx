@@ -11,6 +11,7 @@ import {
   ClienteResumen,
   MovimientoTrabajador,
   RegistroCaja,
+  VentaManualItem,
 } from '../types';
 import {
   getProductos,
@@ -191,6 +192,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [ventaManualProductoId, setVentaManualProductoId] = useState('');
   const [ventaManualCantidad, setVentaManualCantidad] = useState('1');
   const [ventaManualVarianteId, setVentaManualVarianteId] = useState('');
+  const [ventaManualTalla, setVentaManualTalla] = useState('');
+  const [ventaManualColor, setVentaManualColor] = useState('');
+  const [ventaManualItems, setVentaManualItems] = useState<Array<{
+    producto_id: string;
+    nombre: string;
+    precio: number;
+    cantidad: number;
+    subtotal: number;
+    variante_id?: string;
+    variante_titulo?: string;
+    talla?: string;
+    color?: string;
+    imagen_url?: string;
+  }>>([]);
   const [ventaManualNotas, setVentaManualNotas] = useState('');
   const [submittingVentaManual, setSubmittingVentaManual] = useState(false);
   const [liquidandoVentaId, setLiquidandoVentaId] = useState<string | null>(null);
@@ -208,6 +223,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [pedidoFilter, setPedidoFilter] = useState<'todos' | 'pendientes' | 'aprobados' | 'entregados' | 'cancelados'>('todos');
   const [inventarioFilter, setInventarioFilter] = useState<'todos' | 'disponibles' | 'stock-bajo' | 'agotados'>('todos');
   const [gastoFilter, setGastoFilter] = useState('todas');
+  const [gastoFechaFilter, setGastoFechaFilter] = useState('');
 
   // Filtros de Auditoría y Movimientos
   const [movimientosSearch, setMovimientosSearch] = useState('');
@@ -339,6 +355,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const pedidosPendientes = pedidos.filter((p) => p.estado === 'pendiente').length;
   const pedidosAprobados = pedidos.filter((p) => p.estado === 'aprobado' || p.estado === 'entregado').length;
   const volumenTotalPedidos = pedidos.reduce((acc, p) => acc + (p.total || 0), 0);
+
+  const getDuracionCaja = (fechaInicio?: string, fechaFin?: string) => {
+    if (!fechaInicio) return '—';
+    const start = new Date(fechaInicio).getTime();
+    const end = fechaFin ? new Date(fechaFin).getTime() : Date.now();
+    const diffMs = Math.max(0, end - start);
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const hours = Math.floor(diffMins / 60);
+    const mins = diffMins % 60;
+    if (hours === 0) return `${mins} min`;
+    return `${hours}h ${mins}m`;
+  };
 
   // Extracción consolidada de clientes basada prioritariamente en el NÚMERO DE TELÉFONO
   const clientesList: ClienteResumen[] = useMemo(() => {
@@ -890,6 +918,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const cantNum = Math.max(1, parseInt(ventaManualCantidad) || 1);
     setSubmittingVentaManual(true);
     try {
+      const cajeroActual = currentUser?.nombre || currentUser?.email?.split('@')[0] || 'Cajero';
       const selectedProd = productos.find((p) => p.id === ventaManualProductoId);
       let selectedVarTitulo = '';
       if (selectedProd && ventaManualVarianteId && Array.isArray(selectedProd.variantes)) {
@@ -901,20 +930,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         }
       }
 
-      const items = selectedProd
-        ? [
-            {
-              id: selectedProd.id,
-              producto_id: selectedProd.id,
-              nombre: selectedProd.nombre,
-              precio: montoNum,
-              cantidad: cantNum,
-              variante_id: ventaManualVarianteId || undefined,
-              variante_titulo: selectedVarTitulo || undefined,
-              imagen_url: selectedProd.imagen_url || (selectedProd.imagenes && selectedProd.imagenes[0]) || undefined,
-            },
-          ]
-        : [];
+      let itemsToSave: any[] = [];
+      if (ventaManualItems.length > 0) {
+        itemsToSave = ventaManualItems.map((it) => ({
+          id: it.producto_id,
+          producto_id: it.producto_id,
+          nombre: it.nombre,
+          precio: it.precio,
+          cantidad: it.cantidad,
+          variante_id: it.variante_id,
+          variante_titulo: it.variante_titulo,
+          talla: it.talla,
+          color: it.color,
+          imagen_url: it.imagen_url,
+        }));
+      } else if (selectedProd) {
+        itemsToSave = [
+          {
+            id: selectedProd.id,
+            producto_id: selectedProd.id,
+            nombre: selectedProd.nombre,
+            precio: montoNum,
+            cantidad: cantNum,
+            variante_id: ventaManualVarianteId || undefined,
+            variante_titulo: selectedVarTitulo || undefined,
+            talla: ventaManualTalla || undefined,
+            color: ventaManualColor || undefined,
+            imagen_url: selectedProd.imagen_url || (selectedProd.imagenes && selectedProd.imagenes[0]) || undefined,
+          },
+        ];
+      }
 
       // Cálculo de abono y saldo pendiente
       let montoAbonado = montoNum;
@@ -949,32 +994,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         monto_abonado: montoAbonado,
         saldo_pendiente: saldoPendiente,
         estado_pago: estadoPago,
-        items,
+        cajero_nombre: cajeroActual,
+        registrado_por: cajeroActual,
+        items: itemsToSave,
         tipo: 'manual',
         notas:
           ventaManualNotas.trim() ||
-          (selectedProd
-            ? `Producto: ${selectedProd.nombre}${selectedVarTitulo ? ` (${selectedVarTitulo})` : ''} x${cantNum}${saldoPendiente > 0 ? ` • Abonó: $${montoAbonado.toFixed(2)}, Saldo al entregar: $${saldoPendiente.toFixed(2)}` : ''}`
+          (itemsToSave.length > 0
+            ? `${itemsToSave.map((it) => `${it.nombre}${it.variante_titulo ? ` (${it.variante_titulo})` : ''} x${it.cantidad}`).join(', ')}${saldoPendiente > 0 ? ` • Abonó: $${montoAbonado.toFixed(2)}, Saldo al entregar: $${saldoPendiente.toFixed(2)}` : ''}`
             : saldoPendiente > 0 ? `Abonó: $${montoAbonado.toFixed(2)}, Saldo al entregar: $${saldoPendiente.toFixed(2)}` : undefined),
       });
 
       if (res.success && res.data) {
         const nuevaVenta = res.data;
 
-        // Descontar inmediatamente en el estado local de productos si se asoció un producto
-        if (selectedProd) {
+        // Descontar inmediatamente en el estado local de productos por cada producto vendido
+        if (itemsToSave.length > 0) {
           setProductos((prev) =>
             prev.map((prod) => {
-              if (prod.id !== selectedProd.id) return prod;
-              const nextStock = Math.max(0, (prod.stock ?? 0) - cantNum);
+              const matchedItems = itemsToSave.filter((it) => (it.producto_id || it.id) === prod.id);
+              if (matchedItems.length === 0) return prod;
+              const totalCantVendida = matchedItems.reduce((acc, it) => acc + (it.cantidad || 1), 0);
+              const nextStock = Math.max(0, (prod.stock ?? 0) - totalCantVendida);
               let nextVars = prod.variantes;
-              if (Array.isArray(nextVars) && (ventaManualVarianteId || selectedVarTitulo)) {
+              if (Array.isArray(nextVars)) {
                 nextVars = nextVars.map((v: any) => {
-                  if (
-                    (ventaManualVarianteId && (v.id === ventaManualVarianteId || v.titulo === ventaManualVarianteId)) ||
-                    (selectedVarTitulo && (v.titulo === selectedVarTitulo || v.id === selectedVarTitulo))
-                  ) {
-                    return { ...v, stock: Math.max(0, (v.stock ?? 0) - cantNum) };
+                  const varMatch = matchedItems.find((it) => (it.variante_id && v.id === it.variante_id) || (it.variante_titulo && v.titulo === it.variante_titulo));
+                  if (varMatch) {
+                    return { ...v, stock: Math.max(0, (v.stock ?? 0) - (varMatch.cantidad || 1)) };
                   }
                   return v;
                 });
@@ -994,6 +1041,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         setVentaManualProductoId('');
         setVentaManualCantidad('1');
         setVentaManualVarianteId('');
+        setVentaManualTalla('');
+        setVentaManualColor('');
+        setVentaManualItems([]);
         setVentaManualNotas('');
         setVentaManualMetodo('efectivo');
 
@@ -1003,12 +1053,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         // Registrar auditoría
         registrarMovimiento({
           usuario_id: currentUser?.id,
-          usuario_nombre: currentUser?.nombre || currentUser?.email || 'Admin',
+          usuario_nombre: cajeroActual,
           usuario_email: currentUser?.email || '',
           rol: currentUser?.rol || 'cajero',
           accion: 'Registró Venta Manual',
           modulo: 'ventas',
-          detalles: `Venta manual por $${montoNum.toFixed(2)} (${metodoReal.toUpperCase()}) para ${ventaManualCliente.trim()} (Tel: ${ventaManualTelefono.trim() || 'N/A'})${saldoPendiente > 0 ? ` [Abonado: $${montoAbonado.toFixed(2)} | Pendiente: $${saldoPendiente.toFixed(2)}]` : ''}${selectedProd ? ` - Descontó ${cantNum} un. de "${selectedProd.nombre}"` : ''}.`,
+          detalles: `Venta manual por $${montoNum.toFixed(2)} (${metodoReal.toUpperCase()}) para ${ventaManualCliente.trim()} (Tel: ${ventaManualTelefono.trim() || 'N/A'})${saldoPendiente > 0 ? ` [Abonado: $${montoAbonado.toFixed(2)} | Pendiente: $${saldoPendiente.toFixed(2)}]` : ''}${itemsToSave.length > 0 ? ` - ${itemsToSave.length} producto(s) vendidos` : ''}.`,
         }).then(() => getMovimientosTrabajadores().then(setMovimientos));
 
         setUserFeedback({
@@ -1205,7 +1255,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   );
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col lg:flex-row font-sans">
+    <div className="min-h-screen bg-[#080706] text-white flex flex-col lg:flex-row font-sans selection:bg-[#C59A4D] selection:text-black">
       {/* Mobile & Tablet Top Header (Optimized for Android & iOS with 3-rayitas Menu button) */}
       <div className="lg:hidden bg-[#0F0E0D] text-white border-b border-[#26221E] sticky top-0 z-30">
         <div className="px-3.5 py-3 flex items-center justify-between gap-2">
@@ -1509,9 +1559,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* Main Content Viewport */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
         {/* Top bar header */}
-        <header className="bg-white border-b border-[#E5E9EE] px-4 sm:px-6 py-3.5 sm:py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+        <header className="bg-[#0F0E0D] border-b border-[#26221E] px-4 sm:px-6 py-3.5 sm:py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <div>
-            <h1 className="text-xl sm:text-2xl font-black text-[#1A1918] font-heading capitalize leading-tight">
+            <h1 className="text-xl sm:text-2xl font-black text-white font-heading capitalize leading-tight">
               {activeSection === 'dashboard' && 'Dashboard General'}
               {activeSection === 'pedidos' && 'Gestión de Pedidos & Comprobantes'}
               {activeSection === 'ventas' && 'Módulo de Ventas & Facturación'}
@@ -1524,7 +1574,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {activeSection === 'clientes' && 'Directorio de Clientes'}
               {activeSection === 'usuarios' && 'Gestión de Usuarios, Roles & Permisos'}
             </h1>
-            <p className="text-xs text-[#7A7368] mt-0.5">
+            <p className="text-xs text-[#A69F93] mt-0.5">
               {activeSection === 'dashboard' && 'Métricas operativas y financieras generales de AlexStore'}
               {activeSection === 'pedidos' && 'Verifica comprobantes de pago por Yappy y Transferencias, y aprueba compras'}
               {activeSection === 'ventas' && 'Ventas web aprobadas y registro de ventas manuales de mostrador'}
@@ -1534,18 +1584,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {activeSection === 'productos' && 'Administra catálogo, precios, fotos e inventario en public.productos'}
               {activeSection === 'categorias' && 'Crea y edita categorías en public.categorias'}
               {activeSection === 'inventario' && 'Monitorea existencias, alertas de stock mínimo y reposición en public.inventario'}
-              {activeSection === 'clientes' && 'Listado consolidado de clientes, pedidos acumulados y contacto directo'}
+              {activeSection === 'clientes' && 'Directorio consolidado de clientes, pedidos acumulados y contacto directo'}
               {activeSection === 'usuarios' && 'Administración de cuentas de Dueño, Administradores y Cajeros con seguridad RLS'}
             </p>
           </div>
 
-          <button
-            onClick={onExitAdmin}
-            className="px-4 py-2 rounded-xl border border-[#D5DCE4] hover:bg-[#F4F6F8] text-xs font-bold uppercase tracking-wider flex items-center gap-2 self-start sm:self-auto transition-colors cursor-pointer"
-          >
-            <ExternalLink className="w-3.5 h-3.5 text-[#C59A4D]" />
-            <span>VER CATÁLOGO</span>
-          </button>
+          <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+            {canAccessSection(userRole, 'usuarios') && (
+              <button
+                onClick={() => setIsModalSqlAuthOpen(true)}
+                className="px-3.5 py-2 rounded-xl border border-[#3A332B] bg-[#1A1816] hover:bg-[#25221E] text-xs font-bold text-[#E6C687] flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                title="Ver scripts y esquema SQL para Supabase"
+              >
+                <Database className="w-3.5 h-3.5 text-[#C59A4D]" />
+                <span>Scripts SQL</span>
+              </button>
+            )}
+
+            <button
+              onClick={onExitAdmin}
+              className="px-4 py-2 rounded-xl border border-[#2D2822] bg-[#141210] hover:bg-[#1E1B18] text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2 transition-colors cursor-pointer shadow-sm"
+            >
+              <ExternalLink className="w-3.5 h-3.5 text-[#C59A4D]" />
+              <span>VER CATÁLOGO</span>
+            </button>
+          </div>
         </header>
 
         {/* Content Body */}
@@ -1571,17 +1634,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
           {/* GUARD DE SEGURIDAD ESTRICTO: Bloqueo de secciones no autorizadas */}
           {!canAccessSection(userRole, activeSection) && (
-            <div className="bg-white rounded-3xl p-8 border border-rose-200 text-center space-y-3 animate-fade-in">
-              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+            <div className="bg-[#13110F] rounded-3xl p-8 border border-rose-900/50 text-center space-y-3 animate-fade-in shadow-xl">
+              <div className="w-12 h-12 rounded-2xl bg-rose-950/60 text-rose-400 border border-rose-800/60 flex items-center justify-center mx-auto">
                 <ShieldAlert className="w-6 h-6" />
               </div>
-              <h2 className="text-lg font-black text-[#1A1918]">Módulo Restringido</h2>
-              <p className="text-xs text-[#7A7368] max-w-md mx-auto">
-                Tu rol actual (<strong>{ROLE_PERMISSIONS[userRole]?.name}</strong>) no tiene autorización para acceder a este módulo financiero o administrativo.
+              <h2 className="text-lg font-black text-white">Módulo Restringido</h2>
+              <p className="text-xs text-[#A69F93] max-w-md mx-auto">
+                Tu rol actual (<strong className="text-[#E6C687]">{ROLE_PERMISSIONS[userRole]?.name}</strong>) no tiene autorización para acceder a este módulo financiero o administrativo.
               </p>
               <button
                 onClick={() => setActiveSection('pedidos')}
-                className="px-5 py-2.5 rounded-2xl bg-[#141312] text-white text-xs font-black uppercase tracking-wider cursor-pointer"
+                className="px-5 py-2.5 rounded-2xl bg-[#C59A4D] hover:bg-[#D4A95D] text-black text-xs font-black uppercase tracking-wider cursor-pointer shadow-md transition-all active:scale-95"
               >
                 Ir a Pedidos & Comprobantes
               </button>
@@ -1593,12 +1656,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           {activeSection === 'dashboard' && (
             <div className="space-y-6">
               {/* Top Banner Card: Resumen General del Negocio */}
-              <div className="bg-white rounded-3xl p-6 border border-[#E5E9EE] shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="bg-[#13110F] rounded-3xl p-6 border border-[#26221E] shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-lg font-black text-[#1A1918] font-heading">
+                  <h2 className="text-lg font-black text-white font-heading">
                     Resumen General del Negocio
                   </h2>
-                  <p className="text-xs text-[#7A7368] mt-0.5">
+                  <p className="text-xs text-[#A69F93] mt-0.5">
                     Datos sincronizados en tiempo real con Supabase Database & Storage.
                   </p>
                 </div>
@@ -1606,7 +1669,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div className="flex items-center gap-2.5">
                   <button
                     onClick={reloadAllData}
-                    className="p-2.5 rounded-2xl bg-[#F4F6F8] hover:bg-[#EAEFF5] text-[#1A1918] transition-colors"
+                    className="p-2.5 rounded-2xl bg-[#1C1A17] hover:bg-[#25221E] text-white border border-[#2D2822] transition-colors cursor-pointer"
                     title="Actualizar datos"
                   >
                     <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -1617,9 +1680,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       setProductoToEdit(null);
                       setIsModalProductoOpen(true);
                     }}
-                    className="px-5 py-2.5 rounded-2xl bg-[#141312] hover:bg-black text-[#F5E6BE] text-xs font-black tracking-wider uppercase flex items-center gap-1.5 shadow-md transition-all active:scale-95"
+                    className="px-5 py-2.5 rounded-2xl bg-[#C59A4D] hover:bg-[#B3873B] text-[#141312] text-xs font-black tracking-wider uppercase flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer"
                   >
-                    <Plus className="w-4 h-4" />
+                    <Plus className="w-4 h-4 stroke-[3]" />
                     <span>NUEVO PRODUCTO</span>
                   </button>
                 </div>
@@ -1630,36 +1693,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 {/* 1. Total Productos */}
                 <div
                   onClick={() => setActiveSection('productos')}
-                  className="bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#E5E9EE] shadow-xs hover:border-[#C59A4D]/50 transition-all cursor-pointer flex flex-col justify-between"
+                  className="bg-[#13110F] rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#26221E] shadow-md hover:border-[#C59A4D]/50 transition-all cursor-pointer flex flex-col justify-between"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#A69F93]">
                       TOTAL PRODUCTOS
                     </span>
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#1C1A17] border border-[#2D2822] flex items-center justify-center text-[#C59A4D]">
                       <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </div>
                   </div>
                   <div className="my-2 sm:my-3">
-                    <span className="text-2xl sm:text-3xl font-black text-[#1A1918]">{totalProductos}</span>
+                    <span className="text-2xl sm:text-3xl font-black text-white">{totalProductos}</span>
                   </div>
-                  <span className="text-[10px] sm:text-[11px] font-bold text-[#C59A4D]">Ver catálogo completo →</span>
+                  <span className="text-[10px] sm:text-[11px] font-bold text-[#E6C687]">Ver catálogo completo →</span>
                 </div>
 
                 {/* 2. Activos Visibles */}
-                <div className="bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#E5E9EE] shadow-xs flex flex-col justify-between">
+                <div className="bg-[#13110F] rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#26221E] shadow-md flex flex-col justify-between">
                   <div className="flex items-center justify-between">
-                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#A69F93]">
                       ACTIVOS (VISIBLES)
                     </span>
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-emerald-950/60 border border-emerald-800/60 flex items-center justify-center text-emerald-400">
                       <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </div>
                   </div>
                   <div className="my-2 sm:my-3">
-                    <span className="text-2xl sm:text-3xl font-black text-[#1A1918]">{activosVisibles}</span>
+                    <span className="text-2xl sm:text-3xl font-black text-white">{activosVisibles}</span>
                   </div>
-                  <span className="text-[10px] sm:text-[11px] font-bold text-emerald-600">
+                  <span className="text-[10px] sm:text-[11px] font-bold text-emerald-400">
                     {totalProductos > 0 ? Math.round((activosVisibles / totalProductos) * 100) : 100}% del total
                   </span>
                 </div>
@@ -1667,20 +1730,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 {/* 3. Categorías */}
                 <div
                   onClick={() => setActiveSection('categorias')}
-                  className="bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#E5E9EE] shadow-xs hover:border-[#C59A4D]/50 transition-all cursor-pointer flex flex-col justify-between"
+                  className="bg-[#13110F] rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#26221E] shadow-md hover:border-[#C59A4D]/50 transition-all cursor-pointer flex flex-col justify-between"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#A69F93]">
                       CATEGORÍAS
                     </span>
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-50 flex items-center justify-center text-[#C59A4D]">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-950/50 border border-amber-800/50 flex items-center justify-center text-[#E6C687]">
                       <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </div>
                   </div>
                   <div className="my-2 sm:my-3">
-                    <span className="text-2xl sm:text-3xl font-black text-[#1A1918]">{totalCategorias}</span>
+                    <span className="text-2xl sm:text-3xl font-black text-white">{totalCategorias}</span>
                   </div>
-                  <span className="text-[10px] sm:text-[11px] font-bold text-[#C59A4D]">Gestionar categorías →</span>
+                  <span className="text-[10px] sm:text-[11px] font-bold text-[#E6C687]">Gestionar categorías →</span>
                 </div>
 
                 {/* 4. Stock Bajo */}
@@ -1689,20 +1752,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     setInventarioFilter('stock-bajo');
                     setActiveSection('inventario');
                   }}
-                  className="bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#E5E9EE] shadow-xs hover:border-amber-400 transition-all cursor-pointer flex flex-col justify-between"
+                  className="bg-[#13110F] rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#26221E] shadow-md hover:border-amber-400/50 transition-all cursor-pointer flex flex-col justify-between"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#A69F93]">
                       STOCK BAJO
                     </span>
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-950/60 border border-amber-800/60 flex items-center justify-center text-amber-400">
                       <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </div>
                   </div>
                   <div className="my-2 sm:my-3">
-                    <span className="text-2xl sm:text-3xl font-black text-amber-600">{stockBajoCount}</span>
+                    <span className="text-2xl sm:text-3xl font-black text-amber-400">{stockBajoCount}</span>
                   </div>
-                  <span className="text-[10px] sm:text-[11px] font-bold text-amber-700">Requieren reposición</span>
+                  <span className="text-[10px] sm:text-[11px] font-bold text-amber-400">Requieren reposición</span>
                 </div>
 
                 {/* 5. Agotados */}
@@ -1711,26 +1774,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     setInventarioFilter('agotados');
                     setActiveSection('inventario');
                   }}
-                  className="bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#E5E9EE] shadow-xs hover:border-rose-400 transition-all cursor-pointer flex flex-col justify-between"
+                  className="bg-[#13110F] rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-[#26221E] shadow-md hover:border-rose-400/50 transition-all cursor-pointer flex flex-col justify-between"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#A69F93]">
                       AGOTADOS
                     </span>
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-rose-50 flex items-center justify-center text-rose-600">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-rose-950/60 border border-rose-800/60 flex items-center justify-center text-rose-400">
                       <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </div>
                   </div>
                   <div className="my-2 sm:my-3">
-                    <span className="text-2xl sm:text-3xl font-black text-rose-600">{agotadosCount}</span>
+                    <span className="text-2xl sm:text-3xl font-black text-rose-400">{agotadosCount}</span>
                   </div>
-                  <span className="text-[10px] sm:text-[11px] font-bold text-rose-700">Sin existencias (0)</span>
+                  <span className="text-[10px] sm:text-[11px] font-bold text-rose-400">Sin existencias (0)</span>
                 </div>
               </div>
 
               {/* Balance Financiero & Total Neto (Disponible para Dueño y Administrador) */}
               {canAccessSection(userRole, 'gastos') && (
-                <div className="bg-gradient-to-br from-[#141312] to-[#24201C] text-white rounded-3xl p-6 sm:p-7 shadow-xl border border-[#3A332B] space-y-5">
+                <div className="bg-gradient-to-br from-[#141312] to-[#201D1A] text-white rounded-3xl p-6 sm:p-7 shadow-xl border border-[#3A332B] space-y-5">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-white/10">
                     <div>
                       <span className="text-[10px] font-black uppercase tracking-widest text-[#C59A4D] flex items-center gap-2">
@@ -1751,7 +1814,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-white/60 block">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-[#A69F93] block">
                         TOTAL VENTAS (INGRESOS BRUTOS)
                       </span>
                       <span className="text-2xl sm:text-3xl font-black text-white block my-1.5">
@@ -1764,7 +1827,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </div>
 
                     <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-white/60 block">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-[#A69F93] block">
                         TOTAL GASTOS REGISTRADOS
                       </span>
                       <span className="text-2xl sm:text-3xl font-black text-rose-400 block my-1.5">
@@ -1794,43 +1857,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               )}
 
               {/* Espacio de Almacenamiento & Base de Datos (Supabase Quota) */}
-              <div className="bg-white rounded-3xl p-6 border border-[#E5E9EE] shadow-xs space-y-5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#F0EAE1]">
+              <div className="bg-[#13110F] rounded-3xl p-6 border border-[#26221E] shadow-xl space-y-5 text-white">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#26221E]">
                   <div>
-                    <span className="text-[10px] font-black uppercase tracking-wider text-[#8C8375] flex items-center gap-1.5">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-[#A69F93] flex items-center gap-1.5">
                       <Database className="w-3.5 h-3.5 text-[#C59A4D]" />
                       CAPACIDAD & ESPACIO DISPONIBLE (SUPABASE)
                     </span>
-                    <h3 className="text-base font-black text-[#1A1918] font-heading mt-0.5">
+                    <h3 className="text-base font-black text-white font-heading mt-0.5">
                       Espacio para Montar Productos, Comprobantes y Tablas
                     </h3>
                   </div>
-                  <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-black self-start sm:self-auto">
+                  <span className="px-3 py-1 rounded-full bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 text-xs font-black self-start sm:self-auto">
                     Tier Gratuito Activo (100% Operativo)
                   </span>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   {/* Storage: Fotos de Productos y Comprobantes */}
-                  <div className="p-4 rounded-2xl bg-[#FCFAF7] border border-[#EAE5DC] space-y-3">
+                  <div className="p-4 rounded-2xl bg-[#1A1816] border border-[#2D2822] space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-xl bg-amber-50 text-[#C59A4D] flex items-center justify-center font-bold">
+                        <div className="w-8 h-8 rounded-xl bg-amber-950/60 border border-amber-800/50 text-[#E6C687] flex items-center justify-center font-bold">
                           <UploadCloud className="w-4 h-4" />
                         </div>
                         <div>
-                          <span className="text-xs font-extrabold text-[#1A1918] block">Almacenamiento Storage</span>
-                          <span className="text-[10px] text-[#7A7368]">Fotos de productos y comprobantes</span>
+                          <span className="text-xs font-extrabold text-white block">Almacenamiento Storage</span>
+                          <span className="text-[10px] text-[#A69F93]">Fotos de productos y comprobantes</span>
                         </div>
                       </div>
                       <div className="text-right">
-                        <span className="text-xs font-black text-[#1A1918] block">{metricasEspacio.mbStorageUsado} MB / {metricasEspacio.mbStorageTotal} MB</span>
-                        <span className="text-[10px] text-emerald-600 font-bold">{metricasEspacio.mbStorageLibre} MB libres</span>
+                        <span className="text-xs font-black text-white block">{metricasEspacio.mbStorageUsado} MB / {metricasEspacio.mbStorageTotal} MB</span>
+                        <span className="text-[10px] text-emerald-400 font-bold">{metricasEspacio.mbStorageLibre} MB libres</span>
                       </div>
                     </div>
 
                     {/* Progress Bar */}
-                    <div className="w-full bg-[#EAE5DC] h-2.5 rounded-full overflow-hidden">
+                    <div className="w-full bg-[#26221E] h-2.5 rounded-full overflow-hidden">
                       <div
                         className="bg-[#C59A4D] h-full rounded-full transition-all duration-500"
                         style={{ width: `${Math.max(2, metricasEspacio.porcentajeStorageUsado)}%` }}
@@ -1838,43 +1901,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
-                      <div className="bg-white p-2 rounded-xl border border-[#E5DFD5]">
-                        <span className="text-[#7A7368] block text-[10px]">Capacidad restante productos:</span>
-                        <strong className="text-emerald-700 font-extrabold block">
+                      <div className="bg-[#13110F] p-2 rounded-xl border border-[#26221E]">
+                        <span className="text-[#A69F93] block text-[10px]">Capacidad restante productos:</span>
+                        <strong className="text-emerald-400 font-extrabold block">
                           ~{metricasEspacio.productosRestantesEstimados.toLocaleString()} productos
                         </strong>
-                        <span className="text-[9px] text-[#9C9488]">({metricasEspacio.totalFotosProductos} fotos actuales)</span>
+                        <span className="text-[9px] text-[#7A7368]">({metricasEspacio.totalFotosProductos} fotos actuales)</span>
                       </div>
-                      <div className="bg-white p-2 rounded-xl border border-[#E5DFD5]">
-                        <span className="text-[#7A7368] block text-[10px]">Capacidad comprobantes:</span>
-                        <strong className="text-emerald-700 font-extrabold block">
+                      <div className="bg-[#13110F] p-2 rounded-xl border border-[#26221E]">
+                        <span className="text-[#A69F93] block text-[10px]">Capacidad comprobantes:</span>
+                        <strong className="text-emerald-400 font-extrabold block">
                           ~{metricasEspacio.fotosRestantesEstimadas.toLocaleString()} comprobantes
                         </strong>
-                        <span className="text-[9px] text-[#9C9488]">({metricasEspacio.totalComprobantes} capturas guardadas)</span>
+                        <span className="text-[9px] text-[#7A7368]">({metricasEspacio.totalComprobantes} capturas guardadas)</span>
                       </div>
                     </div>
                   </div>
 
                   {/* Base de Datos: Tablas y Registros */}
-                  <div className="p-4 rounded-2xl bg-[#FCFAF7] border border-[#EAE5DC] space-y-3">
+                  <div className="p-4 rounded-2xl bg-[#1A1816] border border-[#2D2822] space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center font-bold">
+                        <div className="w-8 h-8 rounded-xl bg-sky-950/60 border border-sky-800/50 text-sky-400 flex items-center justify-center font-bold">
                           <Database className="w-4 h-4" />
                         </div>
                         <div>
-                          <span className="text-xs font-extrabold text-[#1A1918] block">Base de Datos PostgreSQL</span>
-                          <span className="text-[10px] text-[#7A7368]">Pedidos, ventas, clientes y gastos</span>
+                          <span className="text-xs font-extrabold text-white block">Base de Datos PostgreSQL</span>
+                          <span className="text-[10px] text-[#A69F93]">Pedidos, ventas, clientes y gastos</span>
                         </div>
                       </div>
                       <div className="text-right">
-                        <span className="text-xs font-black text-[#1A1918] block">{metricasEspacio.mbBaseDatosUsado} MB / {metricasEspacio.mbBaseDatosTotal} MB</span>
-                        <span className="text-[10px] text-emerald-600 font-bold">{metricasEspacio.mbBaseDatosLibre} MB libres</span>
+                        <span className="text-xs font-black text-white block">{metricasEspacio.mbBaseDatosUsado} MB / {metricasEspacio.mbBaseDatosTotal} MB</span>
+                        <span className="text-[10px] text-emerald-400 font-bold">{metricasEspacio.mbBaseDatosLibre} MB libres</span>
                       </div>
                     </div>
 
                     {/* Progress Bar */}
-                    <div className="w-full bg-[#EAE5DC] h-2.5 rounded-full overflow-hidden">
+                    <div className="w-full bg-[#26221E] h-2.5 rounded-full overflow-hidden">
                       <div
                         className="bg-sky-500 h-full rounded-full transition-all duration-500"
                         style={{ width: `${Math.max(2, metricasEspacio.porcentajeBaseDatosUsado)}%` }}
@@ -1882,19 +1945,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
-                      <div className="bg-white p-2 rounded-xl border border-[#E5DFD5]">
-                        <span className="text-[#7A7368] block text-[10px]">Registros en tablas:</span>
-                        <strong className="text-sky-800 font-extrabold block">
+                      <div className="bg-[#13110F] p-2 rounded-xl border border-[#26221E]">
+                        <span className="text-[#A69F93] block text-[10px]">Registros en tablas:</span>
+                        <strong className="text-sky-400 font-extrabold block">
                           {metricasEspacio.totalFilasTablas} registros
                         </strong>
-                        <span className="text-[9px] text-[#9C9488]">Pedidos, ventas, gastos, etc.</span>
+                        <span className="text-[9px] text-[#7A7368]">Pedidos, ventas, gastos, etc.</span>
                       </div>
-                      <div className="bg-white p-2 rounded-xl border border-[#E5DFD5]">
-                        <span className="text-[#7A7368] block text-[10px]">Espacio restante DB:</span>
-                        <strong className="text-emerald-700 font-extrabold block">
+                      <div className="bg-[#13110F] p-2 rounded-xl border border-[#26221E]">
+                        <span className="text-[#A69F93] block text-[10px]">Espacio restante DB:</span>
+                        <strong className="text-emerald-400 font-extrabold block">
                           {(100 - metricasEspacio.porcentajeBaseDatosUsado).toFixed(1)}% disponible
                         </strong>
-                        <span className="text-[9px] text-[#9C9488]">Capacidad para +500,000 pedidos</span>
+                        <span className="text-[9px] text-[#7A7368]">Capacidad para +500,000 pedidos</span>
                       </div>
                     </div>
                   </div>
@@ -1904,9 +1967,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {/* Bottom 2 Split Cards: Stock Bajo & Agotados (Image 2) */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Left Card: Productos con Stock Bajo */}
-                <div className="bg-white rounded-3xl p-6 border border-[#E5E9EE] shadow-xs space-y-4">
+                <div className="bg-[#13110F] rounded-3xl p-6 border border-[#26221E] shadow-xl space-y-4">
                   <div className="flex items-center justify-between">
-                    <h3 className="font-extrabold text-sm text-[#1A1918] flex items-center gap-2">
+                    <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
                       Productos con Stock Bajo ({stockBajoCount})
                     </h3>
@@ -1915,7 +1978,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         setInventarioFilter('stock-bajo');
                         setActiveSection('inventario');
                       }}
-                      className="text-xs font-bold text-[#C59A4D] hover:underline"
+                      className="text-xs font-bold text-[#E6C687] hover:underline cursor-pointer"
                     >
                       VER INVENTARIO →
                     </button>
@@ -1925,41 +1988,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     {productos.filter((p) => (p.stock ?? 0) > 0 && (p.stock ?? 0) < 5).slice(0, 4).map((p) => (
                       <div
                         key={p.id}
-                        className="p-3 rounded-2xl bg-[#FCFAF5] border border-[#F0EAE1] flex items-center justify-between gap-3"
+                        className="p-3 rounded-2xl bg-[#1A1816] border border-[#2D2822] flex items-center justify-between gap-3 text-white"
                       >
                         <img
                           src={p.imagen_url || (p.imagenes && p.imagenes[0]) || ''}
                           alt=""
-                          className="w-12 h-14 object-cover rounded-xl bg-white border border-[#E5DFD5] shrink-0"
+                          className="w-12 h-14 object-cover rounded-xl bg-black border border-[#2D2822] shrink-0"
                         />
                         <div className="flex-1 min-w-0">
-                          <h4 className="font-extrabold text-xs text-[#1A1918] truncate">{p.nombre}</h4>
-                          <span className="text-[11px] text-[#7A7368] block">
+                          <h4 className="font-extrabold text-xs text-white truncate">{p.nombre}</h4>
+                          <span className="text-[11px] text-[#A69F93] block">
                             {categorias.find((c) => c.id === p.categoria_id)?.nombre || 'General'}
                           </span>
                         </div>
                         <div className="text-right">
-                          <span className="font-black text-sm text-amber-600">{p.stock} unids.</span>
-                          <span className="text-[10px] text-[#9C9488] block">Mín: {p.stock_minimo || 5}</span>
+                          <span className="font-black text-sm text-amber-400">{p.stock} unids.</span>
+                          <span className="text-[10px] text-[#A69F93] block">Mín: {p.stock_minimo || 5}</span>
                         </div>
                         <button
                           onClick={() => handleStockDelta(p.id, p.stock ?? 0, 5)}
-                          className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs"
+                          className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs cursor-pointer shadow-sm"
                         >
                           Ajustar
                         </button>
                       </div>
                     ))}
                     {stockBajoCount === 0 && (
-                      <p className="text-xs text-[#7A7368] py-8 text-center">No hay productos con stock bajo actualmente.</p>
+                      <p className="text-xs text-[#A69F93] py-8 text-center">No hay productos con stock bajo actualmente.</p>
                     )}
                   </div>
                 </div>
 
                 {/* Right Card: Productos Agotados */}
-                <div className="bg-white rounded-3xl p-6 border border-[#E5E9EE] shadow-xs space-y-4">
+                <div className="bg-[#13110F] rounded-3xl p-6 border border-[#26221E] shadow-xl space-y-4">
                   <div className="flex items-center justify-between">
-                    <h3 className="font-extrabold text-sm text-[#1A1918] flex items-center gap-2">
+                    <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-rose-600" />
                       Productos Agotados ({agotadosCount})
                     </h3>
@@ -1968,7 +2031,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         setInventarioFilter('agotados');
                         setActiveSection('inventario');
                       }}
-                      className="text-xs font-bold text-[#C59A4D] hover:underline"
+                      className="text-xs font-bold text-[#E6C687] hover:underline cursor-pointer"
                     >
                       VER INVENTARIO →
                     </button>
@@ -1978,32 +2041,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     {productos.filter((p) => (p.stock ?? 0) <= 0).slice(0, 4).map((p) => (
                       <div
                         key={p.id}
-                        className="p-3 rounded-2xl bg-[#FCFAF5] border border-[#F0EAE1] flex items-center justify-between gap-3"
+                        className="p-3 rounded-2xl bg-[#1A1816] border border-[#2D2822] flex items-center justify-between gap-3 text-white"
                       >
                         <img
                           src={p.imagen_url || (p.imagenes && p.imagenes[0]) || ''}
                           alt=""
-                          className="w-12 h-14 object-cover rounded-xl bg-white border border-[#E5DFD5] shrink-0"
+                          className="w-12 h-14 object-cover rounded-xl bg-black border border-[#2D2822] shrink-0"
                         />
                         <div className="flex-1 min-w-0">
-                          <h4 className="font-extrabold text-xs text-[#1A1918] truncate">{p.nombre}</h4>
-                          <span className="text-[11px] text-[#7A7368] block">
+                          <h4 className="font-extrabold text-xs text-white truncate">{p.nombre}</h4>
+                          <span className="text-[11px] text-[#A69F93] block">
                             {categorias.find((c) => c.id === p.categoria_id)?.nombre || 'General'}
                           </span>
                         </div>
                         <div className="text-right">
-                          <span className="font-black text-sm text-rose-600">0 unidades</span>
+                          <span className="font-black text-sm text-rose-400">0 unidades</span>
                         </div>
                         <button
                           onClick={() => handleStockDelta(p.id, 0, 5)}
-                          className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs"
+                          className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs cursor-pointer shadow-sm"
                         >
                           Reponer
                         </button>
                       </div>
                     ))}
                     {agotadosCount === 0 && (
-                      <p className="text-xs text-[#7A7368] py-8 text-center">¡Genial! No hay productos agotados.</p>
+                      <p className="text-xs text-[#A69F93] py-8 text-center">¡Genial! No hay productos agotados.</p>
                     )}
                   </div>
                 </div>
@@ -2019,81 +2082,81 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {/* Stat Cards: If Cajero -> Operational counts only (NO MONEY). If Dueño/Admin -> Financial metrics */}
               {userRole === 'cajero' ? (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
-                    <span className="text-[10px] font-black uppercase text-slate-500 block">PEDIDOS RECIBIDOS</span>
-                    <span className="text-2xl sm:text-3xl font-black text-slate-900 block my-2">{pedidos.length}</span>
-                    <span className="text-[11px] font-bold text-slate-600">Total en sistema</span>
+                  <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">PEDIDOS RECIBIDOS</span>
+                    <span className="text-2xl sm:text-3xl font-black text-white block my-2">{pedidos.length}</span>
+                    <span className="text-[11px] font-bold text-slate-400">Total en sistema</span>
                   </div>
 
-                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
-                    <span className="text-[10px] font-black uppercase text-slate-500 block">PEDIDOS ACEPTADOS</span>
-                    <span className="text-2xl sm:text-3xl font-black text-emerald-600 block my-2">
+                  <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">PEDIDOS ACEPTADOS</span>
+                    <span className="text-2xl sm:text-3xl font-black text-emerald-400 block my-2">
                       {pedidos.filter((p) => p.estado === 'aprobado' || p.estado === 'aceptado').length}
                     </span>
-                    <span className="text-[11px] font-bold text-emerald-700">Listos / Despachados</span>
+                    <span className="text-[11px] font-bold text-emerald-400">Listos / Despachados</span>
                   </div>
 
-                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
-                    <span className="text-[10px] font-black uppercase text-slate-500 block">PEDIDOS PENDIENTES</span>
-                    <span className="text-2xl sm:text-3xl font-black text-amber-600 block my-2">
+                  <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">PEDIDOS PENDIENTES</span>
+                    <span className="text-2xl sm:text-3xl font-black text-amber-400 block my-2">
                       {pedidos.filter((p) => p.estado === 'pendiente').length}
                     </span>
-                    <span className="text-[11px] font-bold text-amber-700">Por revisar comprobante</span>
+                    <span className="text-[11px] font-bold text-amber-400">Por revisar comprobante</span>
                   </div>
 
-                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
-                    <span className="text-[10px] font-black uppercase text-slate-500 block">VENTAS REALIZADAS</span>
-                    <span className="text-2xl sm:text-3xl font-black text-sky-600 block my-2">{ventas.length}</span>
-                    <span className="text-[11px] font-bold text-sky-700">Web y mostrador</span>
+                  <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">VENTAS REALIZADAS</span>
+                    <span className="text-2xl sm:text-3xl font-black text-sky-400 block my-2">{ventas.length}</span>
+                    <span className="text-[11px] font-bold text-sky-400">Web y mostrador</span>
                   </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
-                    <span className="text-[10px] font-black uppercase text-slate-500 block">INGRESOS TOTALES</span>
-                    <span className="text-2xl sm:text-3xl font-black text-slate-900 block my-2">${ingresosTotales.toFixed(2)}</span>
-                    <span className="text-[11px] font-bold text-emerald-600">Acumulado histórico</span>
+                  <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">INGRESOS TOTALES</span>
+                    <span className="text-2xl sm:text-3xl font-black text-white block my-2">${ingresosTotales.toFixed(2)}</span>
+                    <span className="text-[11px] font-bold text-emerald-400">Acumulado histórico</span>
                   </div>
 
-                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
-                    <span className="text-[10px] font-black uppercase text-slate-500 block">VENTAS ESTE MES</span>
-                    <span className="text-2xl sm:text-3xl font-black text-slate-900 block my-2">${ingresosTotales.toFixed(2)}</span>
-                    <span className="text-[11px] text-slate-500">{ventas.length} transacciones</span>
+                  <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">VENTAS ESTE MES</span>
+                    <span className="text-2xl sm:text-3xl font-black text-white block my-2">${ingresosTotales.toFixed(2)}</span>
+                    <span className="text-[11px] text-[#A69F93]">{ventas.length} transacciones</span>
                   </div>
 
-                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
-                    <span className="text-[10px] font-black uppercase text-slate-500 block">TOTAL TRANSACCIONES</span>
-                    <span className="text-2xl sm:text-3xl font-black text-slate-900 block my-2">{ventas.length}</span>
-                    <span className="text-[11px] text-slate-500">Web + Manuales</span>
+                  <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">TOTAL TRANSACCIONES</span>
+                    <span className="text-2xl sm:text-3xl font-black text-white block my-2">{ventas.length}</span>
+                    <span className="text-[11px] text-[#A69F93]">Web + Manuales</span>
                   </div>
 
-                  <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
-                    <span className="text-[10px] font-black uppercase text-slate-500 block">TICKET PROMEDIO</span>
-                    <span className="text-2xl sm:text-3xl font-black text-[#C59A4D] block my-2">
+                  <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">TICKET PROMEDIO</span>
+                    <span className="text-2xl sm:text-3xl font-black text-[#E6C687] block my-2">
                       ${ventas.length > 0 ? Math.round(ingresosTotales / ventas.length) : 0}
                     </span>
-                    <span className="text-[11px] text-slate-500">Por cada venta</span>
+                    <span className="text-[11px] text-[#A69F93]">Por cada venta</span>
                   </div>
                 </div>
               )}
 
               {/* Filters bar */}
-              <div className="bg-white rounded-3xl p-4 border border-slate-200 flex flex-wrap items-center justify-between gap-3 shadow-sm">
+              <div className="bg-[#13110F] rounded-3xl p-4 border border-[#26221E] flex flex-wrap items-center justify-between gap-3 shadow-md">
                 <div className="relative flex-1 min-w-[200px] max-w-sm">
-                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#A69F93]" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Buscar venta, cliente o código..."
-                    className="w-full bg-slate-50 text-xs px-10 py-2.5 rounded-2xl border border-slate-200 focus:outline-none focus:bg-white"
+                    className="w-full bg-[#1A1816] text-xs text-white px-10 py-2.5 rounded-2xl border border-[#2D2822] focus:outline-none focus:border-[#C59A4D] placeholder-[#7A7368]"
                   />
                 </div>
 
                 <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                   <button
                     onClick={reloadAllData}
-                    className="p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700"
+                    className="p-2.5 rounded-xl border border-[#2D2822] bg-[#1A1816] hover:bg-[#25221E] text-white transition-colors cursor-pointer"
                     title="Recargar ventas"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -2111,9 +2174,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       setVentaManualMetodo('efectivo');
                       setIsModalVentaManualOpen(true);
                     }}
-                    className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-black text-[#F5E6BE] text-xs font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all"
+                    className="px-4 py-2.5 rounded-xl bg-[#C59A4D] hover:bg-[#B3873B] text-[#141312] text-xs font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all"
                   >
-                    <Plus className="w-4 h-4 text-[#C59A4D]" />
+                    <Plus className="w-4 h-4 stroke-[3]" />
                     <span>+ REGISTRAR VENTA MANUAL</span>
                   </button>
                 </div>
@@ -2121,26 +2184,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               {/* Ventas Table or Empty state */}
               {ventas.length === 0 ? (
-                <div className="bg-white rounded-3xl p-8 sm:p-12 border border-slate-200 text-center space-y-3 shadow-sm">
-                  <TrendingUp className="w-10 h-10 mx-auto text-slate-300" />
-                  <h3 className="font-extrabold text-slate-900">
+                <div className="bg-[#13110F] rounded-3xl p-8 sm:p-12 border border-[#26221E] text-center space-y-3 shadow-md text-white">
+                  <TrendingUp className="w-10 h-10 mx-auto text-[#7A7368]" />
+                  <h3 className="font-extrabold text-white">
                     No se encontraron ventas registradas
                   </h3>
-                  <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  <p className="text-xs text-[#A69F93] max-w-md mx-auto">
                     Al aceptar y aprobar pedidos web verificados, se registrarán automáticamente aquí descontando del inventario. También puedes pulsar en &quot;Registrar Venta Manual&quot;.
                   </p>
                 </div>
               ) : (
-                <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+                <div className="bg-[#13110F] rounded-2xl sm:rounded-3xl border border-[#26221E] overflow-hidden shadow-xl text-white">
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[700px] text-left text-xs">
-                      <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-black uppercase text-slate-500 tracking-wider">
+                    <table className="w-full min-w-[950px] text-left text-xs">
+                      <thead className="bg-[#1A1816] border-b border-[#26221E] text-[10px] font-black uppercase text-[#A69F93] tracking-wider">
                         <tr>
                           <th className="py-3.5 px-4">Código</th>
+                          <th className="py-3.5 px-4">Prendas / Productos</th>
                           <th className="py-3.5 px-4">Cliente</th>
-                          <th className="py-3.5 px-4">Teléfono</th>
                           <th className="py-3.5 px-4">Método / Estado</th>
-                          <th className="py-3.5 px-4">Tipo</th>
+                          <th className="py-3.5 px-4">Registrado Por</th>
                           <th className="py-3.5 px-4">Fecha</th>
                           <th className="py-3.5 px-4 text-right">
                             {userRole === 'cajero' ? 'Artículos' : 'Total'}
@@ -2148,7 +2211,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           <th className="py-3.5 px-4 text-center">Acciones</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100">
+                      <tbody className="divide-y divide-[#221F1C]">
                         {ventas
                           .filter((v) => {
                             if (!searchQuery.trim()) return true;
@@ -2156,26 +2219,89 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             return (
                               v.codigo.toLowerCase().includes(q) ||
                               v.cliente_nombre.toLowerCase().includes(q) ||
-                              (v.cliente_telefono && v.cliente_telefono.includes(q))
+                              (v.cliente_telefono && v.cliente_telefono.includes(q)) ||
+                              (v.cajero_nombre && v.cajero_nombre.toLowerCase().includes(q))
                             );
                           })
                           .map((v) => {
                             const hasSaldo = Boolean(v.saldo_pendiente && v.saldo_pendiente > 0 && v.estado_pago !== 'completo');
 
                             return (
-                              <tr key={v.id || v.codigo} className="hover:bg-slate-50/70 transition-colors">
-                                <td className="py-3.5 px-4 font-mono font-bold text-slate-900">
+                              <tr key={v.id || v.codigo} className="hover:bg-[#1A1816] transition-colors">
+                                <td className="py-3.5 px-4 font-mono font-bold text-[#E6C687] align-top">
                                   {v.codigo}
+                                  <span
+                                    className={`block mt-1 px-2 py-0.2 rounded-full text-[9px] font-black uppercase w-fit ${
+                                      v.tipo === 'web'
+                                        ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60'
+                                        : 'bg-[#25221F] text-slate-300 border border-[#332E27]'
+                                    }`}
+                                  >
+                                    {v.tipo || 'web'}
+                                  </span>
                                 </td>
-                                <td className="py-3.5 px-4 font-extrabold text-slate-900">
-                                  {v.cliente_nombre}
+
+                                {/* Prendas / Productos con fotos y variantes */}
+                                <td className="py-3.5 px-4 align-top max-w-xs">
+                                  {v.items && v.items.length > 0 ? (
+                                    <div className="space-y-2">
+                                      {v.items.map((it, idx) => {
+                                        const prodRef = productos.find(
+                                          (p) => p.id === (it.producto_id || it.id) || p.nombre === it.nombre
+                                        );
+                                        const prodImg = it.imagen_url || prodRef?.imagen_url || prodRef?.imagenes?.[0];
+                                        const varDesc =
+                                          it.variante_titulo ||
+                                          (it.talla ? `Talla: ${it.talla}` : null) ||
+                                          (it.color ? `Color: ${it.color}` : null) ||
+                                          (it.opciones ? Object.entries(it.opciones).map(([k, val]) => `${k}: ${val}`).join(', ') : null);
+
+                                        return (
+                                          <div key={idx} className="flex items-center gap-2.5 bg-[#141210] p-1.5 rounded-xl border border-[#26221E]">
+                                            {prodImg ? (
+                                              <img
+                                                src={prodImg}
+                                                alt={it.nombre}
+                                                className="w-10 h-10 object-cover rounded-lg bg-black border border-[#2D2822] shrink-0"
+                                              />
+                                            ) : (
+                                              <div className="w-10 h-10 rounded-lg bg-[#1A1816] border border-[#2D2822] flex items-center justify-center text-[9px] font-bold text-[#7A7368] shrink-0">
+                                                Sin foto
+                                              </div>
+                                            )}
+                                            <div className="min-w-0 flex-1">
+                                              <span className="font-bold text-white text-[11px] block truncate">
+                                                {it.nombre}
+                                              </span>
+                                              <div className="flex items-center gap-1.5 text-[10px] text-[#A69F93] flex-wrap">
+                                                <span className="font-black text-[#E6C687]">x{it.cantidad || 1}</span>
+                                                {varDesc && (
+                                                  <span className="text-slate-300 font-medium">({varDesc})</span>
+                                                )}
+                                                {it.precio && (
+                                                  <span className="text-[#A69F93]">${Number(it.precio).toFixed(2)} c/u</span>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <span className="text-[#7A7368] text-[11px] italic">Sin prendas detalladas</span>
+                                  )}
                                 </td>
-                                <td className="py-3.5 px-4 text-slate-600 font-mono text-[11px]">
-                                  {v.cliente_telefono || '—'}
+
+                                <td className="py-3.5 px-4 align-top">
+                                  <strong className="font-extrabold text-white block">{v.cliente_nombre}</strong>
+                                  <span className="text-[#A69F93] font-mono text-[11px] block mt-0.5">
+                                    📞 {v.cliente_telefono || '—'}
+                                  </span>
                                 </td>
-                                <td className="py-3.5 px-4">
+
+                                <td className="py-3.5 px-4 align-top">
                                   <div className="space-y-0.5">
-                                    <span className="font-bold text-slate-800 uppercase block text-[11px]">
+                                    <span className="font-bold text-slate-200 uppercase block text-[11px]">
                                       {v.metodo_pago === 'abono'
                                         ? 'Abono Parcial'
                                         : v.metodo_pago === 'contra_entrega'
@@ -2184,48 +2310,55 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     </span>
                                     {hasSaldo ? (
                                       userRole === 'cajero' ? (
-                                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 font-extrabold text-[9px] inline-block">
+                                        <span className="px-2 py-0.5 rounded-full bg-amber-950/70 border border-amber-800 text-amber-300 font-extrabold text-[9px] inline-block">
                                           ⏳ Saldo pendiente por cobrar
                                         </span>
                                       ) : (
-                                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 font-extrabold text-[9px] inline-block">
+                                        <span className="px-2 py-0.5 rounded-full bg-amber-950/70 border border-amber-800 text-amber-300 font-extrabold text-[9px] inline-block">
                                           ⏳ Debe: ${v.saldo_pendiente?.toFixed(2)} USD
                                         </span>
                                       )
                                     ) : (
-                                      <span className="text-[9px] text-emerald-700 font-bold inline-flex items-center gap-1">
-                                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                      <span className="text-[9px] text-emerald-400 font-bold inline-flex items-center gap-1">
+                                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
                                         Completado
                                       </span>
                                     )}
                                   </div>
                                 </td>
-                                <td className="py-3.5 px-4">
-                                  <span
-                                    className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                                      v.tipo === 'web'
-                                        ? 'bg-emerald-100 text-emerald-900'
-                                        : 'bg-slate-100 text-slate-800'
-                                    }`}
-                                  >
-                                    {v.tipo || 'web'}
-                                  </span>
+
+                                {/* Registrado Por */}
+                                <td className="py-3.5 px-4 align-top">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-5 h-5 rounded-full bg-[#1F1C18] border border-[#332E27] flex items-center justify-center text-[10px]">
+                                      {v.tipo === 'web' ? '🌐' : '👤'}
+                                    </span>
+                                    <div>
+                                      <strong className="text-white font-extrabold block text-[11px]">
+                                        {v.cajero_nombre || (v.tipo === 'web' ? 'Cliente Web' : 'Cajero / Staff')}
+                                      </strong>
+                                      <span className="text-[9px] text-[#A69F93]">
+                                        {v.tipo === 'web' ? 'Tienda Online' : 'Venta Mostrador'}
+                                      </span>
+                                    </div>
+                                  </div>
                                 </td>
-                                <td className="py-3.5 px-4 text-slate-500 text-[11px]">
+
+                                <td className="py-3.5 px-4 text-[#A69F93] text-[11px] align-top font-mono">
                                   {v.creado_en ? new Date(v.creado_en).toLocaleString('es-PA') : 'Reciente'}
                                 </td>
                                 <td className="py-3.5 px-4 text-right">
                                   {userRole === 'cajero' ? (
-                                    <span className="font-bold text-slate-700">
+                                    <span className="font-bold text-slate-300">
                                       {v.items?.length || 1} prenda(s)
                                     </span>
                                   ) : (
                                     <div>
-                                      <span className="font-black text-sm text-slate-900 block">
+                                      <span className="font-black text-sm text-white block">
                                         ${Number(v.total).toFixed(2)}
                                       </span>
                                       {hasSaldo && (
-                                        <span className="text-[10px] text-emerald-700 font-bold block">
+                                        <span className="text-[10px] text-emerald-400 font-bold block">
                                           Abonó: ${Number(v.monto_abonado || 0).toFixed(2)}
                                         </span>
                                       )}
@@ -2255,7 +2388,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                       <button
                                         type="button"
                                         onClick={() => handleEliminarVenta(v.id || v.codigo)}
-                                        className="px-2 py-1 rounded-lg text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 font-bold text-xs inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                        className="px-2 py-1 rounded-lg text-rose-400 bg-rose-950/40 hover:bg-rose-950/80 border border-rose-900/50 font-bold text-xs inline-flex items-center gap-1 transition-colors cursor-pointer"
                                         title="Eliminar registro de venta permanentemente de Supabase"
                                       >
                                         <Trash2 className="w-3.5 h-3.5" />
@@ -2282,10 +2415,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <div className="space-y-6">
               {/* Status Banner */}
               <div
-                className={`rounded-3xl p-6 sm:p-7 border shadow-sm transition-all ${
+                className={`rounded-3xl p-6 sm:p-7 border shadow-xl transition-all ${
                   sesionCaja && sesionCaja.estado === 'abierta'
-                    ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
-                    : 'bg-white border-slate-200 text-slate-900'
+                    ? 'bg-[#0B1A12] border-emerald-800/80 text-white'
+                    : 'bg-[#13110F] border-[#26221E] text-white'
                 }`}
               >
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -2294,32 +2427,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
                         sesionCaja && sesionCaja.estado === 'abierta'
                           ? 'bg-emerald-600 text-white shadow-md'
-                          : 'bg-slate-100 text-slate-600 border border-slate-200'
+                          : 'bg-[#1C1A17] text-[#A69F93] border border-[#2D2822]'
                       }`}
                     >
                       <Wallet className="w-6 h-6" />
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span
                           className={`w-2.5 h-2.5 rounded-full ${
                             sesionCaja && sesionCaja.estado === 'abierta'
-                              ? 'bg-emerald-500 animate-pulse'
-                              : 'bg-slate-400'
+                              ? 'bg-emerald-400 animate-pulse'
+                              : 'bg-slate-600'
                           }`}
                         />
-                        <span className="text-[10px] font-black uppercase tracking-wider">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-[#A69F93]">
                           {sesionCaja && sesionCaja.estado === 'abierta'
                             ? 'TURNO DE CAJA ACTIVO'
                             : 'CAJA CERRADA'}
                         </span>
+                        {sesionCaja && sesionCaja.estado === 'abierta' && (
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-700/80 text-emerald-300 text-[10px] font-black inline-flex items-center gap-1">
+                            <span>⏱️</span>
+                            <span>Abierta hace {getDuracionCaja(sesionCaja.fecha_apertura)}</span>
+                          </span>
+                        )}
                       </div>
-                      <h2 className="text-xl sm:text-2xl font-black mt-1">
+                      <h2 className="text-xl sm:text-2xl font-black mt-1 text-white">
                         {sesionCaja && sesionCaja.estado === 'abierta'
                           ? `Turno abierto por ${sesionCaja.abierto_por}`
                           : 'No hay turno activo en este momento'}
                       </h2>
-                      <p className="text-xs opacity-75 mt-0.5">
+                      <p className="text-xs text-[#A69F93] mt-0.5">
                         {sesionCaja && sesionCaja.estado === 'abierta'
                           ? `Iniciado el ${new Date(sesionCaja.fecha_apertura).toLocaleString('es-PA')}. Fondo inicial: $${Number(sesionCaja.monto_inicial).toFixed(2)} USD.`
                           : 'Inicia el turno de caja indicando el fondo inicial en gaveta para registrar cobros y cuadres.'}
@@ -2330,13 +2469,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <div className="flex items-center gap-2.5 flex-wrap">
                     <button
                       onClick={reloadAllData}
-                      className="p-2.5 rounded-2xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 transition-colors shadow-xs"
+                      className="p-2.5 rounded-2xl bg-[#1C1A17] border border-[#2D2822] hover:bg-[#25221F] text-white transition-colors cursor-pointer shadow-xs"
                       title="Actualizar datos"
                     >
                       <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                     </button>
 
-                    {sesionCaja && sesionCaja.estado === 'abierta' ? (
+                    {/* Bloqueo estricto para trabajadores / cajeros */}
+                    {userRole === 'cajero' ? (
+                      <div className="px-4 py-2.5 rounded-2xl bg-[#1A1816] border border-amber-800/60 text-amber-300 text-xs font-bold flex items-center gap-2">
+                        <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Apertura y Cierre exclusivo de Dueño</span>
+                      </div>
+                    ) : sesionCaja && sesionCaja.estado === 'abierta' ? (
                       <button
                         onClick={() => {
                           setMontoCierreReal('');
@@ -2365,40 +2510,142 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
 
                 {/* Resumen del turno actual si está abierto */}
-                {sesionCaja && sesionCaja.estado === 'abierta' && userRole !== 'cajero' && (() => {
+                {sesionCaja && sesionCaja.estado === 'abierta' && (() => {
                   const fechaInicio = sesionCaja.fecha_apertura ? new Date(sesionCaja.fecha_apertura).getTime() : 0;
-                  const ventasEfectivoTurno = ventas
-                    .filter(
-                      (v) =>
-                        (v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega') &&
-                        v.creado_en &&
-                        new Date(v.creado_en).getTime() >= fechaInicio
-                    )
-                    .reduce((acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0), 0);
+                  const ventasEfectivoTurno = ventas.filter(
+                    (v) =>
+                      (v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega') &&
+                      v.creado_en &&
+                      new Date(v.creado_en).getTime() >= fechaInicio
+                  );
+                  const totalVentasEfectivo = ventasEfectivoTurno.reduce(
+                    (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
+                    0
+                  );
 
-                  const gastosEfectivoTurno = gastos
-                    .filter((g) => g.creado_en && new Date(g.creado_en).getTime() >= fechaInicio)
-                    .reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
+                  const gastosEfectivoTurno = gastos.filter(
+                    (g) => g.creado_en && new Date(g.creado_en).getTime() >= fechaInicio
+                  );
+                  const totalGastosEfectivo = gastosEfectivoTurno.reduce(
+                    (acc, g) => acc + (Number(g.monto) || 0),
+                    0
+                  );
 
-                  const esperado = (Number(sesionCaja.monto_inicial) || 0) + ventasEfectivoTurno - gastosEfectivoTurno;
+                  const fondoInicial = Number(sesionCaja.monto_inicial) || 0;
+                  const esperado = fondoInicial + totalVentasEfectivo - totalGastosEfectivo;
 
                   return (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-5 mt-5 border-t border-emerald-200/80 text-xs">
-                      <div className="bg-white/80 p-3 rounded-xl border border-emerald-200">
-                        <span className="text-slate-500 font-bold block text-[10px] uppercase">Fondo Inicial</span>
-                        <strong className="text-base text-slate-900 font-black">${Number(sesionCaja.monto_inicial).toFixed(2)}</strong>
-                      </div>
-                      <div className="bg-white/80 p-3 rounded-xl border border-emerald-200">
-                        <span className="text-slate-500 font-bold block text-[10px] uppercase">Efectivo Cobrado</span>
-                        <strong className="text-base text-emerald-700 font-black">+${ventasEfectivoTurno.toFixed(2)}</strong>
-                      </div>
-                      <div className="bg-white/80 p-3 rounded-xl border border-emerald-200">
-                        <span className="text-slate-500 font-bold block text-[10px] uppercase">Salidas / Gastos</span>
-                        <strong className="text-base text-rose-600 font-black">-${gastosEfectivoTurno.toFixed(2)}</strong>
-                      </div>
-                      <div className="bg-white p-3 rounded-xl border border-emerald-300 shadow-xs">
-                        <span className="text-emerald-800 font-extrabold block text-[10px] uppercase">Esperado en Gaveta</span>
-                        <strong className="text-base text-emerald-900 font-black">${esperado.toFixed(2)} USD</strong>
+                    <div className="space-y-4 pt-5 mt-5 border-t border-emerald-900/60 text-xs">
+                      {userRole !== 'cajero' && (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          <div className="bg-[#13110F] p-3 rounded-xl border border-emerald-900/60">
+                            <span className="text-[#A69F93] font-bold block text-[10px] uppercase">Fondo Inicial Base</span>
+                            <strong className="text-base text-white font-black">${fondoInicial.toFixed(2)}</strong>
+                          </div>
+                          <div className="bg-[#13110F] p-3 rounded-xl border border-emerald-900/60">
+                            <span className="text-[#A69F93] font-bold block text-[10px] uppercase">
+                              (+) Entradas Efectivo ({ventasEfectivoTurno.length})
+                            </span>
+                            <strong className="text-base text-emerald-400 font-black">+${totalVentasEfectivo.toFixed(2)}</strong>
+                          </div>
+                          <div className="bg-[#13110F] p-3 rounded-xl border border-emerald-900/60">
+                            <span className="text-[#A69F93] font-bold block text-[10px] uppercase">
+                              (-) Salidas Gastos ({gastosEfectivoTurno.length})
+                            </span>
+                            <strong className="text-base text-rose-400 font-black">-${totalGastosEfectivo.toFixed(2)}</strong>
+                          </div>
+                          <div className="bg-[#181614] p-3 rounded-xl border border-emerald-700/60 shadow-xs">
+                            <span className="text-emerald-400 font-extrabold block text-[10px] uppercase">Esperado en Gaveta</span>
+                            <strong className="text-base text-emerald-300 font-black">${esperado.toFixed(2)} USD</strong>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Lista detallada de todo lo que está ingresando/saliendo en la gaveta */}
+                      <div className="bg-[#13110F] rounded-2xl p-4 border border-[#26221E] space-y-3">
+                        <div className="flex items-center justify-between pb-2 border-b border-[#26221E]">
+                          <span className="font-extrabold text-white text-xs flex items-center gap-2">
+                            <span>📋</span>
+                            <span>Movimientos en Efectivo del Turno Actual (Entradas y Salidas en Gaveta)</span>
+                          </span>
+                          <span className="text-[11px] text-[#E6C687] font-bold">
+                            {ventasEfectivoTurno.length + gastosEfectivoTurno.length + 1} registros
+                          </span>
+                        </div>
+
+                        <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                          {/* Entrada Base */}
+                          <div className="p-2.5 rounded-xl bg-[#1A1816] border border-[#26221E] flex items-center justify-between gap-3 text-xs">
+                            <div className="flex items-center gap-2.5">
+                              <span className="w-7 h-7 rounded-lg bg-emerald-950/80 border border-emerald-700/60 text-emerald-400 flex items-center justify-center font-black text-xs">
+                                💼
+                              </span>
+                              <div>
+                                <span className="font-black text-white block text-[11px]">Fondo Inicial en Gaveta</span>
+                                <span className="text-[10px] text-[#A69F93]">
+                                  Abierto por: <strong className="text-white">{sesionCaja.abierto_por}</strong> • {new Date(sesionCaja.fecha_apertura).toLocaleTimeString('es-PA')}
+                                </span>
+                              </div>
+                            </div>
+                            <span className="font-black text-white text-sm">+${fondoInicial.toFixed(2)}</span>
+                          </div>
+
+                          {/* Ventas en efectivo */}
+                          {ventasEfectivoTurno.map((v) => {
+                            const cobro = Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0;
+                            return (
+                              <div key={v.id || v.codigo} className="p-2.5 rounded-xl bg-[#1A1816] border border-[#26221E] flex items-center justify-between gap-3 text-xs hover:border-[#38332B] transition-colors">
+                                <div className="flex items-center gap-2.5">
+                                  <span className="w-7 h-7 rounded-lg bg-emerald-950/80 border border-emerald-700/60 text-emerald-400 flex items-center justify-center font-black text-xs">
+                                    💵
+                                  </span>
+                                  <div>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-black text-white text-[11px]">Venta {v.codigo}</span>
+                                      <span className="text-[10px] text-[#E6C687] font-bold">({v.cliente_nombre})</span>
+                                      <span className="px-1.5 py-0.2 rounded bg-black border border-[#2D2822] text-[#A69F93] text-[9px] uppercase font-mono">
+                                        {v.metodo_pago}
+                                      </span>
+                                    </div>
+                                    <span className="text-[10px] text-[#A69F93] block">
+                                      Registrado por: <strong className="text-white">{v.cajero_nombre || 'Cajero'}</strong> • {v.creado_en ? new Date(v.creado_en).toLocaleTimeString('es-PA') : ''}
+                                      {v.items && v.items.length > 0 && ` • ${v.items.length} prenda(s)`}
+                                    </span>
+                                  </div>
+                                </div>
+                                <span className="font-black text-emerald-400 text-sm">
+                                  +${cobro.toFixed(2)}
+                                </span>
+                              </div>
+                            );
+                          })}
+
+                          {/* Gastos del turno */}
+                          {gastosEfectivoTurno.map((g) => (
+                            <div key={g.id || g.concepto} className="p-2.5 rounded-xl bg-[#1A1816] border border-[#26221E] flex items-center justify-between gap-3 text-xs hover:border-rose-900/50 transition-colors">
+                              <div className="flex items-center gap-2.5">
+                                <span className="w-7 h-7 rounded-lg bg-rose-950/80 border border-rose-700/60 text-rose-400 flex items-center justify-center font-black text-xs">
+                                  🔻
+                                </span>
+                                <div>
+                                  <span className="font-black text-rose-300 block text-[11px]">Gasto: {g.concepto}</span>
+                                  <span className="text-[10px] text-[#A69F93] block">
+                                    Por: <strong className="text-white">{g.creado_por || 'Admin'}</strong> • {g.fecha ? new Date(g.fecha).toLocaleTimeString('es-PA') : ''}
+                                  </span>
+                                </div>
+                              </div>
+                              <span className="font-black text-rose-400 text-sm">
+                                -${Number(g.monto).toFixed(2)}
+                              </span>
+                            </div>
+                          ))}
+
+                          {ventasEfectivoTurno.length === 0 && gastosEfectivoTurno.length === 0 && (
+                            <p className="text-[11px] text-[#7A7368] py-2 text-center">
+                              No hay cobros en efectivo ni gastos registrados en este turno todavía.
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -2406,26 +2653,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               {/* Historial de Turnos de Caja */}
-              <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm space-y-4 p-5 sm:p-6">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="bg-[#13110F] rounded-3xl border border-[#26221E] overflow-hidden shadow-xl space-y-4 p-5 sm:p-6 text-white">
+                <div className="flex items-center justify-between pb-3 border-b border-[#26221E]">
                   <div>
-                    <h3 className="font-black text-sm text-slate-900">Historial de Turnos & Arqueos de Caja</h3>
-                    <p className="text-[11px] text-slate-500">Registro persistente de aperturas, cierres y diferencias de efectivo</p>
+                    <h3 className="font-black text-sm text-white">Historial de Turnos & Arqueos de Caja</h3>
+                    <p className="text-[11px] text-[#A69F93]">Registro persistente de aperturas, cierres, duraciones y diferencias de efectivo</p>
                   </div>
-                  <span className="text-xs font-bold text-slate-500">{historialCaja.length} registros</span>
+                  <span className="text-xs font-bold text-[#A69F93]">{historialCaja.length} registros</span>
                 </div>
 
                 {historialCaja.length === 0 ? (
-                  <div className="py-10 text-center text-xs text-slate-400">
+                  <div className="py-10 text-center text-xs text-[#7A7368]">
                     No hay turnos de caja registrados aún. Abre la caja para comenzar el primer turno.
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[750px] text-left text-xs">
-                      <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-black uppercase text-slate-500 tracking-wider">
+                    <table className="w-full min-w-[850px] text-left text-xs">
+                      <thead className="bg-[#1A1816] border-b border-[#26221E] text-[10px] font-black uppercase text-[#A69F93] tracking-wider">
                         <tr>
                           <th className="py-3 px-4">Estado</th>
                           <th className="py-3 px-4">Apertura</th>
+                          <th className="py-3 px-4">Duración</th>
                           <th className="py-3 px-4">Abierto por</th>
                           <th className="py-3 px-4 text-right">Fondo Inicial</th>
                           {userRole !== 'cajero' && (
@@ -2439,35 +2687,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           <th className="py-3 px-4">Notas</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100">
+                      <tbody className="divide-y divide-[#221F1C]">
                         {historialCaja.map((reg) => (
-                          <tr key={reg.id} className="hover:bg-slate-50/60 transition-colors">
+                          <tr key={reg.id} className="hover:bg-[#1A1816] transition-colors">
                             <td className="py-3.5 px-4">
                               <span
                                 className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
                                   reg.estado === 'abierta'
-                                    ? 'bg-emerald-100 text-emerald-900 border border-emerald-200'
-                                    : 'bg-slate-100 text-slate-700'
+                                    ? 'bg-emerald-950/70 text-emerald-400 border border-emerald-800'
+                                    : 'bg-[#25221F] text-slate-300 border border-[#332E27]'
                                 }`}
                               >
                                 {reg.estado === 'abierta' ? '🟢 Abierta' : 'Cerrada'}
                               </span>
                             </td>
-                            <td className="py-3.5 px-4 font-mono text-[11px] text-slate-700">
+                            <td className="py-3.5 px-4 font-mono text-[11px] text-[#A69F93]">
                               {reg.fecha_apertura ? new Date(reg.fecha_apertura).toLocaleString('es-PA') : '—'}
                             </td>
-                            <td className="py-3.5 px-4 font-bold text-slate-900">
+                            <td className="py-3.5 px-4 font-mono text-[11px] font-bold text-[#E6C687]">
+                              {reg.estado === 'abierta'
+                                ? `⏱️ ${getDuracionCaja(reg.fecha_apertura)}`
+                                : getDuracionCaja(reg.fecha_apertura, reg.fecha_cierre || undefined)}
+                            </td>
+                            <td className="py-3.5 px-4 font-bold text-white">
                               {reg.abierto_por}
                             </td>
-                            <td className="py-3.5 px-4 text-right font-black text-slate-800">
+                            <td className="py-3.5 px-4 text-right font-black text-slate-200">
                               ${Number(reg.monto_inicial || 0).toFixed(2)}
                             </td>
                             {userRole !== 'cajero' && (
                               <>
-                                <td className="py-3.5 px-4 text-right font-medium text-slate-600">
+                                <td className="py-3.5 px-4 text-right font-medium text-[#A69F93]">
                                   {reg.monto_esperado !== undefined ? `$${Number(reg.monto_esperado).toFixed(2)}` : '—'}
                                 </td>
-                                <td className="py-3.5 px-4 text-right font-black text-slate-900">
+                                <td className="py-3.5 px-4 text-right font-black text-white">
                                   {reg.monto_final_real !== undefined ? `$${Number(reg.monto_final_real).toFixed(2)}` : '—'}
                                 </td>
                                 <td className="py-3.5 px-4 text-right font-black">
@@ -2475,10 +2728,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     <span
                                       className={`px-2 py-0.5 rounded-md text-[11px] font-black ${
                                         reg.diferencia === 0
-                                          ? 'text-emerald-700 bg-emerald-50'
+                                          ? 'text-emerald-400 bg-emerald-950/60 border border-emerald-800/60'
                                           : reg.diferencia > 0
-                                          ? 'text-blue-700 bg-blue-50'
-                                          : 'text-rose-700 bg-rose-50'
+                                          ? 'text-blue-400 bg-blue-950/60 border border-blue-800/60'
+                                          : 'text-rose-400 bg-rose-950/60 border border-rose-800/60'
                                       }`}
                                     >
                                       {reg.diferencia > 0 ? `+${reg.diferencia.toFixed(2)}` : `${reg.diferencia.toFixed(2)}`}
@@ -2489,19 +2742,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 </td>
                               </>
                             )}
-                            <td className="py-3.5 px-4 text-slate-500 text-[11px]">
+                            <td className="py-3.5 px-4 text-[#A69F93] text-[11px]">
                               {reg.fecha_cierre ? (
                                 <div>
                                   <span>{new Date(reg.fecha_cierre).toLocaleString('es-PA')}</span>
                                   {reg.cerrado_por && (
-                                    <span className="block text-[10px] text-slate-400">por {reg.cerrado_por}</span>
+                                    <span className="block text-[10px] text-[#7A7368]">por {reg.cerrado_por}</span>
                                   )}
                                 </div>
                               ) : (
-                                <span className="text-emerald-600 font-bold">En curso...</span>
+                                <span className="text-emerald-400 font-bold">En curso...</span>
                               )}
                             </td>
-                            <td className="py-3.5 px-4 text-slate-600 text-[11px] max-w-[200px] truncate">
+                            <td className="py-3.5 px-4 text-[#A69F93] text-[11px] max-w-[200px] truncate">
                               {reg.notas || '—'}
                             </td>
                           </tr>
@@ -2521,141 +2774,220 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <div className="space-y-6">
               {/* Financial Summary Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs">
-                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">
+                <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                  <span className="text-[10px] font-black uppercase text-[#A69F93] block">
                     TOTAL VENTAS (INGRESOS BRUTOS)
                   </span>
-                  <span className="text-3xl font-black text-[#1A1918] block my-2">
+                  <span className="text-3xl font-black text-white block my-2">
                     ${totalVentasGanado.toFixed(2)}
                   </span>
-                  <span className="text-[11px] text-emerald-700 font-bold flex items-center gap-1">
+                  <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1">
                     <ArrowUpRight className="w-3.5 h-3.5" />
                     {ventas.length} ventas acumuladas
                   </span>
                 </div>
 
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs">
-                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">
+                <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                  <span className="text-[10px] font-black uppercase text-[#A69F93] block">
                     TOTAL GASTOS REGISTRADOS
                   </span>
-                  <span className="text-3xl font-black text-rose-600 block my-2">
+                  <span className="text-3xl font-black text-rose-400 block my-2">
                     -${totalGastosMonto.toFixed(2)}
                   </span>
-                  <span className="text-[11px] text-rose-700 font-bold flex items-center gap-1">
+                  <span className="text-[11px] text-rose-400 font-bold flex items-center gap-1">
                     <ArrowDownRight className="w-3.5 h-3.5" />
                     {gastos.length} gastos operativos / inventario
                   </span>
                 </div>
 
-                <div className={`rounded-3xl p-5 border shadow-sm ${
+                <div className={`rounded-3xl p-5 border shadow-md ${
                   totalNetoGanancia >= 0
-                    ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
-                    : 'bg-rose-50 border-rose-200 text-rose-950'
+                    ? 'bg-[#0B1A12] border-emerald-800/80 text-emerald-300'
+                    : 'bg-[#1F0C0E] border-rose-800/80 text-rose-300'
                 }`}>
-                  <span className="text-[10px] font-black uppercase tracking-wider block opacity-70">
+                  <span className="text-[10px] font-black uppercase tracking-wider block opacity-90 text-[#E6C687]">
                     TOTAL NETO EN CAJA (GANANCIA REAL)
                   </span>
-                  <span className="text-3xl font-black block my-2">
+                  <span className="text-3xl font-black text-white block my-2">
                     ${totalNetoGanancia.toFixed(2)} USD
                   </span>
-                  <span className="text-[11px] font-bold">
+                  <span className={`text-[11px] font-bold ${totalNetoGanancia >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                     Ventas menos Gastos deducidos en tiempo real
                   </span>
                 </div>
               </div>
 
               {/* Action and Filter Bar */}
-              <div className="bg-white rounded-3xl p-4 border border-[#E5E9EE] flex flex-wrap items-center justify-between gap-3 shadow-xs">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    onClick={() => setIsModalGastoOpen(true)}
-                    className="px-5 py-2.5 rounded-2xl bg-[#141312] hover:bg-black text-[#F5E6BE] text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-md cursor-pointer transition-all active:scale-95"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>REGISTRAR NUEVO GASTO</span>
-                  </button>
-                  <button
-                    onClick={reloadAllData}
-                    className="p-2.5 rounded-xl border border-[#D5DCE4] hover:bg-[#FAF8F5] text-[#1A1918]"
-                    title="Recargar datos"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+              {(() => {
+                const todayStr = new Date().toISOString().split('T')[0];
+                const yesterdayDate = new Date();
+                yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+                const yesterdayStr = yesterdayDate.toISOString().split('T')[0];
 
-                <div className="text-xs text-[#7A7368] font-bold">
-                  {gastos.length} registros de egresos
-                </div>
-              </div>
+                const gastosFiltrados = gastos.filter((g) => {
+                  if (!gastoFechaFilter) return true;
+                  if (!g.fecha) return false;
+                  try {
+                    const d = new Date(g.fecha).toISOString().split('T')[0];
+                    return d === gastoFechaFilter;
+                  } catch {
+                    return false;
+                  }
+                });
 
-              {/* Expenses Table */}
-              <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
-                {gastos.length === 0 ? (
-                  <div className="p-12 text-center space-y-3">
-                    <Wallet className="w-10 h-10 mx-auto text-[#C9BFB0]" />
-                    <h3 className="font-extrabold text-[#1A1918]">
-                      No hay gastos registrados todavía
-                    </h3>
-                    <p className="text-xs text-[#7A7368] max-w-md mx-auto">
-                      Registra los gastos de compras de mercancía (ej: 10 camisas), alquiler o publicidad para descontarlos del total ganado y ver tu ganancia neta.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[620px] text-left text-xs">
-                      <thead className="bg-[#FAF8F5] border-b border-[#EAE5DC] text-[10px] font-black uppercase text-[#7A7368] tracking-wider">
-                        <tr>
-                          <th className="py-3.5 px-4">Concepto / Descripción</th>
-                          <th className="py-3.5 px-4">Categoría</th>
-                          <th className="py-3.5 px-4">Fecha</th>
-                          <th className="py-3.5 px-4">Registrado Por</th>
-                          <th className="py-3.5 px-4 text-right">Monto Deducido</th>
-                          <th className="py-3.5 px-4 text-center">Acciones</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#F2EDE4]">
-                        {gastos.map((g) => (
-                          <tr key={g.id || g.concepto} className="hover:bg-[#FCFAF7] transition-colors">
-                            <td className="py-3.5 px-4">
-                              <span className="font-extrabold text-[#1A1918] block">{g.concepto}</span>
-                              {g.notas && (
-                                <span className="text-[11px] text-[#7A7368] block mt-0.5">{g.notas}</span>
-                              )}
-                            </td>
-                            <td className="py-3.5 px-4">
-                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#FAF8F5] border border-[#E5DFD5] text-[#5A554D]">
-                                {g.categoria}
-                              </span>
-                            </td>
-                            <td className="py-3.5 px-4 text-[#7A7368]">
-                              {g.fecha ? new Date(g.fecha).toLocaleDateString('es-PA') : 'Reciente'}
-                            </td>
-                            <td className="py-3.5 px-4 text-[#7A7368]">
-                              {g.creado_por || 'Administrador'}
-                            </td>
-                            <td className="py-3.5 px-4 text-right font-black text-rose-600 text-sm">
-                              -${Number(g.monto).toFixed(2)}
-                            </td>
-                            <td className="py-3.5 px-4 text-center">
-                              {g.id && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleEliminarGasto(g.id!, g.concepto)}
-                                  className="px-2.5 py-1 rounded-lg text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 font-bold text-xs inline-flex items-center gap-1 transition-colors cursor-pointer"
-                                  title="Eliminar gasto"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                  <span>Eliminar</span>
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+                const totalGastosFiltrados = gastosFiltrados.reduce((sum, g) => sum + (Number(g.monto) || 0), 0);
+
+                return (
+                  <>
+                    <div className="bg-[#13110F] rounded-3xl p-4 border border-[#26221E] flex flex-wrap items-center justify-between gap-3 shadow-md">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          onClick={() => setIsModalGastoOpen(true)}
+                          className="px-5 py-2.5 rounded-2xl bg-[#C59A4D] hover:bg-[#D4A95D] text-black text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-md cursor-pointer transition-all active:scale-95"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>REGISTRAR NUEVO GASTO</span>
+                        </button>
+                        <button
+                          onClick={reloadAllData}
+                          className="p-2.5 rounded-xl border border-[#38332B] hover:bg-[#1E1B18] text-[#E6C687] transition-colors cursor-pointer"
+                          title="Recargar datos"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Date Filter Controls */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] font-extrabold text-[#A69F93] flex items-center gap-1">
+                          📅 Filtrar por día:
+                        </span>
+                        <input
+                          type="date"
+                          value={gastoFechaFilter}
+                          onChange={(e) => setGastoFechaFilter(e.target.value)}
+                          className="bg-[#1A1816] text-white text-xs px-3 py-1.5 rounded-xl border border-[#332E27] focus:outline-none focus:border-[#C59A4D]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setGastoFechaFilter(todayStr)}
+                          className={`px-2.5 py-1.5 rounded-xl text-xs font-black cursor-pointer transition-colors ${
+                            gastoFechaFilter === todayStr
+                              ? 'bg-[#C59A4D] text-[#141312]'
+                              : 'bg-[#1A1816] text-[#A69F93] hover:text-white border border-[#2D2822]'
+                          }`}
+                        >
+                          Hoy
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setGastoFechaFilter(yesterdayStr)}
+                          className={`px-2.5 py-1.5 rounded-xl text-xs font-black cursor-pointer transition-colors ${
+                            gastoFechaFilter === yesterdayStr
+                              ? 'bg-[#C59A4D] text-[#141312]'
+                              : 'bg-[#1A1816] text-[#A69F93] hover:text-white border border-[#2D2822]'
+                          }`}
+                        >
+                          Ayer
+                        </button>
+                        {gastoFechaFilter && (
+                          <button
+                            type="button"
+                            onClick={() => setGastoFechaFilter('')}
+                            className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-[#26221E] text-rose-300 hover:text-rose-200 cursor-pointer"
+                          >
+                            ✕ Ver Todos
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Filter Summary Banner if date filter active */}
+                    {gastoFechaFilter && (
+                      <div className="bg-[#181614] p-3.5 rounded-2xl border border-[#332E27] flex items-center justify-between text-xs text-white">
+                        <div className="flex items-center gap-2">
+                          <span className="text-amber-400 font-bold">🔍 Mostrando gastos del día:</span>
+                          <strong className="font-mono text-white text-sm">{gastoFechaFilter}</strong>
+                          <span className="text-[#A69F93]">({gastosFiltrados.length} registros encontrados)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[#A69F93]">Total de este día:</span>
+                          <span className="text-rose-400 font-black text-base">-${totalGastosFiltrados.toFixed(2)} USD</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Expenses Table */}
+                    <div className="bg-[#13110F] rounded-3xl border border-[#26221E] overflow-hidden shadow-md">
+                      {gastosFiltrados.length === 0 ? (
+                        <div className="p-12 text-center space-y-3">
+                          <Wallet className="w-10 h-10 mx-auto text-[#6A6358]" />
+                          <h3 className="font-extrabold text-white">
+                            {gastoFechaFilter ? `No hay gastos registrados el ${gastoFechaFilter}` : 'No hay gastos registrados todavía'}
+                          </h3>
+                          <p className="text-xs text-[#A69F93] max-w-md mx-auto">
+                            {gastoFechaFilter ? 'Prueba seleccionando otra fecha o pulsando "Ver Todos".' : 'Registra compras de mercancía o egresos de la tienda.'}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[620px] text-left text-xs">
+                            <thead className="bg-[#1A1816] border-b border-[#26221E] text-[10px] font-black uppercase text-[#E6C687] tracking-wider">
+                              <tr>
+                                <th className="py-3.5 px-4">Concepto / Descripción</th>
+                                <th className="py-3.5 px-4">Categoría</th>
+                                <th className="py-3.5 px-4">Fecha</th>
+                                <th className="py-3.5 px-4">Registrado Por</th>
+                                <th className="py-3.5 px-4 text-right">Monto Deducido</th>
+                                <th className="py-3.5 px-4 text-center">Acciones</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#221F1C]">
+                              {gastosFiltrados.map((g) => (
+                                <tr key={g.id || g.concepto} className="hover:bg-[#1A1816]/60 transition-colors">
+                                  <td className="py-3.5 px-4">
+                                    <span className="font-extrabold text-white block">{g.concepto}</span>
+                                    {g.notas && (
+                                      <span className="text-[11px] text-[#A69F93] block mt-0.5">{g.notas}</span>
+                                    )}
+                                  </td>
+                                  <td className="py-3.5 px-4">
+                                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#1E1B18] border border-[#38332B] text-[#E6C687]">
+                                      {g.categoria}
+                                    </span>
+                                  </td>
+                                  <td className="py-3.5 px-4 text-[#A69F93] font-mono">
+                                    {g.fecha ? new Date(g.fecha).toLocaleString('es-PA') : 'Reciente'}
+                                  </td>
+                                  <td className="py-3.5 px-4 text-white font-bold">
+                                    {g.creado_por || 'Administrador'}
+                                  </td>
+                                  <td className="py-3.5 px-4 text-right font-black text-rose-400 text-sm">
+                                    -${Number(g.monto).toFixed(2)}
+                                  </td>
+                                  <td className="py-3.5 px-4 text-center">
+                                    {g.id && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEliminarGasto(g.id!, g.concepto)}
+                                        className="px-2.5 py-1 rounded-lg text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 font-bold text-xs inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                        title="Eliminar gasto"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                        <span>Eliminar</span>
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           )}
 
@@ -2665,13 +2997,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           {activeSection === 'movimientos' && (
             <div className="space-y-6 animate-fade-in">
               {/* Header card */}
-              <div className="bg-white rounded-3xl p-6 border border-[#E5E9EE] shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="bg-[#13110F] rounded-3xl p-6 border border-[#26221E] shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-lg font-black text-[#1A1918] font-heading flex items-center gap-2">
+                  <h2 className="text-lg font-black text-white font-heading flex items-center gap-2">
                     <Activity className="w-5 h-5 text-[#C59A4D]" />
                     Registro de Movimientos & Auditoría de Trabajadores
                   </h2>
-                  <p className="text-xs text-[#7A7368] mt-0.5">
+                  <p className="text-xs text-[#A69F93] mt-0.5">
                     Historial cronológico de cada acción, turno, confirmación de pedidos, cobros y ajustes de inventario realizados por los trabajadores.
                   </p>
                 </div>
@@ -2682,7 +3014,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       const m = await getMovimientosTrabajadores();
                       setMovimientos(m);
                     }}
-                    className="p-2.5 rounded-2xl bg-[#F4F6F8] hover:bg-[#EAEFF5] text-[#1A1918] transition-colors cursor-pointer"
+                    className="p-2.5 rounded-2xl bg-[#1E1B18] hover:bg-[#2A2622] text-[#E6C687] border border-[#38332B] transition-colors cursor-pointer"
                     title="Actualizar movimientos en tiempo real"
                   >
                     <RefreshCw className="w-4 h-4" />
@@ -2691,7 +3023,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   {userRole === 'dueno' && (
                     <button
                       onClick={handleLimpiarHistorialMovimientosRegistro}
-                      className="px-4 py-2.5 rounded-2xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-black tracking-wider uppercase flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
+                      className="px-4 py-2.5 rounded-2xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 text-xs font-black tracking-wider uppercase flex items-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
                     >
                       <Trash2 className="w-4 h-4" />
                       <span>VACIAR HISTORIAL</span>
@@ -2702,57 +3034,57 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               {/* 4 Stat Cards de Auditoría */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs">
-                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">
+                <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                  <span className="text-[10px] font-black uppercase text-[#A69F93] block">
                     TOTAL MOVIMIENTOS
                   </span>
-                  <span className="text-2xl sm:text-3xl font-black text-[#1A1918] block my-2">
+                  <span className="text-2xl sm:text-3xl font-black text-white block my-2">
                     {movimientos.length}
                   </span>
-                  <span className="text-[11px] text-emerald-600 font-bold">
+                  <span className="text-[11px] text-emerald-400 font-bold">
                     Acciones registradas
                   </span>
                 </div>
 
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs">
-                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">
+                <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                  <span className="text-[10px] font-black uppercase text-[#A69F93] block">
                     TURNOS DE TRABAJO
                   </span>
-                  <span className="text-2xl sm:text-3xl font-black text-emerald-600 block my-2">
+                  <span className="text-2xl sm:text-3xl font-black text-emerald-400 block my-2">
                     {movimientos.filter((m) => m.modulo === 'auth' || m.accion.toLowerCase().includes('turno')).length}
                   </span>
-                  <span className="text-[11px] text-[#7A7368]">
+                  <span className="text-[11px] text-[#A69F93]">
                     Inicios de sesión
                   </span>
                 </div>
 
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs">
-                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">
+                <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                  <span className="text-[10px] font-black uppercase text-[#A69F93] block">
                     MOVIMIENTOS EN PEDIDOS
                   </span>
-                  <span className="text-2xl sm:text-3xl font-black text-[#C59A4D] block my-2">
+                  <span className="text-2xl sm:text-3xl font-black text-[#E6C687] block my-2">
                     {movimientos.filter((m) => m.modulo === 'pedidos').length}
                   </span>
-                  <span className="text-[11px] text-[#7A7368]">
+                  <span className="text-[11px] text-[#A69F93]">
                     Aprobados / Rechazados
                   </span>
                 </div>
 
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE] shadow-xs">
-                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">
+                <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                  <span className="text-[10px] font-black uppercase text-[#A69F93] block">
                     AJUSTES DE INVENTARIO
                   </span>
-                  <span className="text-2xl sm:text-3xl font-black text-sky-600 block my-2">
+                  <span className="text-2xl sm:text-3xl font-black text-sky-400 block my-2">
                     {movimientos.filter((m) => m.modulo === 'inventario').length}
                   </span>
-                  <span className="text-[11px] text-[#7A7368]">
+                  <span className="text-[11px] text-[#A69F93]">
                     Stock modificado
                   </span>
                 </div>
               </div>
 
               {/* Filtros de Búsqueda y Módulo */}
-              <div className="bg-white rounded-3xl p-4 border border-[#E5E9EE] flex flex-wrap items-center justify-between gap-3 shadow-xs">
+              <div className="bg-[#13110F] rounded-3xl p-4 border border-[#26221E] flex flex-wrap items-center justify-between gap-3 shadow-md">
                 <div className="relative flex-1 min-w-[220px] max-w-md">
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8C8375]" />
                   <input
@@ -2760,7 +3092,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     placeholder="Buscar por trabajador, correo, pedido o acción..."
                     value={movimientosSearch}
                     onChange={(e) => setMovimientosSearch(e.target.value)}
-                    className="w-full bg-[#FAF8F5] text-xs px-10 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                    className="w-full bg-[#1A1816] text-xs px-10 py-2.5 rounded-2xl border border-[#38332B] text-white placeholder-[#6A6358] focus:outline-none focus:border-[#C59A4D]"
                   />
                 </div>
 
@@ -2768,34 +3100,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <select
                     value={movimientosModuloFilter}
                     onChange={(e) => setMovimientosModuloFilter(e.target.value)}
-                    className="bg-[#FAF8F5] text-xs font-bold text-[#1A1918] px-3.5 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none"
+                    className="bg-[#1A1816] text-xs font-bold text-[#E6C687] px-3.5 py-2.5 rounded-2xl border border-[#38332B] focus:outline-none"
                   >
-                    <option value="todos">Todos los Módulos</option>
-                    <option value="auth">Turnos / Sesiones</option>
-                    <option value="pedidos">Pedidos & Comprobantes</option>
-                    <option value="inventario">Inventario & Stock</option>
-                    <option value="ventas">Ventas</option>
-                    <option value="gastos">Gastos</option>
+                    <option value="todos" className="bg-[#1A1816] text-white">Todos los Módulos</option>
+                    <option value="auth" className="bg-[#1A1816] text-white">Turnos / Sesiones</option>
+                    <option value="pedidos" className="bg-[#1A1816] text-white">Pedidos & Comprobantes</option>
+                    <option value="inventario" className="bg-[#1A1816] text-white">Inventario & Stock</option>
+                    <option value="ventas" className="bg-[#1A1816] text-white">Ventas</option>
+                    <option value="gastos" className="bg-[#1A1816] text-white">Gastos</option>
                   </select>
 
                   <select
                     value={movimientosRolFilter}
                     onChange={(e) => setMovimientosRolFilter(e.target.value)}
-                    className="bg-[#FAF8F5] text-xs font-bold text-[#1A1918] px-3.5 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none"
+                    className="bg-[#1A1816] text-xs font-bold text-[#E6C687] px-3.5 py-2.5 rounded-2xl border border-[#38332B] focus:outline-none"
                   >
-                    <option value="todos">Todos los Roles</option>
-                    <option value="cajero">Solo Trabajadores</option>
-                    <option value="dueno">Solo Dueños</option>
-                    <option value="administrador">Solo Administradores</option>
+                    <option value="todos" className="bg-[#1A1816] text-white">Todos los Roles</option>
+                    <option value="cajero" className="bg-[#1A1816] text-white">Solo Trabajadores</option>
+                    <option value="dueno" className="bg-[#1A1816] text-white">Solo Dueños</option>
+                    <option value="administrador" className="bg-[#1A1816] text-white">Solo Administradores</option>
                   </select>
                 </div>
               </div>
 
               {/* Tabla de Movimientos */}
-              <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
+              <div className="bg-[#13110F] rounded-3xl border border-[#26221E] overflow-hidden shadow-md">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[700px] text-left text-xs">
-                    <thead className="bg-[#FAF8F5] border-b border-[#EAE5DC] text-[10px] font-black uppercase text-[#7A7368] tracking-wider">
+                    <thead className="bg-[#1A1816] border-b border-[#26221E] text-[10px] font-black uppercase text-[#E6C687] tracking-wider">
                       <tr>
                         <th className="py-3.5 px-5">FECHA Y HORA</th>
                         <th className="py-3.5 px-5">TRABAJADOR / USUARIO</th>
@@ -2807,7 +3139,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         )}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#F2EDE4]">
+                    <tbody className="divide-y divide-[#221F1C]">
                       {movimientos
                         .filter((m) => {
                           if (movimientosModuloFilter !== 'todos' && m.modulo !== movimientosModuloFilter) return false;
@@ -2840,31 +3172,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           const isWorker = mov.rol === 'cajero' || mov.rol === 'trabajador';
 
                           return (
-                            <tr key={mov.id} className="hover:bg-[#FCFAF7] transition-colors">
+                            <tr key={mov.id} className="hover:bg-[#1A1816]/60 transition-colors">
                               <td className="py-3.5 px-5 whitespace-nowrap">
-                                <span className="font-bold text-[#1A1918] block">{formattedTime}</span>
-                                <span className="text-[10px] text-[#7A7368] block">{formattedDate}</span>
+                                <span className="font-bold text-white block">{formattedTime}</span>
+                                <span className="text-[10px] text-[#A69F93] block">{formattedDate}</span>
                               </td>
 
                               <td className="py-3.5 px-5">
                                 <div className="flex items-center gap-2">
                                   <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 ${
-                                    isWorker ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-[#8C6B28]'
+                                    isWorker ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-[#E6C687] border border-amber-800'
                                   }`}>
                                     {mov.usuario_nombre.charAt(0).toUpperCase()}
                                   </div>
                                   <div className="min-w-0">
                                     <div className="flex items-center gap-1.5 flex-wrap">
-                                      <strong className="text-xs text-[#1A1918]">{mov.usuario_nombre}</strong>
+                                      <strong className="text-xs text-white">{mov.usuario_nombre}</strong>
                                       <span className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase ${
                                         isWorker
-                                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                                          : 'bg-amber-100 text-[#8C6B28] border border-amber-300'
+                                          ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
+                                          : 'bg-amber-950/80 text-[#E6C687] border border-amber-800'
                                       }`}>
                                         {isWorker ? 'TRABAJADOR' : mov.rol.toUpperCase()}
                                       </span>
                                     </div>
-                                    <span className="text-[10px] text-[#7A7368] block truncate">
+                                    <span className="text-[10px] text-[#A69F93] block truncate">
                                       {mov.usuario_email}
                                     </span>
                                   </div>
@@ -2872,7 +3204,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               </td>
 
                               <td className="py-3.5 px-5">
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-slate-100 text-slate-800 border border-slate-200">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-[#1E1B18] text-[#E6C687] border border-[#38332B]">
                                   {mov.modulo || 'general'}
                                 </span>
                               </td>
@@ -2880,21 +3212,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               <td className="py-3.5 px-5">
                                 <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-extrabold ${
                                   mov.accion.includes('Aprobó') || mov.accion.includes('Verificado')
-                                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                    ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/80'
                                     : mov.accion.includes('Rechazó')
-                                    ? 'bg-rose-50 text-rose-800 border border-rose-200'
+                                    ? 'bg-rose-950/60 text-rose-300 border border-rose-800/80'
                                     : mov.accion.includes('Stock')
-                                    ? 'bg-sky-50 text-sky-800 border border-sky-200'
+                                    ? 'bg-sky-950/60 text-sky-300 border border-sky-800/80'
                                     : mov.accion.includes('Turno') || mov.accion.includes('Sesión')
-                                    ? 'bg-purple-50 text-purple-800 border border-purple-200'
-                                    : 'bg-amber-50 text-amber-800 border border-amber-200'
+                                    ? 'bg-purple-950/60 text-purple-300 border border-purple-800/80'
+                                    : 'bg-amber-950/60 text-[#E6C687] border border-amber-800/80'
                                 }`}>
                                   {mov.accion}
                                 </span>
                               </td>
 
                               <td className="py-3.5 px-5 max-w-md">
-                                <p className="text-xs text-[#453F38] font-medium leading-relaxed">
+                                <p className="text-xs text-[#C9BFB0] font-medium leading-relaxed">
                                   {mov.detalles || 'Sin detalles adicionales'}
                                 </p>
                               </td>
@@ -2903,7 +3235,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 <td className="py-3.5 px-5 text-right">
                                   <button
                                     onClick={() => handleEliminarMovimientoRegistro(mov.id)}
-                                    className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 hover:border-rose-200 border border-transparent transition-colors cursor-pointer"
+                                    className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-950/50 hover:border-rose-800 border border-transparent transition-colors cursor-pointer"
                                     title="Eliminar este registro de auditoría"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
@@ -2916,12 +3248,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                       {movimientos.length === 0 && (
                         <tr>
-                          <td colSpan={userRole === 'dueno' ? 6 : 5} className="py-14 text-center text-[#7A7368]">
-                            <Activity className="w-8 h-8 text-[#CCC5B8] mx-auto mb-2" />
-                            <strong className="block text-sm text-[#1A1918]">
+                          <td colSpan={userRole === 'dueno' ? 6 : 5} className="py-14 text-center text-[#A69F93]">
+                            <Activity className="w-8 h-8 text-[#6A6358] mx-auto mb-2" />
+                            <strong className="block text-sm text-white">
                               No hay movimientos registrados todavía
                             </strong>
-                            <p className="text-xs text-[#7A7368] mt-1 max-w-sm mx-auto">
+                            <p className="text-xs text-[#A69F93] mt-1 max-w-sm mx-auto">
                               Cada vez que un trabajador inicie turno, apruebe pedidos o ajuste inventario, se registrará automáticamente en esta tabla.
                             </p>
                           </td>
@@ -2941,41 +3273,47 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <div className="space-y-6">
               {/* 4 Stat Cards */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE]">
-                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">TOTAL PEDIDOS REGISTRADOS</span>
-                  <span className="text-3xl font-black text-[#1A1918] block my-2">{pedidos.length}</span>
-                  <span className="text-[11px] text-[#7A7368]">En línea y WhatsApp</span>
+                <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                  <span className="text-[10px] font-black uppercase text-[#A69F93] block">TOTAL PEDIDOS REGISTRADOS</span>
+                  <span className="text-3xl font-black text-white block my-2">{pedidos.length}</span>
+                  <span className="text-[11px] text-[#A69F93]">En línea y WhatsApp</span>
                 </div>
 
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE]">
-                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">PENDIENTES POR VERIFICAR</span>
-                  <span className="text-3xl font-black text-amber-600 block my-2">{pedidosPendientes}</span>
-                  <span className="text-[11px] text-amber-700">Comprobante por revisar</span>
+                <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                  <span className="text-[10px] font-black uppercase text-[#A69F93] block">PENDIENTES POR VERIFICAR</span>
+                  <span className="text-3xl font-black text-amber-400 block my-2">{pedidosPendientes}</span>
+                  <span className="text-[11px] text-amber-400">Comprobante por revisar</span>
                 </div>
 
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE]">
-                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">APROBADOS & ENTREGADOS</span>
-                  <span className="text-3xl font-black text-emerald-600 block my-2">{pedidosAprobados}</span>
-                  <span className="text-[11px] text-emerald-700">Pasados a ventas</span>
+                <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                  <span className="text-[10px] font-black uppercase text-[#A69F93] block">APROBADOS & ENTREGADOS</span>
+                  <span className="text-3xl font-black text-emerald-400 block my-2">{pedidosAprobados}</span>
+                  <span className="text-[11px] text-emerald-400">Pasados a ventas</span>
                 </div>
 
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E9EE]">
-                  <span className="text-[10px] font-black uppercase text-[#7A7368] block">VOLUMEN TOTAL EN PEDIDOS</span>
-                  <span className="text-3xl font-black text-[#1A1918] block my-2">${volumenTotalPedidos}</span>
-                  <span className="text-[11px] text-[#7A7368]">Excluye cancelados</span>
+                <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
+                  <span className="text-[10px] font-black uppercase text-[#A69F93] block">
+                    {userRole === 'cajero' ? 'ARTÍCULOS EN PROCESO' : 'VOLUMEN EN PEDIDOS'}
+                  </span>
+                  <span className="text-3xl font-black text-white block my-2">
+                    {userRole === 'cajero' ? `${pedidos.length} pedidos` : `$${volumenTotalPedidos}`}
+                  </span>
+                  <span className="text-[11px] text-[#A69F93]">
+                    {userRole === 'cajero' ? 'Turno operativo activo' : 'Excluye cancelados'}
+                  </span>
                 </div>
               </div>
 
               {/* Search & Status Filters */}
-              <div className="bg-white rounded-3xl p-4 border border-[#E5E9EE] flex flex-wrap items-center justify-between gap-3">
+              <div className="bg-[#13110F] rounded-3xl p-4 border border-[#26221E] flex flex-wrap items-center justify-between gap-3 shadow-md">
                 <div className="relative flex-1 min-w-[200px] max-w-sm">
-                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8C8375]" />
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#A69F93]" />
                   <input
                     type="text"
                     placeholder="Buscar por código, cliente o teléfono..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-[#FAF8F5] text-xs px-10 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none"
+                    className="w-full bg-[#1A1816] text-xs text-white px-10 py-2.5 rounded-2xl border border-[#2D2822] focus:outline-none focus:border-[#C59A4D] placeholder-[#7A7368]"
                   />
                 </div>
 
@@ -2984,10 +3322,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <button
                       key={tab}
                       onClick={() => setPedidoFilter(tab)}
-                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold capitalize transition-all ${
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold capitalize transition-all cursor-pointer ${
                         pedidoFilter === tab
-                          ? 'bg-[#141312] text-white'
-                          : 'bg-[#F4F6F8] text-[#1A1918] hover:bg-[#EAEFF5]'
+                          ? 'bg-[#C59A4D] text-[#141312] font-black shadow-sm'
+                          : 'bg-[#1A1816] text-white hover:bg-[#25221F] border border-[#2D2822]'
                       }`}
                     >
                       {tab}
@@ -2995,7 +3333,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   ))}
                   <button
                     onClick={reloadAllData}
-                    className="p-2 rounded-xl border border-[#D5DCE4] text-[#1A1918]"
+                    className="p-2 rounded-xl border border-[#2D2822] bg-[#1A1816] hover:bg-[#25221F] text-white cursor-pointer"
                     title="Recargar"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
@@ -3006,19 +3344,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {/* Toast de confirmación de comprobante */}
               {comprobanteToast && (
                 <div
-                  className={`p-4 rounded-2xl flex items-center justify-between gap-3 text-xs font-bold animate-fade-in shadow-sm ${
+                  className={`p-4 rounded-2xl flex items-center justify-between gap-3 text-xs font-bold animate-fade-in shadow-md ${
                     comprobanteToast.type === 'success'
-                      ? 'bg-emerald-50 border border-emerald-200 text-emerald-900'
-                      : 'bg-rose-50 border border-rose-200 text-rose-900'
+                      ? 'bg-emerald-950/70 border border-emerald-800 text-emerald-300'
+                      : 'bg-rose-950/70 border border-rose-800 text-rose-300'
                   }`}
                 >
                   <div className="flex items-center gap-2.5">
-                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
                     <span>{comprobanteToast.msg}</span>
                   </div>
                   <button
                     onClick={() => setComprobanteToast(null)}
-                    className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-800 cursor-pointer"
+                    className="p-1 hover:bg-emerald-900/50 rounded-lg text-emerald-300 cursor-pointer"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -3045,32 +3383,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   .map((pedido) => (
                     <div
                       key={pedido.id || pedido.codigo}
-                      className="bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-6 border border-[#E5E9EE] shadow-xs space-y-4"
+                      className="bg-[#13110F] rounded-2xl sm:rounded-3xl p-3.5 sm:p-6 border border-[#26221E] shadow-xl space-y-4 text-white"
                     >
                       {/* Order Header bar */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 sm:pb-4 border-b border-[#F0EAE1] gap-2.5 sm:gap-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 sm:pb-4 border-b border-[#26221E] gap-2.5 sm:gap-3">
                         <div className="flex items-center gap-2.5 sm:gap-3">
-                          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-[#141312] text-[#E6C687] flex items-center justify-center font-black text-xs shrink-0">
+                          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-black border border-[#2D2822] text-[#E6C687] flex items-center justify-center font-black text-xs shrink-0">
                             ALX
                           </div>
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                              <span className="font-black text-xs sm:text-sm text-[#1A1918]">{pedido.codigo}</span>
+                              <span className="font-black text-xs sm:text-sm text-white">{pedido.codigo}</span>
                               <span
                                 className={`px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase ${
                                   pedido.estado === 'pendiente'
-                                    ? 'bg-amber-100 text-amber-900'
+                                    ? 'bg-amber-950/70 text-amber-300 border border-amber-800'
                                     : pedido.estado === 'aprobado' || pedido.estado === 'aceptado'
-                                    ? 'bg-emerald-100 text-emerald-900'
+                                    ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-800'
                                     : pedido.estado === 'entregado'
-                                    ? 'bg-blue-100 text-blue-900'
-                                    : 'bg-rose-100 text-rose-900'
+                                    ? 'bg-blue-950/70 text-blue-300 border border-blue-800'
+                                    : 'bg-rose-950/70 text-rose-300 border border-rose-800'
                                 }`}
                               >
                                 {pedido.estado}
                               </span>
                             </div>
-                            <span className="text-[10px] sm:text-[11px] text-[#7A7368] block">
+                            <span className="text-[10px] sm:text-[11px] text-[#A69F93] block">
                               {pedido.creado_en ? new Date(pedido.creado_en).toLocaleString('es-PA') : 'Reciente'}
                             </span>
                           </div>
@@ -3100,7 +3438,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               type="button"
                               disabled={orderActionLoadingId === (pedido.id || pedido.codigo)}
                               onClick={() => handleRechazarPedido(pedido)}
-                              className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-extrabold text-[11px] sm:text-xs flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                              className="px-2.5 py-1.5 rounded-xl bg-rose-950/50 hover:bg-rose-950 text-rose-300 border border-rose-900 font-extrabold text-[11px] sm:text-xs flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
                               title="Rechazar pedido"
                             >
                               <XCircle className="w-3.5 h-3.5" />
@@ -3113,7 +3451,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             onChange={(e) =>
                               handleUpdateOrderStatus(pedido.id || '', e.target.value)
                             }
-                            className="bg-[#FAF8F5] text-[11px] sm:text-xs font-bold text-[#1A1918] px-2.5 py-1.5 rounded-xl border border-[#E5DFD5] focus:outline-none"
+                            className="bg-[#1A1816] text-[11px] sm:text-xs font-bold text-white px-2.5 py-1.5 rounded-xl border border-[#2D2822] focus:outline-none"
                           >
                             <option value="pendiente">Pendiente</option>
                             <option value="aprobado">Aprobado</option>
@@ -3125,7 +3463,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           <button
                             type="button"
                             onClick={() => handleEliminarPedido(pedido.id || pedido.codigo, pedido.codigo)}
-                            className="px-2 py-1.5 rounded-xl text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 font-bold text-[11px] sm:text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                            className="px-2 py-1.5 rounded-xl text-rose-400 bg-rose-950/40 hover:bg-rose-950/80 border border-rose-900/50 font-bold text-[11px] sm:text-xs flex items-center gap-1 transition-colors cursor-pointer"
                             title="Eliminar este pedido permanentemente"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -3138,12 +3476,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 text-xs">
                         {/* Col 1: Datos del Cliente */}
                         <div className="space-y-1.5">
-                          <span className="text-[10px] font-black uppercase text-[#9C9488] block">
+                          <span className="text-[10px] font-black uppercase text-[#A69F93] block">
                             DATOS DEL CLIENTE
                           </span>
-                          <strong className="text-sm text-[#1A1918] block">{pedido.cliente_nombre}</strong>
-                          <div className="flex items-center gap-2 text-[#7A7368]">
-                            <Phone className="w-3.5 h-3.5 text-[#9C9488]" />
+                          <strong className="text-sm text-white block">{pedido.cliente_nombre}</strong>
+                          <div className="flex items-center gap-2 text-[#A69F93]">
+                            <Phone className="w-3.5 h-3.5 text-[#C59A4D]" />
                             <span>{pedido.cliente_telefono}</span>
                             <button
                               onClick={() => {
@@ -3155,19 +3493,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   '_blank'
                                 );
                               }}
-                              className="p-1 rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200 cursor-pointer"
+                              className="p-1 rounded-full bg-emerald-950/80 text-emerald-400 hover:bg-emerald-900 border border-emerald-800 cursor-pointer"
                               title="Chatear por WhatsApp"
                             >
                               <MessageCircle className="w-3.5 h-3.5 fill-current" />
                             </button>
                           </div>
                           {pedido.cliente_direccion && (
-                            <span className="text-[#7A7368] block mt-1">
+                            <span className="text-[#A69F93] block mt-1">
                               📍 {pedido.cliente_direccion}
                             </span>
                           )}
                           {pedido.notas && (
-                            <span className="text-[11px] text-[#7A7368] block italic mt-1 bg-[#FAF8F5] p-2 rounded-xl border border-[#F0EAE1]">
+                            <span className="text-[11px] text-[#A69F93] block italic mt-1 bg-[#1A1816] p-2 rounded-xl border border-[#2D2822]">
                               Nota: {pedido.notas}
                             </span>
                           )}
@@ -3176,37 +3514,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         {/* Col 2: Pago & Comprobante (Requisito 4) */}
                         <div className="space-y-2.5">
                           <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-black uppercase text-[#9C9488]">
+                            <span className="text-[10px] font-black uppercase text-[#A69F93]">
                               PAGO & COMPROBANTE
                             </span>
-                            <span className="px-2 py-0.5 rounded bg-[#141312] text-white text-[9px] font-black uppercase">
+                            <span className="px-2 py-0.5 rounded bg-black border border-[#2D2822] text-[#E6C687] text-[9px] font-black uppercase">
                               {pedido.metodo_pago}
                             </span>
                           </div>
 
                           <div className="flex items-baseline justify-between">
-                            <span className="text-[#7A7368]">
+                            <span className="text-[#A69F93]">
                               {userRole === 'cajero' ? 'Artículos:' : 'Monto Total:'}
                             </span>
                             {userRole === 'cajero' ? (
-                              <span className="text-base font-black text-slate-800">
+                              <span className="text-base font-black text-slate-200">
                                 {pedido.items?.reduce((s, it) => s + (it.cantidad || 1), 0) || pedido.items?.length || 1} prenda(s)
                               </span>
                             ) : (
-                              <span className="text-xl font-black text-[#1A1918]">${pedido.total}</span>
+                              <span className="text-xl font-black text-[#E6C687]">${pedido.total}</span>
                             )}
                           </div>
 
                           {/* Estado de validación del comprobante */}
                           <div className="flex items-center justify-between">
-                            <span className="text-[10px] text-[#7A7368] font-bold">Estado del Comprobante:</span>
+                            <span className="text-[10px] text-[#A69F93] font-bold">Estado del Comprobante:</span>
                             <span
                               className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
                                 pedido.estado_pago === 'verificado'
-                                  ? 'bg-emerald-100 text-emerald-900 border border-emerald-200'
+                                  ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-800'
                                   : pedido.estado_pago === 'rechazado'
-                                  ? 'bg-rose-100 text-rose-900 border border-rose-200'
-                                  : 'bg-amber-100 text-amber-900 border border-amber-200'
+                                  ? 'bg-rose-950/70 text-rose-300 border border-rose-800'
+                                  : 'bg-amber-950/70 text-amber-300 border border-amber-800'
                               }`}
                             >
                               {pedido.estado_pago === 'verificado'
@@ -3218,13 +3556,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           </div>
 
                           {pedido.comprobante_url ? (
-                            <div className="rounded-2xl bg-[#FAF8F5] border border-[#EAE5DC] p-2.5 space-y-2.5">
+                            <div className="rounded-2xl bg-[#1A1816] border border-[#2D2822] p-2.5 space-y-2.5">
                               {/* Vista previa de imagen + botones Ver y Descargar */}
                               <div className="flex items-center gap-2.5">
                                 <img
                                   src={pedido.comprobante_url}
                                   alt="Comprobante de pago"
-                                  className="w-14 h-14 object-cover rounded-xl border border-[#D5CEC2] shadow-xs cursor-pointer hover:opacity-90 transition-opacity"
+                                  className="w-14 h-14 object-cover rounded-xl border border-[#332E27] shadow-xs cursor-pointer hover:opacity-90 transition-opacity"
                                   onClick={() => {
                                     setSelectedOrderForProof(pedido);
                                     setViewingProofUrl(pedido.comprobante_url || null);
@@ -3232,7 +3570,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   title="Click para ver en pantalla completa"
                                 />
                                 <div className="flex-1 min-w-0">
-                                  <span className="text-xs font-bold text-[#1A1918] block truncate">
+                                  <span className="text-xs font-bold text-white block truncate">
                                     Comprobante Adjunto
                                   </span>
                                   <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
@@ -3242,10 +3580,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                         setSelectedOrderForProof(pedido);
                                         setViewingProofUrl(pedido.comprobante_url || null);
                                       }}
-                                      className="px-2 py-1 rounded-lg bg-[#141312] text-white text-[10px] font-bold flex items-center gap-1 hover:bg-black transition-colors cursor-pointer"
+                                      className="px-2 py-1 rounded-lg bg-[#C59A4D] text-[#141312] text-[10px] font-black flex items-center gap-1 hover:bg-[#B3873B] transition-colors cursor-pointer"
                                       title="Abrir en tamaño completo"
                                     >
-                                      <Eye className="w-3 h-3 text-[#E6C687]" />
+                                      <Eye className="w-3 h-3 text-[#141312]" />
                                       <span>Ver</span>
                                     </button>
 
@@ -3253,20 +3591,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                       href={pedido.comprobante_url}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="px-2 py-1 rounded-lg bg-white border border-[#DDD7CC] hover:bg-[#FAF8F5] text-[#1A1918] text-[10px] font-bold flex items-center gap-1 transition-colors"
+                                      className="px-2 py-1 rounded-lg bg-[#141210] border border-[#2D2822] hover:bg-[#1E1B18] text-[#E6C687] text-[10px] font-bold flex items-center gap-1 transition-colors"
                                       title="Abrir comprobante en nueva pestaña"
                                     >
-                                      <ExternalLink className="w-3 h-3 text-[#7A7368]" />
+                                      <ExternalLink className="w-3 h-3 text-[#A69F93]" />
                                       <span>Pestaña</span>
                                     </a>
 
                                     <button
                                       type="button"
                                       onClick={() => handleCopyReceiptLink(pedido.comprobante_url!, pedido.id || pedido.codigo)}
-                                      className="px-2 py-1 rounded-lg bg-white border border-[#DDD7CC] hover:bg-[#FAF8F5] text-[#1A1918] text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                                      className="px-2 py-1 rounded-lg bg-[#141210] border border-[#2D2822] hover:bg-[#1E1B18] text-slate-300 text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
                                       title="Copiar enlace directo del comprobante"
                                     >
-                                      <Copy className="w-3 h-3 text-[#7A7368]" />
+                                      <Copy className="w-3 h-3 text-[#A69F93]" />
                                       <span>{copiedLinkOrderId === (pedido.id || pedido.codigo) ? '¡Copiado!' : 'Copiar link'}</span>
                                     </button>
 
@@ -3278,10 +3616,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                           `comprobante_${pedido.codigo}_${pedido.cliente_nombre.replace(/\s+/g, '_')}.jpg`
                                         )
                                       }
-                                      className="px-2 py-1 rounded-lg bg-white border border-[#DDD7CC] hover:bg-[#FAF8F5] text-[#1A1918] text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                                      className="px-2 py-1 rounded-lg bg-[#141210] border border-[#2D2822] hover:bg-[#1E1B18] text-slate-300 text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
                                       title="Descargar comprobante a tu dispositivo con nombre descriptivo"
                                     >
-                                      <Download className="w-3 h-3 text-[#7A7368]" />
+                                      <Download className="w-3 h-3 text-[#A69F93]" />
                                       <span>Descargar</span>
                                     </button>
                                   </div>
@@ -3289,8 +3627,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               </div>
 
                               {/* Selector rápido de validación del comprobante con confirmación visual */}
-                              <div className="pt-2 border-t border-[#EFE8DD] flex items-center justify-between gap-1">
-                                <span className="text-[10px] text-[#7A7368] font-bold">Cambiar estado:</span>
+                              <div className="pt-2 border-t border-[#26221E] flex items-center justify-between gap-1">
+                                <span className="text-[10px] text-[#A69F93] font-bold">Cambiar estado:</span>
                                 <div className="flex items-center gap-1">
                                   <button
                                     type="button"
@@ -3304,7 +3642,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
                                       pedido.estado_pago === 'verificado'
                                         ? 'bg-emerald-600 text-white shadow-xs'
-                                        : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
+                                        : 'bg-emerald-950/60 text-emerald-400 hover:bg-emerald-950 border border-emerald-800'
                                     }`}
                                     title="Marcar comprobante como verificado"
                                   >
@@ -3322,7 +3660,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
                                       pedido.estado_pago === 'rechazado'
                                         ? 'bg-rose-600 text-white shadow-xs'
-                                        : 'bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200'
+                                        : 'bg-rose-950/60 text-rose-400 hover:bg-rose-950 border border-rose-800'
                                     }`}
                                     title="Marcar comprobante como rechazado"
                                   >
@@ -3340,7 +3678,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
                                       pedido.estado_pago === 'pendiente_revision'
                                         ? 'bg-amber-600 text-white shadow-xs'
-                                        : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+                                        : 'bg-amber-950/60 text-amber-400 hover:bg-amber-950 border border-amber-800'
                                     }`}
                                     title="Restablecer comprobante a pendiente"
                                   >
@@ -3349,19 +3687,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 </div>
 
                                 {pedido.revisado_por && (
-                                  <div className="pt-2 border-t border-[#EFE8DD] text-[10px] text-[#7A7368] flex items-center justify-between">
-                                    <span>Revisado por: <strong className="text-[#1A1918]">{pedido.revisado_por}</strong></span>
+                                  <div className="pt-2 border-t border-[#26221E] text-[10px] text-[#A69F93] flex items-center justify-between">
+                                    <span>Revisado por: <strong className="text-white">{pedido.revisado_por}</strong></span>
                                     {pedido.revisado_en && <span>{new Date(pedido.revisado_en).toLocaleString('es-PA')}</span>}
                                   </div>
                                 )}
                               </div>
                             </div>
                           ) : (
-                            <div className="p-3 rounded-2xl bg-[#FAF8F5] border border-dashed border-[#DDD7CC] text-center space-y-2">
-                              <span className="text-[11px] text-[#9C9488] font-bold block">
+                            <div className="p-3 rounded-2xl bg-[#1A1816] border border-dashed border-[#332E27] text-center space-y-2">
+                              <span className="text-[11px] text-[#A69F93] font-bold block">
                                 ⚠️ Sin comprobante adjunto
                               </span>
-                              <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-[#DDD7CC] hover:border-[#141312] text-[#1A1918] text-[10px] font-bold cursor-pointer transition-colors shadow-xs">
+                              <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#13110F] border border-[#2D2822] hover:border-[#C59A4D] text-[#E6C687] text-[10px] font-bold cursor-pointer transition-colors shadow-xs">
                                 <UploadCloud className="w-3.5 h-3.5 text-[#C59A4D]" />
                                 <span>
                                   {uploadingProofOrderId === (pedido.id || pedido.codigo)
@@ -3386,7 +3724,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                         {/* Col 3: Productos del Pedido (con variantes y opciones) */}
                         <div className="space-y-1.5">
-                          <span className="text-[10px] font-black uppercase text-[#9C9488] block">
+                          <span className="text-[10px] font-black uppercase text-[#A69F93] block">
                             PRODUCTOS DEL PEDIDO ({pedido.items?.length || 0})
                           </span>
 
@@ -3405,7 +3743,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               return (
                                 <div
                                   key={idx}
-                                  className="flex items-start justify-between gap-2 bg-[#FCFAF7] p-2 rounded-xl border border-[#F0EAE1]"
+                                  className="flex items-start justify-between gap-2 bg-[#1A1816] p-2 rounded-xl border border-[#2D2822]"
                                 >
                                   <div className="flex items-center gap-2.5 truncate min-w-0">
                                     {(() => {
@@ -3414,24 +3752,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                         <img
                                           src={prodImg}
                                           alt={it.nombre}
-                                          className="w-12 h-14 object-cover rounded-xl bg-white border border-[#EAE5DC] shadow-xs shrink-0"
+                                          className="w-12 h-14 object-cover rounded-xl bg-black border border-[#2D2822] shadow-xs shrink-0"
                                         />
                                       ) : (
-                                        <div className="w-12 h-14 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0 text-[10px] font-bold">
+                                        <div className="w-12 h-14 rounded-xl bg-black border border-[#2D2822] flex items-center justify-center text-[#7A7368] shrink-0 text-[10px] font-bold">
                                           Sin foto
                                         </div>
                                       );
                                     })()}
                                     <div className="min-w-0">
-                                      <span className="font-bold text-[#1A1918] truncate block text-[11px]">
-                                        {it.nombre} <span className="text-[#8C8375]">x{it.cantidad}</span>
+                                      <span className="font-bold text-white truncate block text-[11px]">
+                                        {it.nombre} <span className="text-[#A69F93]">x{it.cantidad}</span>
                                       </span>
                                       {varDesc && (
-                                        <span className="text-[10px] text-[#C59A4D] font-bold block truncate">
+                                        <span className="text-[10px] text-[#E6C687] font-bold block truncate">
                                           {varDesc}
                                         </span>
                                       )}
-                                      <span className="text-[10px] text-[#7A7368] block">
+                                      <span className="text-[10px] text-[#A69F93] block">
                                         {userRole === 'cajero'
                                           ? `${it.cantidad} unidad(es)`
                                           : `$${it.precio.toFixed(2)} c/u`}
@@ -3439,7 +3777,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     </div>
                                   </div>
                                   {userRole !== 'cajero' && (
-                                    <span className="font-black text-[#1A1918] shrink-0 text-xs">
+                                    <span className="font-black text-white shrink-0 text-xs">
                                       ${(it.precio * it.cantidad).toFixed(2)}
                                     </span>
                                   )}
@@ -3450,33 +3788,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                           {/* Desglose de Artículos (Oculta dinero a cajero) */}
                           {userRole === 'cajero' ? (
-                            <div className="pt-2 border-t border-[#EAE3D5] text-xs font-bold text-slate-700 bg-[#FAF8F5] p-2.5 rounded-xl flex items-center justify-between">
-                              <span className="text-[11px] text-slate-500 uppercase tracking-wider font-extrabold">Total Prendas:</span>
-                              <span className="font-black text-slate-900 text-sm">
+                            <div className="pt-2 border-t border-[#26221E] text-xs font-bold text-slate-300 bg-[#1A1816] p-2.5 rounded-xl flex items-center justify-between">
+                              <span className="text-[11px] text-[#A69F93] uppercase tracking-wider font-extrabold">Total Prendas:</span>
+                              <span className="font-black text-white text-sm">
                                 {pedido.items?.reduce((s, it) => s + (it.cantidad || 1), 0) || pedido.items?.length || 1} prenda(s)
                               </span>
                             </div>
                           ) : (
-                            <div className="pt-2.5 border-t border-[#EAE3D5] space-y-1 text-[11px] text-[#7A7368] bg-[#FAF8F5] p-2 rounded-xl">
+                            <div className="pt-2.5 border-t border-[#26221E] space-y-1 text-[11px] text-[#A69F93] bg-[#1A1816] p-2 rounded-xl">
                               <div className="flex justify-between">
                                 <span>Subtotal Artículos:</span>
-                                <span className="font-bold text-[#1A1918]">${(pedido.subtotal || pedido.total).toFixed(2)}</span>
+                                <span className="font-bold text-white">${(pedido.subtotal || pedido.total).toFixed(2)}</span>
                               </div>
                               {(pedido.descuento ?? 0) > 0 && (
-                                <div className="flex justify-between text-emerald-700">
+                                <div className="flex justify-between text-emerald-400">
                                   <span>Descuento:</span>
                                   <span className="font-bold">-${Number(pedido.descuento).toFixed(2)}</span>
                                 </div>
                               )}
                               <div className="flex justify-between">
                                 <span>Envío:</span>
-                                <span className="font-bold text-[#1A1918]">
+                                <span className="font-bold text-white">
                                   {(pedido.costo_envio ?? 0) > 0 ? `$${Number(pedido.costo_envio).toFixed(2)}` : '$0.00'}
                                 </span>
                               </div>
-                              <div className="pt-1.5 border-t border-[#EAE3D5] flex justify-between font-black text-xs text-[#1A1918]">
+                              <div className="pt-1.5 border-t border-[#26221E] flex justify-between font-black text-xs text-white">
                                 <span>TOTAL FINAL:</span>
-                                <span className="text-[#C59A4D] text-sm">${Number(pedido.total).toFixed(2)}</span>
+                                <span className="text-[#E6C687] text-sm">${Number(pedido.total).toFixed(2)}</span>
                               </div>
                             </div>
                           )}
@@ -3500,7 +3838,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           {activeSection === 'productos' && (
             <div className="space-y-5">
               {/* Filter bar */}
-              <div className="bg-white rounded-3xl p-4 border border-[#E5E9EE] flex flex-wrap items-center justify-between gap-3">
+              <div className="bg-[#13110F] rounded-3xl p-4 border border-[#26221E] flex flex-wrap items-center justify-between gap-3 shadow-md">
                 <div className="flex items-center gap-3 flex-1 min-w-[240px]">
                   <div className="relative flex-1 max-w-sm">
                     <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8C8375]" />
@@ -3509,18 +3847,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       placeholder="Buscar por nombre..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full bg-[#FAF8F5] text-xs px-10 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none"
+                      className="w-full bg-[#1A1816] text-xs px-10 py-2.5 rounded-2xl border border-[#38332B] text-white placeholder-[#6A6358] focus:outline-none focus:border-[#C59A4D]"
                     />
                   </div>
 
                   <select
                     value={categoriaFilter}
                     onChange={(e) => setCategoriaFilter(e.target.value)}
-                    className="bg-[#FAF8F5] text-xs font-bold text-[#1A1918] px-3.5 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none"
+                    className="bg-[#1A1816] text-xs font-bold text-[#E6C687] px-3.5 py-2.5 rounded-2xl border border-[#38332B] focus:outline-none"
                   >
-                    <option value="todas">Todas las categorías</option>
+                    <option value="todas" className="bg-[#1A1816] text-white">Todas las categorías</option>
                     {categorias.map((c) => (
-                      <option key={c.id} value={c.id}>
+                      <option key={c.id} value={c.id} className="bg-[#1A1816] text-white">
                         {c.nombre}
                       </option>
                     ))}
@@ -3528,7 +3866,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                   <button
                     onClick={reloadAllData}
-                    className="p-2.5 rounded-xl border border-[#D5DCE4] text-[#1A1918]"
+                    className="p-2.5 rounded-xl border border-[#38332B] hover:bg-[#1E1B18] text-[#E6C687] transition-colors cursor-pointer"
                     title="Recargar"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
@@ -3540,7 +3878,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     setProductoToEdit(null);
                     setIsModalProductoOpen(true);
                   }}
-                  className="px-5 py-2.5 rounded-2xl bg-[#141312] hover:bg-black text-[#F5E6BE] text-xs font-black tracking-wider uppercase flex items-center gap-2 shadow-md transition-all active:scale-95"
+                  className="px-5 py-2.5 rounded-2xl bg-[#C59A4D] hover:bg-[#D4A95D] text-black text-xs font-black tracking-wider uppercase flex items-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
                   <span>+ NUEVO PRODUCTO</span>
@@ -3548,10 +3886,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               {/* Table (Image 5) */}
-              <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
+              <div className="bg-[#13110F] rounded-3xl border border-[#26221E] overflow-hidden shadow-md">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[650px] text-left text-xs">
-                    <thead className="bg-[#FAF8F5] border-b border-[#E5E9EE] text-[#7A7368] font-bold uppercase tracking-wider text-[10px]">
+                    <thead className="bg-[#1A1816] border-b border-[#26221E] text-[#E6C687] font-bold uppercase tracking-wider text-[10px]">
                       <tr>
                         <th className="py-4 px-6">PRODUCTO</th>
                         <th className="py-4 px-6">CATEGORÍA</th>
@@ -3561,7 +3899,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         <th className="py-4 px-6 text-right">ACCIONES</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#F0EAE1]">
+                    <tbody className="divide-y divide-[#221F1C]">
                       {productos
                         .filter((p) => {
                           if (categoriaFilter !== 'todas' && p.categoria_id !== categoriaFilter) return false;
@@ -3576,20 +3914,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           const isBajo = stock > 0 && stock < 5;
 
                           return (
-                            <tr key={prod.id} className="hover:bg-[#FCFAF7] transition-colors">
+                            <tr key={prod.id} className="hover:bg-[#1A1816]/60 transition-colors">
                               <td className="py-3 px-6">
                                 <div className="flex items-center gap-3">
                                   <img
                                     src={prod.imagen_url || (prod.imagenes && prod.imagenes[0]) || ''}
                                     alt=""
-                                    className="w-12 h-14 object-cover rounded-xl bg-[#F7F5F0] border border-[#EAE5DC]"
+                                    className="w-12 h-14 object-cover rounded-xl bg-[#1E1B18] border border-[#38332B]"
                                   />
                                   <div>
-                                    <span className="font-extrabold text-sm text-[#1A1918] block max-w-xs truncate">
+                                    <span className="font-extrabold text-sm text-white block max-w-xs truncate">
                                       {prod.nombre}
                                     </span>
                                     {prod.imagenes && prod.imagenes.length > 1 && (
-                                      <span className="text-[10px] text-[#9C9488]">
+                                      <span className="text-[10px] text-[#A69F93]">
                                         +{prod.imagenes.length} fotos galería
                                       </span>
                                     )}
@@ -3597,28 +3935,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 </div>
                               </td>
 
-                              <td className="py-3 px-6 text-[#5A554D] font-medium">
+                              <td className="py-3 px-6 text-[#C9BFB0] font-medium">
                                 {categorias.find((c) => c.id === prod.categoria_id)?.nombre || 'General'}
                               </td>
 
-                              <td className="py-3 px-6 font-black text-sm text-[#1A1918]">
+                              <td className="py-3 px-6 font-black text-sm text-white">
                                 ${prod.precio}
                               </td>
 
                               <td className="py-3 px-6">
                                 {isAgotado ? (
-                                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-rose-50 text-rose-700 font-bold border border-rose-200">
+                                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-rose-950/60 text-rose-300 font-bold border border-rose-800/80">
                                     <XCircle className="w-3.5 h-3.5" />
                                     Agotado (0)
                                   </span>
                                 ) : isBajo ? (
-                                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-50 text-amber-800 font-bold border border-amber-200">
-                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-950/60 text-[#E6C687] font-bold border border-amber-800/80">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
                                     Últimas {stock} unidades
                                   </span>
                                 ) : (
-                                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 font-bold border border-emerald-200">
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-950/60 text-emerald-300 font-bold border border-emerald-800/80">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                                     Disponible ({stock})
                                   </span>
                                 )}
@@ -3627,12 +3965,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               <td className="py-3 px-6">
                                 <span
                                   className={`inline-flex items-center gap-1 font-bold ${
-                                    prod.activo ? 'text-emerald-600' : 'text-[#9C9488]'
+                                    prod.activo ? 'text-emerald-400' : 'text-[#A69F93]'
                                   }`}
                                 >
                                   <span
                                     className={`w-2 h-2 rounded-full ${
-                                      prod.activo ? 'bg-emerald-500' : 'bg-[#9C9488]'
+                                      prod.activo ? 'bg-emerald-400' : 'bg-[#6A6358]'
                                     }`}
                                   />
                                   {prod.activo ? 'Activo' : 'Inactivo'}
@@ -3646,14 +3984,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                       setProductoToEdit(prod);
                                       setIsModalProductoOpen(true);
                                     }}
-                                    className="p-1.5 rounded-lg text-[#7A7368] hover:text-[#1A1918] hover:bg-slate-100"
+                                    className="p-1.5 rounded-lg text-[#A69F93] hover:text-[#E6C687] hover:bg-[#1E1B18] transition-colors cursor-pointer"
                                     title="Editar producto"
                                   >
                                     <Edit2 className="w-4 h-4" />
                                   </button>
                                   <button
                                     onClick={() => handleDeleteProducto(prod.id, prod.nombre)}
-                                    className="p-1.5 rounded-lg text-[#9C9488] hover:text-rose-600 hover:bg-rose-50"
+                                    className="p-1.5 rounded-lg text-[#A69F93] hover:text-rose-400 hover:bg-rose-950/50 transition-colors cursor-pointer"
                                     title="Eliminar de Supabase"
                                   >
                                     <Trash2 className="w-4 h-4" />
@@ -3669,9 +4007,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                 {productos.length === 0 && (
                   <div className="py-16 text-center space-y-3">
-                    <Package className="w-10 h-10 mx-auto text-[#C9BFB0]" />
-                    <p className="font-extrabold text-[#1A1918]">Catálogo en 0</p>
-                    <p className="text-xs text-[#7A7368]">
+                    <Package className="w-10 h-10 mx-auto text-[#6A6358]" />
+                    <p className="font-extrabold text-white">Catálogo en 0</p>
+                    <p className="text-xs text-[#A69F93]">
                       Presiona &quot;+ NUEVO PRODUCTO&quot; arriba para agregar tus primeras camisetas.
                     </p>
                   </div>
@@ -3685,12 +4023,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           {/* ======================================================== */}
           {activeSection === 'categorias' && (
             <div className="space-y-5">
-              <div className="bg-white rounded-3xl p-6 border border-[#E5E9EE] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="bg-[#13110F] rounded-3xl p-6 border border-[#26221E] shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-lg font-black text-[#1A1918] font-heading">
+                  <h2 className="text-lg font-black text-white font-heading">
                     Categorías Registradas ({categorias.length})
                   </h2>
-                  <p className="text-xs text-[#7A7368] mt-0.5">
+                  <p className="text-xs text-[#A69F93] mt-0.5">
                     Organiza los productos en public.categorias. En el catálogo público solo se verán las categorías activas.
                   </p>
                 </div>
@@ -3698,7 +4036,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div className="flex items-center gap-2.5">
                   <button
                     onClick={reloadAllData}
-                    className="p-2.5 rounded-2xl bg-[#F4F6F8] hover:bg-[#EAEFF5] text-[#1A1918]"
+                    className="p-2.5 rounded-2xl bg-[#1E1B18] hover:bg-[#2A2622] text-[#E6C687] border border-[#38332B] transition-colors cursor-pointer"
                     title="Actualizar"
                   >
                     <RefreshCw className="w-4 h-4" />
@@ -3709,7 +4047,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       setCategoriaToEdit(null);
                       setIsModalCategoriaOpen(true);
                     }}
-                    className="px-5 py-2.5 rounded-2xl bg-[#141312] hover:bg-black text-[#F5E6BE] text-xs font-black tracking-wider uppercase flex items-center gap-1.5 shadow-md"
+                    className="px-5 py-2.5 rounded-2xl bg-[#C59A4D] hover:bg-[#D4A95D] text-black text-xs font-black tracking-wider uppercase flex items-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
                   >
                     <Plus className="w-4 h-4" />
                     <span>+ NUEVA CATEGORÍA</span>
@@ -3718,10 +4056,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               {/* Table (Image 6) */}
-              <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
+              <div className="bg-[#13110F] rounded-3xl border border-[#26221E] overflow-hidden shadow-md">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[550px] text-left text-xs">
-                    <thead className="bg-[#FAF8F5] border-b border-[#E5E9EE] text-[#7A7368] font-bold uppercase tracking-wider text-[10px]">
+                    <thead className="bg-[#1A1816] border-b border-[#26221E] text-[#E6C687] font-bold uppercase tracking-wider text-[10px]">
                       <tr>
                         <th className="py-4 px-6">CATEGORÍA</th>
                         <th className="py-4 px-6">DESCRIPCIÓN</th>
@@ -3730,32 +4068,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         <th className="py-4 px-6 text-right">ACCIONES</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#F0EAE1]">
+                    <tbody className="divide-y divide-[#221F1C]">
                       {categorias.map((cat) => {
                         const prodsCount = productos.filter((p) => p.categoria_id === cat.id).length;
 
                         return (
-                          <tr key={cat.id} className="hover:bg-[#FCFAF7] transition-colors">
+                          <tr key={cat.id} className="hover:bg-[#1A1816]/60 transition-colors">
                             <td className="py-4 px-6">
                               <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 rounded-xl bg-[#FAF8F5] border border-[#EAE5DC] flex items-center justify-center text-[#C59A4D]">
+                                <div className="w-9 h-9 rounded-xl bg-[#1E1B18] border border-[#38332B] flex items-center justify-center text-[#E6C687]">
                                   <Layers className="w-4 h-4" />
                                 </div>
-                                <span className="font-extrabold text-sm text-[#1A1918]">{cat.nombre}</span>
+                                <span className="font-extrabold text-sm text-white">{cat.nombre}</span>
                               </div>
                             </td>
 
-                            <td className="py-4 px-6 text-[#7A7368] italic">
+                            <td className="py-4 px-6 text-[#A69F93] italic">
                               {cat.descripcion || 'Sin descripción'}
                             </td>
 
-                            <td className="py-4 px-6 font-bold text-[#1A1918]">
+                            <td className="py-4 px-6 font-bold text-white">
                               {prodsCount} productos
                             </td>
 
                             <td className="py-4 px-6">
-                              <span className="inline-flex items-center gap-1 font-bold text-emerald-600">
-                                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                              <span className="inline-flex items-center gap-1 font-bold text-emerald-400">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400" />
                                 Activa
                               </span>
                             </td>
@@ -3767,13 +4105,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     setCategoriaToEdit(cat);
                                     setIsModalCategoriaOpen(true);
                                   }}
-                                  className="p-1.5 rounded-lg text-[#7A7368] hover:text-[#1A1918] hover:bg-slate-100"
+                                  className="p-1.5 rounded-lg text-[#A69F93] hover:text-[#E6C687] hover:bg-[#1E1B18] transition-colors cursor-pointer"
+                                  title="Editar categoría"
                                 >
                                   <Edit2 className="w-4 h-4" />
                                 </button>
                                 <button
                                   onClick={() => handleDeleteCategoria(cat.id, cat.nombre)}
-                                  className="p-1.5 rounded-lg text-[#9C9488] hover:text-rose-600 hover:bg-rose-50"
+                                  className="p-1.5 rounded-lg text-[#A69F93] hover:text-rose-400 hover:bg-rose-950/50 transition-colors cursor-pointer"
+                                  title="Eliminar categoría"
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </button>
@@ -3795,7 +4135,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           {activeSection === 'inventario' && (
             <div className="space-y-5">
               {/* Filter bar */}
-              <div className="bg-white rounded-3xl p-4 border border-[#E5E9EE] flex flex-wrap items-center justify-between gap-3">
+              <div className="bg-[#13110F] rounded-3xl p-4 border border-[#26221E] flex flex-wrap items-center justify-between gap-3 shadow-md">
                 <div className="relative flex-1 min-w-[200px] max-w-sm">
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8C8375]" />
                   <input
@@ -3803,7 +4143,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     placeholder="Buscar por producto..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-[#FAF8F5] text-xs px-10 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none"
+                    className="w-full bg-[#1A1816] text-xs px-10 py-2.5 rounded-2xl border border-[#38332B] text-white placeholder-[#6A6358] focus:outline-none focus:border-[#C59A4D]"
                   />
                 </div>
 
@@ -3812,10 +4152,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <button
                       key={tab}
                       onClick={() => setInventarioFilter(tab)}
-                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold capitalize transition-all ${
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold capitalize transition-all cursor-pointer ${
                         inventarioFilter === tab
-                          ? 'bg-[#141312] text-white'
-                          : 'bg-[#F4F6F8] text-[#1A1918] hover:bg-[#EAEFF5]'
+                          ? 'bg-[#C59A4D] text-black font-black shadow-sm'
+                          : 'bg-[#1E1B18] text-[#A69F93] hover:bg-[#2A2622] hover:text-white border border-[#38332B]'
                       }`}
                     >
                       {tab === 'stock-bajo' ? 'Stock Bajo' : tab}
@@ -3823,7 +4163,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   ))}
                   <button
                     onClick={reloadAllData}
-                    className="p-2 rounded-xl border border-[#D5DCE4] text-[#1A1918]"
+                    className="p-2 rounded-xl border border-[#38332B] hover:bg-[#1E1B18] text-[#E6C687] transition-colors cursor-pointer"
                     title="Recargar"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
@@ -3832,10 +4172,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               {/* Table (Image 7) */}
-              <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
+              <div className="bg-[#13110F] rounded-3xl border border-[#26221E] overflow-hidden shadow-md">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[650px] text-left text-xs">
-                  <thead className="bg-[#FAF8F5] border-b border-[#E5E9EE] text-[#7A7368] font-bold uppercase tracking-wider text-[10px]">
+                  <thead className="bg-[#1A1816] border-b border-[#26221E] text-[#E6C687] font-bold uppercase tracking-wider text-[10px]">
                     <tr>
                       <th className="py-4 px-6">PRODUCTO</th>
                       <th className="py-4 px-6">STOCK ACTUAL</th>
@@ -3845,7 +4185,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <th className="py-4 px-6 text-right">DETALLES</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#F0EAE1]">
+                  <tbody className="divide-y divide-[#221F1C]">
                     {productos
                       .filter((p) => {
                         const stock = p.stock ?? 0;
@@ -3863,64 +4203,66 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         const isBajo = stock > 0 && stock < 5;
 
                         return (
-                          <tr key={prod.id} className="hover:bg-[#FCFAF7] transition-colors">
+                          <tr key={prod.id} className="hover:bg-[#1A1816]/60 transition-colors">
                             <td className="py-3 px-6">
                               <div className="flex items-center gap-3">
                                 <img
                                   src={prod.imagen_url || (prod.imagenes && prod.imagenes[0]) || ''}
                                   alt=""
-                                  className="w-12 h-14 object-cover rounded-xl bg-[#F7F5F0] border border-[#EAE5DC]"
+                                  className="w-12 h-14 object-cover rounded-xl bg-[#1E1B18] border border-[#38332B]"
                                 />
                                 <div>
-                                  <span className="font-extrabold text-sm text-[#1A1918] block max-w-xs truncate">
+                                  <span className="font-extrabold text-sm text-white block max-w-xs truncate">
                                     {prod.nombre}
                                   </span>
-                                  <span className="text-[11px] text-[#7A7368]">
+                                  <span className="text-[11px] text-[#A69F93]">
                                     {categorias.find((c) => c.id === prod.categoria_id)?.nombre || 'General'}
                                   </span>
                                 </div>
                               </div>
                             </td>
 
-                            <td className="py-3 px-6 font-black text-sm text-[#1A1918]">
+                            <td className="py-3 px-6 font-black text-sm text-white">
                               {stock} unids.
                             </td>
 
-                            <td className="py-3 px-6 text-[#7A7368]">
+                            <td className="py-3 px-6 text-[#A69F93]">
                               {prod.stock_minimo || 5} unids.
                             </td>
 
                             <td className="py-3 px-6">
                               {isAgotado ? (
-                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-rose-50 text-rose-700 font-bold border border-rose-200">
+                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-rose-950/60 text-rose-300 font-bold border border-rose-800/80">
                                   <XCircle className="w-3.5 h-3.5" />
                                   Agotado
                                 </span>
                               ) : isBajo ? (
-                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-50 text-amber-800 font-bold border border-amber-200">
-                                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-950/60 text-[#E6C687] font-bold border border-amber-800/80">
+                                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
                                   Stock Bajo
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 font-bold border border-emerald-200">
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-950/60 text-emerald-300 font-bold border border-emerald-800/80">
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                                   Disponible
                                 </span>
                               )}
                             </td>
 
                             <td className="py-3 px-6 text-center">
-                              <div className="inline-flex items-center gap-2 bg-[#FAF8F5] border border-[#E5DFD5] rounded-xl px-2 py-1">
+                              <div className="inline-flex items-center gap-2 bg-[#1E1B18] border border-[#38332B] rounded-xl px-2 py-1 text-white">
                                 <button
                                   onClick={() => handleStockDelta(prod.id, stock, -1)}
-                                  className="p-1 hover:text-rose-600"
+                                  className="p-1 hover:text-rose-400 text-[#A69F93] transition-colors cursor-pointer"
+                                  title="Restar 1"
                                 >
                                   <Minus className="w-3 h-3" />
                                 </button>
-                                <span className="font-black text-xs min-w-4 text-center">{stock}</span>
+                                <span className="font-black text-xs min-w-4 text-center text-white">{stock}</span>
                                 <button
                                   onClick={() => handleStockDelta(prod.id, stock, 1)}
-                                  className="p-1 hover:text-emerald-600"
+                                  className="p-1 hover:text-emerald-400 text-[#A69F93] transition-colors cursor-pointer"
+                                  title="Sumar 1"
                                 >
                                   <Plus className="w-3 h-3" />
                                 </button>
@@ -3933,7 +4275,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   setProductoToEdit(prod);
                                   setIsModalProductoOpen(true);
                                 }}
-                                className="px-3 py-1.5 rounded-xl border border-[#D5DCE4] hover:bg-[#FAF8F5] text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                                className="px-3 py-1.5 rounded-xl border border-[#38332B] hover:bg-[#1E1B18] text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer text-[#E6C687]"
                               >
                                 <Edit2 className="w-3.5 h-3.5 text-[#C59A4D]" />
                                 <span>Editar</span>
@@ -3955,25 +4297,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           {activeSection === 'clientes' && (
             <div className="space-y-6 animate-fade-in">
               {/* Header card */}
-              <div className="bg-white rounded-3xl p-6 border border-[#E5E9EE] shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="bg-[#13110F] rounded-3xl p-6 border border-[#26221E] shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-lg font-black text-[#1A1918] font-heading">
+                  <h2 className="text-lg font-black text-white font-heading">
                     Directorio Consolidado de Clientes
                   </h2>
-                  <p className="text-xs text-[#7A7368] mt-0.5">
+                  <p className="text-xs text-[#A69F93] mt-0.5">
                     Clientes extraídos y sincronizados desde las órdenes de compra registradas.
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <span className="px-3 py-1.5 rounded-xl bg-[#FAF8F5] border border-[#E5DFD5] text-xs font-bold text-[#1A1918]">
+                  <span className="px-3 py-1.5 rounded-xl bg-[#1E1B18] border border-[#38332B] text-xs font-bold text-[#E6C687]">
                     Total Clientes: {clientesList.length}
                   </span>
                 </div>
               </div>
 
               {/* Search Bar */}
-              <div className="bg-white rounded-3xl p-4 border border-[#E5E9EE] flex items-center gap-3">
+              <div className="bg-[#13110F] rounded-3xl p-4 border border-[#26221E] shadow-md flex items-center gap-3">
                 <div className="relative flex-1 max-w-md">
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8C8375]" />
                   <input
@@ -3981,17 +4323,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     placeholder="Buscar por nombre o teléfono de cliente..."
                     value={clienteSearch}
                     onChange={(e) => setClienteSearch(e.target.value)}
-                    className="w-full bg-[#FAF8F5] text-xs px-10 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                    className="w-full bg-[#1A1816] text-xs px-10 py-2.5 rounded-2xl border border-[#38332B] text-white placeholder-[#6A6358] focus:outline-none focus:border-[#C59A4D]"
                   />
                 </div>
               </div>
 
               {/* Table */}
-              <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
+              <div className="bg-[#13110F] rounded-3xl border border-[#26221E] overflow-hidden shadow-md">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[700px] text-left border-collapse">
                   <thead>
-                    <tr className="border-b border-[#E5E9EE] bg-[#FAF8F5] text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
+                    <tr className="border-b border-[#26221E] bg-[#1A1816] text-[10px] font-black uppercase tracking-wider text-[#E6C687]">
                       <th className="py-3 px-6">Teléfono (ID Cliente)</th>
                       <th className="py-3 px-6">Nombre del Cliente</th>
                       <th className="py-3 px-6">Dirección Habitual</th>
@@ -4000,7 +4342,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <th className="py-3 px-6 text-right">Acciones</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#F0EAE1] text-xs">
+                  <tbody className="divide-y divide-[#221F1C] text-xs">
                     {clientesList
                       .filter((c) => {
                         if (!clienteSearch.trim()) return true;
@@ -4008,41 +4350,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         return c.nombre.toLowerCase().includes(q) || c.telefono.includes(q);
                       })
                       .map((cli, idx) => (
-                        <tr key={idx} className="hover:bg-[#FCFAF7] transition-colors">
+                        <tr key={idx} className="hover:bg-[#1A1816]/60 transition-colors">
                           <td className="py-4 px-6">
                             <div className="flex items-center gap-2.5">
-                              <div className="w-8 h-8 rounded-xl bg-amber-50 text-[#C59A4D] flex items-center justify-center shrink-0">
+                              <div className="w-8 h-8 rounded-xl bg-amber-950/60 text-[#E6C687] border border-amber-800/80 flex items-center justify-center shrink-0">
                                 <Phone className="w-3.5 h-3.5" />
                               </div>
                               <div>
-                                <span className="font-mono font-black text-sm text-[#1A1918] block">
+                                <span className="font-mono font-black text-sm text-white block">
                                   {cli.telefono || 'Sin teléfono'}
                                 </span>
-                                <span className="text-[10px] text-[#8C8375]">Registro por Teléfono</span>
+                                <span className="text-[10px] text-[#A69F93]">Registro por Teléfono</span>
                               </div>
                             </div>
                           </td>
 
                           <td className="py-4 px-6">
-                            <strong className="font-extrabold text-[#1A1918] block text-sm">
+                            <strong className="font-extrabold text-white block text-sm">
                               {cli.nombre}
                             </strong>
-                            <span className="text-[10px] text-[#7A7368]">
+                            <span className="text-[10px] text-[#A69F93]">
                               Cliente AlexStore
                             </span>
                           </td>
 
-                          <td className="py-4 px-6 text-[#7A7368] max-w-xs truncate">
+                          <td className="py-4 px-6 text-[#A69F93] max-w-xs truncate">
                             {cli.direccion || 'Por coordinar'}
                           </td>
 
-                          <td className="py-4 px-6 font-bold text-[#1A1918]">
-                            <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-800 font-extrabold text-xs">
+                          <td className="py-4 px-6 font-bold text-white">
+                            <span className="px-2.5 py-1 rounded-full bg-[#1E1B18] text-[#E6C687] border border-[#38332B] font-extrabold text-xs">
                               {cli.totalPedidos} {cli.totalPedidos === 1 ? 'pedido' : 'pedidos'}
                             </span>
                           </td>
 
-                          <td className="py-4 px-6 font-black text-sm text-emerald-800">
+                          <td className="py-4 px-6 font-black text-sm text-emerald-400">
                             ${cli.totalGastado.toFixed(2)} USD
                           </td>
 
@@ -4058,7 +4400,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     '_blank'
                                   );
                                 }}
-                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
                               >
                                 <MessageCircle className="w-3.5 h-3.5 fill-current" />
                                 <span>WhatsApp</span>
@@ -4066,7 +4408,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                               <button
                                 onClick={() => handleEliminarCliente(cli)}
-                                className="px-2.5 py-1.5 rounded-xl text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 font-bold text-xs inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                className="px-2.5 py-1.5 rounded-xl text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 font-bold text-xs inline-flex items-center gap-1 transition-colors cursor-pointer"
                                 title="Eliminar cliente e historial de pedidos"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -4079,7 +4421,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                     {clientesList.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="py-12 text-center text-[#7A7368]">
+                        <td colSpan={6} className="py-12 text-center text-[#A69F93]">
                           Aún no se han registrado clientes en las órdenes.
                         </td>
                       </tr>
@@ -4097,13 +4439,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           {activeSection === 'usuarios' && (
             <div className="space-y-6 animate-fade-in">
               {/* Header card */}
-              <div className="bg-white rounded-3xl p-6 border border-[#E5E9EE] shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="bg-[#13110F] rounded-3xl p-6 border border-[#26221E] shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-lg font-black text-[#1A1918] font-heading flex items-center gap-2">
+                  <h2 className="text-lg font-black text-white font-heading flex items-center gap-2">
                     <Shield className="w-5 h-5 text-[#C59A4D]" />
                     Gestión de Usuarios, Roles & Permisos
                   </h2>
-                  <p className="text-xs text-[#7A7368] mt-0.5">
+                  <p className="text-xs text-[#A69F93] mt-0.5">
                     Control de accesos basado en roles (Dueño, Administrador, Cajero) con autorización segura.
                   </p>
                 </div>
@@ -4112,7 +4454,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   {/* Botón para ver script SQL de Autenticación */}
                   <button
                     onClick={() => setIsModalSqlAuthOpen(true)}
-                    className="px-4 py-2.5 rounded-2xl bg-amber-50 hover:bg-amber-100 text-[#8C6B28] border border-amber-300 text-xs font-black tracking-wider uppercase flex items-center gap-2 shadow-xs transition-all active:scale-95 cursor-pointer self-start sm:self-auto"
+                    className="px-4 py-2.5 rounded-2xl bg-amber-950/60 hover:bg-amber-900/80 text-[#E6C687] border border-amber-800/80 text-xs font-black tracking-wider uppercase flex items-center gap-2 shadow-sm transition-all active:scale-95 cursor-pointer self-start sm:self-auto"
                   >
                     <KeyRound className="w-4 h-4 text-[#C59A4D]" />
                     <span>SQL SUPABASE AUTH</span>
@@ -4121,9 +4463,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   {/* Botón para crear usuario (Disponible para Dueño y Admin) */}
                   <button
                     onClick={() => setIsModalUsuarioOpen(true)}
-                    className="px-5 py-2.5 rounded-2xl bg-[#141312] hover:bg-black text-[#F5E6BE] text-xs font-black tracking-wider uppercase flex items-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer self-start sm:self-auto"
+                    className="px-5 py-2.5 rounded-2xl bg-[#C59A4D] hover:bg-[#D4A95D] text-black text-xs font-black tracking-wider uppercase flex items-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer self-start sm:self-auto"
                   >
-                    <UserPlus className="w-4 h-4 text-[#C59A4D]" />
+                    <UserPlus className="w-4 h-4 text-black" />
                     <span>REGISTRAR USUARIO</span>
                   </button>
                 </div>
@@ -4131,44 +4473,44 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               {/* 3 Stats de Usuarios */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="p-5 rounded-3xl bg-white border border-[#E5E9EE] shadow-xs flex items-center justify-between">
+                <div className="p-5 rounded-3xl bg-[#13110F] border border-[#26221E] shadow-md flex items-center justify-between">
                   <div>
-                    <span className="text-[10px] font-black uppercase text-[#8C8375] tracking-wider block">
+                    <span className="text-[10px] font-black uppercase text-[#A69F93] tracking-wider block">
                       DUEÑOS (ACCESO TOTAL)
                     </span>
-                    <span className="text-2xl font-black text-[#1A1918] mt-1 block">
+                    <span className="text-2xl font-black text-white mt-1 block">
                       {usuarios.filter((u) => u.rol === 'dueno').length}
                     </span>
                   </div>
-                  <div className="w-10 h-10 rounded-2xl bg-amber-50 text-[#C59A4D] flex items-center justify-center font-black">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-950/60 text-[#E6C687] border border-amber-800/80 flex items-center justify-center font-black">
                     👑
                   </div>
                 </div>
 
-                <div className="p-5 rounded-3xl bg-white border border-[#E5E9EE] shadow-xs flex items-center justify-between">
+                <div className="p-5 rounded-3xl bg-[#13110F] border border-[#26221E] shadow-md flex items-center justify-between">
                   <div>
-                    <span className="text-[10px] font-black uppercase text-[#8C8375] tracking-wider block">
+                    <span className="text-[10px] font-black uppercase text-[#A69F93] tracking-wider block">
                       ADMINISTRADORES
                     </span>
-                    <span className="text-2xl font-black text-[#1A1918] mt-1 block">
+                    <span className="text-2xl font-black text-white mt-1 block">
                       {usuarios.filter((u) => u.rol === 'administrador').length}
                     </span>
                   </div>
-                  <div className="w-10 h-10 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-2xl bg-sky-950/60 text-sky-400 border border-sky-800/80 flex items-center justify-center">
                     <Shield className="w-5 h-5" />
                   </div>
                 </div>
 
-                <div className="p-5 rounded-3xl bg-white border border-[#E5E9EE] shadow-xs flex items-center justify-between">
+                <div className="p-5 rounded-3xl bg-[#13110F] border border-[#26221E] shadow-md flex items-center justify-between">
                   <div>
-                    <span className="text-[10px] font-black uppercase text-[#8C8375] tracking-wider block">
+                    <span className="text-[10px] font-black uppercase text-[#A69F93] tracking-wider block">
                       TRABAJADORES / CAJEROS
                     </span>
-                    <span className="text-2xl font-black text-[#1A1918] mt-1 block">
+                    <span className="text-2xl font-black text-white mt-1 block">
                       {usuarios.filter((u) => u.rol === 'cajero').length}
                     </span>
                   </div>
-                  <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-950/60 text-emerald-400 border border-emerald-800/80 flex items-center justify-center">
                     <Users className="w-5 h-5" />
                   </div>
                 </div>
@@ -4445,7 +4787,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               {/* Filtros */}
-              <div className="bg-white rounded-3xl p-4 border border-[#E5E9EE] flex flex-wrap items-center justify-between gap-3">
+              <div className="bg-[#13110F] rounded-3xl p-4 border border-[#26221E] flex flex-wrap items-center justify-between gap-3 shadow-md">
                 <div className="flex items-center gap-3 flex-1 min-w-[240px]">
                   <div className="relative flex-1 max-w-sm">
                     <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8C8375]" />
@@ -4454,35 +4796,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       placeholder="Buscar por nombre o correo..."
                       value={userSearchQuery}
                       onChange={(e) => setUserSearchQuery(e.target.value)}
-                      className="w-full bg-[#FAF8F5] text-xs px-10 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                      className="w-full bg-[#1A1816] text-xs px-10 py-2.5 rounded-2xl border border-[#38332B] text-white placeholder-[#6A6358] focus:outline-none focus:border-[#C59A4D]"
                     />
                   </div>
 
                   <select
                     value={userRoleFilter}
                     onChange={(e) => setUserRoleFilter(e.target.value as any)}
-                    className="bg-[#FAF8F5] text-xs font-bold text-[#1A1918] px-3.5 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none"
+                    className="bg-[#1A1816] text-xs font-bold text-[#E6C687] px-3.5 py-2.5 rounded-2xl border border-[#38332B] focus:outline-none"
                   >
-                    <option value="todos">Todos los roles</option>
-                    <option value="dueno">Dueño</option>
-                    <option value="administrador">Administrador</option>
-                    <option value="cajero">Trabajador / Cajero</option>
+                    <option value="todos" className="bg-[#1A1816] text-white">Todos los roles</option>
+                    <option value="dueno" className="bg-[#1A1816] text-white">Dueño</option>
+                    <option value="administrador" className="bg-[#1A1816] text-white">Administrador</option>
+                    <option value="cajero" className="bg-[#1A1816] text-white">Trabajador / Cajero</option>
                   </select>
 
                   <select
                     value={userStatusFilter}
                     onChange={(e) => setUserStatusFilter(e.target.value as any)}
-                    className="bg-[#FAF8F5] text-xs font-bold text-[#1A1918] px-3.5 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none"
+                    className="bg-[#1A1816] text-xs font-bold text-[#E6C687] px-3.5 py-2.5 rounded-2xl border border-[#38332B] focus:outline-none"
                   >
-                    <option value="todos">Todos los estados</option>
-                    <option value="activos">Solo activos</option>
-                    <option value="inactivos">Solo inactivos</option>
+                    <option value="todos" className="bg-[#1A1816] text-white">Todos los estados</option>
+                    <option value="activos" className="bg-[#1A1816] text-white">Solo activos</option>
+                    <option value="inactivos" className="bg-[#1A1816] text-white">Solo inactivos</option>
                   </select>
                 </div>
 
                 <button
                   onClick={reloadAllData}
-                  className="p-2.5 rounded-2xl bg-[#F4F6F8] hover:bg-[#EAEFF5] text-[#1A1918] transition-colors"
+                  className="p-2.5 rounded-2xl bg-[#1E1B18] hover:bg-[#2A2622] text-[#E6C687] border border-[#38332B] transition-colors cursor-pointer"
                   title="Actualizar lista"
                 >
                   <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -4490,11 +4832,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               {/* Table de Usuarios */}
-              <div className="bg-white rounded-3xl border border-[#E5E9EE] overflow-hidden shadow-xs">
+              <div className="bg-[#13110F] rounded-3xl border border-[#26221E] overflow-hidden shadow-md">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[700px] text-left border-collapse">
                   <thead>
-                    <tr className="border-b border-[#E5E9EE] bg-[#FAF8F5] text-[10px] font-black uppercase tracking-wider text-[#7A7368]">
+                    <tr className="border-b border-[#26221E] bg-[#1A1816] text-[10px] font-black uppercase tracking-wider text-[#E6C687]">
                       <th className="py-3 px-6">Usuario & Colaborador</th>
                       <th className="py-3 px-6">Nivel de Rol</th>
                       <th className="py-3 px-6">Estado de Acceso</th>
@@ -4503,7 +4845,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <th className="py-3 px-6 text-right">Acciones</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#F0EAE1] text-xs">
+                  <tbody className="divide-y divide-[#221F1C] text-xs">
                     {usuarios
                       .filter((u) => {
                         if (userRoleFilter !== 'todos' && u.rol !== userRoleFilter) return false;
@@ -4522,24 +4864,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         const canDelete = currentUser?.rol === 'dueno' && !isSelf;
 
                         return (
-                          <tr key={u.id} className="hover:bg-[#FCFAF7] transition-colors">
+                          <tr key={u.id} className="hover:bg-[#1A1816]/60 transition-colors">
                             <td className="py-4 px-6">
                               <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-2xl bg-[#141312] text-[#E6C687] flex items-center justify-center font-black text-sm shrink-0">
+                                <div className="w-10 h-10 rounded-2xl bg-[#1E1B18] border border-[#38332B] text-[#E6C687] flex items-center justify-center font-black text-sm shrink-0">
                                   {u.nombre ? u.nombre.substring(0, 2).toUpperCase() : 'US'}
                                 </div>
                                 <div className="min-w-0">
                                   <div className="flex items-center gap-2">
-                                    <strong className="font-extrabold text-sm text-[#1A1918]">
+                                    <strong className="font-extrabold text-sm text-white">
                                       {u.nombre}
                                     </strong>
                                     {isSelf && (
-                                      <span className="text-[9px] bg-slate-100 text-slate-700 font-black px-1.5 py-0.2 rounded">
+                                      <span className="text-[9px] bg-[#2A2622] text-[#E6C687] border border-[#38332B] font-black px-1.5 py-0.2 rounded">
                                         Tú
                                       </span>
                                     )}
                                   </div>
-                                  <span className="text-[11px] text-[#7A7368] font-mono block">
+                                  <span className="text-[11px] text-[#A69F93] font-mono block">
                                     {u.email}
                                   </span>
                                 </div>
@@ -4550,10 +4892,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               <span
                                 className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black ${
                                   u.rol === 'dueno'
-                                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                    ? 'bg-amber-950/80 text-[#E6C687] border border-amber-800'
                                     : u.rol === 'administrador'
-                                    ? 'bg-sky-100 text-sky-900 border border-sky-300'
-                                    : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                                    ? 'bg-sky-950/80 text-sky-300 border border-sky-800'
+                                    : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
                                 }`}
                               >
                                 {u.rol === 'dueno' && '👑 Dueño'}
@@ -4564,23 +4906,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                             <td className="py-4 px-6">
                               {u.activo ? (
-                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold">
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/60 text-emerald-300 border border-emerald-800/80 text-xs font-bold">
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                                   Activo
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 text-rose-800 border border-rose-200 text-xs font-bold">
-                                  <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-950/60 text-rose-300 border border-rose-800/80 text-xs font-bold">
+                                  <XCircle className="w-3.5 h-3.5 text-rose-400" />
                                   Desactivado
                                 </span>
                               )}
                             </td>
 
-                            <td className="py-4 px-6 text-[#7A7368] font-mono text-[11px]">
+                            <td className="py-4 px-6 text-[#A69F93] font-mono text-[11px]">
                               {u.creado_por || 'Sistema'}
                             </td>
 
-                            <td className="py-4 px-6 text-[#7A7368] text-[11px]">
+                            <td className="py-4 px-6 text-[#A69F93] text-[11px]">
                               {new Date(u.creado_en).toLocaleDateString('es-PA')}
                             </td>
 
@@ -4590,7 +4932,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 {currentUser?.rol === 'dueno' && u.rol !== 'dueno' && (
                                   <button
                                     onClick={() => handleCambiarRolDirecto(u, 'dueno')}
-                                    className="px-2.5 py-1 rounded-xl bg-amber-50 hover:bg-amber-100 text-[#8C6B28] border border-amber-300 font-bold text-[10px] inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                    className="px-2.5 py-1 rounded-xl bg-amber-950/60 hover:bg-amber-900/80 text-[#E6C687] border border-amber-800/80 font-bold text-[10px] inline-flex items-center gap-1 transition-colors cursor-pointer"
                                     title="Convertir a Dueño / Admin"
                                   >
                                     <span>👑 Hacer Dueño</span>
@@ -4600,7 +4942,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 {currentUser?.rol === 'dueno' && u.rol !== 'cajero' && (
                                   <button
                                     onClick={() => handleCambiarRolDirecto(u, 'cajero')}
-                                    className="px-2.5 py-1 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-[10px] inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                    className="px-2.5 py-1 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-800/80 font-bold text-[10px] inline-flex items-center gap-1 transition-colors cursor-pointer"
                                     title="Convertir a Trabajador"
                                   >
                                     <span>💼 Hacer Trabajador</span>
@@ -4611,7 +4953,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 {canModify && (
                                   <button
                                     onClick={() => setUsuarioToEditRole(u)}
-                                    className="p-1.5 rounded-xl border border-[#E5DFD5] text-[#1A1918] hover:bg-slate-100 font-bold transition-colors cursor-pointer"
+                                    className="p-1.5 rounded-xl border border-[#38332B] text-[#E6C687] hover:bg-[#1E1B18] font-bold transition-colors cursor-pointer"
                                     title="Modificar rol o permisos"
                                   >
                                     <Edit2 className="w-3.5 h-3.5 text-[#C59A4D]" />
@@ -4624,8 +4966,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     onClick={() => handleToggleUserActive(u)}
                                     className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-colors cursor-pointer ${
                                       u.activo
-                                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
-                                        : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                        ? 'bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60'
+                                        : 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/60'
                                     }`}
                                     title={u.activo ? 'Desactivar cuenta' : 'Activar cuenta'}
                                   >
@@ -4637,7 +4979,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 {canDelete && (
                                   <button
                                     onClick={() => handleDeleteUser(u)}
-                                    className="px-2.5 py-1 rounded-xl text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 font-bold text-[10px] inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                    className="px-2.5 py-1 rounded-xl text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 font-bold text-[10px] inline-flex items-center gap-1 transition-colors cursor-pointer"
                                     title="Eliminar usuario definitivamente"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
@@ -4652,7 +4994,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                     {usuarios.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="py-12 text-center text-[#7A7368]">
+                        <td colSpan={6} className="py-12 text-center text-[#A69F93]">
                           No hay usuarios registrados todavía.
                         </td>
                       </tr>
@@ -4677,23 +5019,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-2xl bg-white rounded-3xl p-4 sm:p-6 space-y-4 shadow-2xl border border-[#E5DFD5] max-h-[92dvh] overflow-y-auto"
+            className="relative w-full max-w-2xl bg-[#13110F] text-white rounded-3xl p-4 sm:p-6 space-y-4 shadow-2xl border border-[#26221E] max-h-[92dvh] overflow-y-auto"
           >
             {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-[#F0EAE1]">
+            <div className="flex items-center justify-between pb-3 border-b border-[#26221E]">
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-black text-sm text-[#1A1918]">
+                  <span className="font-black text-sm text-white">
                     {selectedOrderForProof ? `Comprobante Pedido ${selectedOrderForProof.codigo}` : 'Comprobante de Pago'}
                   </span>
                   {selectedOrderForProof?.estado_pago && (
                     <span
                       className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
                         selectedOrderForProof.estado_pago === 'verificado'
-                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-200'
+                          ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
                           : selectedOrderForProof.estado_pago === 'rechazado'
-                          ? 'bg-rose-100 text-rose-900 border border-rose-200'
-                          : 'bg-amber-100 text-amber-900 border border-amber-200'
+                          ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
+                          : 'bg-amber-950/80 text-[#E6C687] border border-amber-800'
                       }`}
                     >
                       {selectedOrderForProof.estado_pago === 'verificado'
@@ -4705,8 +5047,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   )}
                 </div>
                 {selectedOrderForProof && (
-                  <span className="text-[11px] text-[#7A7368] block mt-0.5">
-                    Cliente: {selectedOrderForProof.cliente_nombre} • Tel: {selectedOrderForProof.cliente_telefono} • Total: ${selectedOrderForProof.total}
+                  <span className="text-[11px] text-[#A69F93] block mt-0.5">
+                    Cliente: <strong className="text-white">{selectedOrderForProof.cliente_nombre}</strong> • Tel: {selectedOrderForProof.cliente_telefono} • Total: ${selectedOrderForProof.total}
                   </span>
                 )}
               </div>
@@ -4716,20 +5058,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   href={viewingProofUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-xl bg-white border border-[#DDD7CC] hover:bg-[#FAF8F5] text-xs font-bold text-[#1A1918] flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  className="px-3 py-1.5 rounded-xl bg-[#1E1B18] border border-[#38332B] hover:bg-[#2A2622] text-xs font-bold text-[#E6C687] flex items-center gap-1.5 cursor-pointer shadow-sm transition-colors"
                   title="Abrir en pestaña nueva"
                 >
-                  <ExternalLink className="w-3.5 h-3.5 text-[#7A7368]" />
+                  <ExternalLink className="w-3.5 h-3.5 text-[#E6C687]" />
                   <span>Pestaña</span>
                 </a>
 
                 <button
                   type="button"
                   onClick={() => handleCopyReceiptLink(viewingProofUrl, selectedOrderForProof?.id || 'modal')}
-                  className="px-3 py-1.5 rounded-xl bg-white border border-[#DDD7CC] hover:bg-[#FAF8F5] text-xs font-bold text-[#1A1918] flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  className="px-3 py-1.5 rounded-xl bg-[#1E1B18] border border-[#38332B] hover:bg-[#2A2622] text-xs font-bold text-[#E6C687] flex items-center gap-1.5 cursor-pointer shadow-sm transition-colors"
                   title="Copiar enlace directo"
                 >
-                  <Copy className="w-3.5 h-3.5 text-[#7A7368]" />
+                  <Copy className="w-3.5 h-3.5 text-[#E6C687]" />
                   <span>{copiedLinkOrderId === (selectedOrderForProof?.id || 'modal') ? '¡Copiado!' : 'Copiar enlace'}</span>
                 </button>
 
@@ -4743,10 +5085,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         : 'comprobante.jpg'
                     )
                   }
-                  className="px-3 py-1.5 rounded-xl bg-white border border-[#DDD7CC] hover:bg-[#FAF8F5] text-xs font-bold text-[#1A1918] flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  className="px-3 py-1.5 rounded-xl bg-[#1E1B18] border border-[#38332B] hover:bg-[#2A2622] text-xs font-bold text-[#E6C687] flex items-center gap-1.5 cursor-pointer shadow-sm transition-colors"
                   title="Descargar comprobante"
                 >
-                  <Download className="w-3.5 h-3.5 text-[#7A7368]" />
+                  <Download className="w-3.5 h-3.5 text-[#E6C687]" />
                   <span>Descargar</span>
                 </button>
 
@@ -4755,7 +5097,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     setViewingProofUrl(null);
                     setSelectedOrderForProof(null);
                   }}
-                  className="p-1.5 rounded-full hover:bg-[#F2ECE1] text-[#7A7368] hover:text-[#1A1918] transition-colors cursor-pointer"
+                  className="p-1.5 rounded-full hover:bg-[#1E1B18] text-[#A69F93] hover:text-white transition-colors cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -4763,7 +5105,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
 
             {/* Image Preview Container */}
-            <div className="bg-[#141312] rounded-2xl p-2 flex items-center justify-center max-h-[50vh] overflow-hidden">
+            <div className="bg-black/95 rounded-2xl p-2 flex items-center justify-center max-h-[50vh] overflow-hidden border border-[#26221E]">
               <img
                 src={viewingProofUrl}
                 alt="Comprobante en alta resolución"
@@ -4773,14 +5115,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             {/* Prendas seleccionadas por el cliente en el pedido con foto y variantes */}
             {selectedOrderForProof && selectedOrderForProof.items && selectedOrderForProof.items.length > 0 && (
-              <div className="bg-[#FCFAF7] rounded-2xl p-3 border border-[#EAE5DC] space-y-2">
+              <div className="bg-[#1A1816] rounded-2xl p-3 border border-[#26221E] space-y-2">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-black text-[#1A1918] uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                  <span className="font-black text-white uppercase tracking-wider text-[10px] flex items-center gap-1.5">
                     <Package className="w-3.5 h-3.5 text-[#C59A4D]" />
                     Prendas elegidas por el cliente ({selectedOrderForProof.items.length})
                   </span>
                   {userRole !== 'cajero' && (
-                    <span className="font-black text-[#C59A4D]">
+                    <span className="font-black text-[#E6C687]">
                       Total Pedido: ${Number(selectedOrderForProof.total).toFixed(2)}
                     </span>
                   )}
@@ -4803,36 +5145,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     return (
                       <div
                         key={idx}
-                        className="flex items-center gap-2.5 bg-white p-2 rounded-xl border border-[#EAE5DC] shadow-xs"
+                        className="flex items-center gap-2.5 bg-[#13110F] p-2 rounded-xl border border-[#26221E] shadow-sm"
                       >
                         {prodImg ? (
                           <img
                             src={prodImg}
                             alt={it.nombre}
-                            className="w-11 h-13 object-cover rounded-lg border border-[#DDD7CC] shrink-0"
+                            className="w-11 h-13 object-cover rounded-lg border border-[#38332B] shrink-0"
                           />
                         ) : (
-                          <div className="w-11 h-13 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0 text-[10px] font-bold">
+                          <div className="w-11 h-13 rounded-lg bg-[#1E1B18] border border-[#38332B] flex items-center justify-center text-[#A69F93] shrink-0 text-[10px] font-bold">
                             Sin foto
                           </div>
                         )}
                         <div className="min-w-0 flex-1">
-                          <span className="font-bold text-xs text-[#1A1918] truncate block">
+                          <span className="font-bold text-xs text-white truncate block">
                             {it.nombre}
                           </span>
                           {varDesc && (
-                            <span className="text-[10px] text-[#C59A4D] font-bold block truncate">
+                            <span className="text-[10px] text-[#E6C687] font-bold block truncate">
                               {varDesc}
                             </span>
                           )}
-                          <span className="text-[10px] text-[#7A7368] block">
+                          <span className="text-[10px] text-[#A69F93] block">
                             {userRole === 'cajero'
                               ? `Cantidad: ${it.cantidad}`
                               : `Cant: ${it.cantidad} • $${it.precio.toFixed(2)} c/u`}
                           </span>
                         </div>
                         {userRole !== 'cajero' && (
-                          <span className="text-xs font-black text-slate-900 shrink-0">
+                          <span className="text-xs font-black text-white shrink-0">
                             ${(it.precio * it.cantidad).toFixed(2)}
                           </span>
                         )}
@@ -4845,8 +5187,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             {/* Quick status change buttons inside modal */}
             {selectedOrderForProof && (
-              <div className="pt-2 border-t border-[#F0EAE1] flex items-center justify-between flex-wrap gap-2 text-xs">
-                <span className="text-[#7A7368] font-bold">Cambiar estado de validación:</span>
+              <div className="pt-2 border-t border-[#26221E] flex items-center justify-between flex-wrap gap-2 text-xs">
+                <span className="text-[#A69F93] font-bold">Cambiar estado de validación:</span>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
@@ -4857,10 +5199,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         'verificado'
                       )
                     }
-                    className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
                       selectedOrderForProof.estado_pago === 'verificado'
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60 border border-emerald-800/80'
                     }`}
                   >
                     <Check className="w-3.5 h-3.5" />
@@ -4876,10 +5218,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         'rechazado'
                       )
                     }
-                    className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
                       selectedOrderForProof.estado_pago === 'rechazado'
-                        ? 'bg-rose-600 text-white shadow-xs'
-                        : 'bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200'
+                        ? 'bg-rose-600 text-white shadow-sm'
+                        : 'bg-rose-950/60 text-rose-300 hover:bg-rose-900/60 border border-rose-800/80'
                     }`}
                   >
                     <XCircle className="w-3.5 h-3.5" />
@@ -4895,10 +5237,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         'pendiente_revision'
                       )
                     }
-                    className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
                       selectedOrderForProof.estado_pago === 'pendiente_revision'
-                        ? 'bg-amber-600 text-white shadow-xs'
-                        : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+                        ? 'bg-amber-600 text-black font-black shadow-sm'
+                        : 'bg-amber-950/60 text-[#E6C687] hover:bg-amber-900/60 border border-amber-800/80'
                     }`}
                   >
                     <Clock className="w-3.5 h-3.5" />
@@ -4913,21 +5255,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
       {/* Modal Registrar Gasto */}
       {isModalGastoOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl w-full max-w-md p-4 sm:p-6 space-y-4 sm:space-y-5 border border-[#E5DFD5] shadow-2xl animate-fade-in max-h-[90dvh] overflow-y-auto my-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-[#F0EAE1]">
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-[#13110F] text-white rounded-3xl w-full max-w-md p-4 sm:p-6 space-y-4 sm:space-y-5 border border-[#26221E] shadow-2xl animate-fade-in max-h-[90dvh] overflow-y-auto my-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-[#26221E]">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-xl bg-rose-950/60 text-rose-300 border border-rose-800/80 flex items-center justify-center">
                   <Wallet className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="font-black text-sm text-[#1A1918]">Registrar Nuevo Gasto</h3>
-                  <p className="text-[11px] text-[#7A7368]">Se deducirá del total ganado para dar la ganancia neta</p>
+                  <h3 className="font-black text-sm text-white">Registrar Nuevo Gasto</h3>
+                  <p className="text-[11px] text-[#A69F93]">Se deducirá del total ganado para dar la ganancia neta</p>
                 </div>
               </div>
               <button
                 onClick={() => setIsModalGastoOpen(false)}
-                className="p-1.5 rounded-full hover:bg-[#FAF8F5] text-[#7A7368]"
+                className="p-1.5 rounded-full hover:bg-[#1E1B18] text-[#A69F93] hover:text-white transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -4935,7 +5277,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             <form onSubmit={handleCrearGastoSubmit} className="space-y-4 text-xs">
               <div>
-                <label className="font-extrabold text-[#1A1918] block mb-1">
+                <label className="font-extrabold text-[#E6C687] block mb-1">
                   Concepto o Descripción del Gasto *
                 </label>
                 <input
@@ -4944,13 +5286,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   placeholder="Ej: Compra de 10 camisas para inventario"
                   value={nuevoGastoConcepto}
                   onChange={(e) => setNuevoGastoConcepto(e.target.value)}
-                  className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                  className="w-full bg-[#1A1816] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D]"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-extrabold text-[#1A1918] block mb-1">
+                  <label className="font-extrabold text-[#E6C687] block mb-1">
                     Monto en USD ($) *
                   </label>
                   <input
@@ -4961,33 +5303,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     placeholder="0.00"
                     value={nuevoGastoMonto}
                     onChange={(e) => setNuevoGastoMonto(e.target.value)}
-                    className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] font-bold"
+                    className="w-full bg-[#1A1816] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D] font-bold"
                   />
                 </div>
 
                 <div>
-                  <label className="font-extrabold text-[#1A1918] block mb-1">
+                  <label className="font-extrabold text-[#E6C687] block mb-1">
                     Categoría
                   </label>
                   <select
                     value={nuevoGastoCategoria}
                     onChange={(e) => setNuevoGastoCategoria(e.target.value)}
-                    className="w-full bg-[#FAF8F5] px-3 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none"
+                    className="w-full bg-[#1A1816] text-white px-3 py-2.5 rounded-xl border border-[#38332B] focus:outline-none"
                   >
-                    <option value="Mercancía e Inventario">Mercancía e Inventario</option>
-                    <option value="Alquiler y Local">Alquiler y Local</option>
-                    <option value="Servicios Básicos">Servicios Básicos</option>
-                    <option value="Transporte y Envíos">Transporte y Envíos</option>
-                    <option value="Publicidad y Marketing">Publicidad y Marketing</option>
-                    <option value="Nómina y Sueldos">Nómina y Sueldos</option>
-                    <option value="Mantenimiento">Mantenimiento</option>
-                    <option value="Otros Gastos">Otros Gastos</option>
+                    <option value="Mercancía e Inventario" className="bg-[#1A1816] text-white">Mercancía e Inventario</option>
+                    <option value="Alquiler y Local" className="bg-[#1A1816] text-white">Alquiler y Local</option>
+                    <option value="Servicios Básicos" className="bg-[#1A1816] text-white">Servicios Básicos</option>
+                    <option value="Transporte y Envíos" className="bg-[#1A1816] text-white">Transporte y Envíos</option>
+                    <option value="Publicidad y Marketing" className="bg-[#1A1816] text-white">Publicidad y Marketing</option>
+                    <option value="Nómina y Sueldos" className="bg-[#1A1816] text-white">Nómina y Sueldos</option>
+                    <option value="Mantenimiento" className="bg-[#1A1816] text-white">Mantenimiento</option>
+                    <option value="Otros Gastos" className="bg-[#1A1816] text-white">Otros Gastos</option>
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="font-extrabold text-[#1A1918] block mb-1">
+                <label className="font-extrabold text-[#E6C687] block mb-1">
                   Notas o detalles adicionales (opcional)
                 </label>
                 <textarea
@@ -4995,7 +5337,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   placeholder="Detalles de proveedor, factura o reposición..."
                   value={nuevoGastoNotas}
                   onChange={(e) => setNuevoGastoNotas(e.target.value)}
-                  className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none resize-none"
+                  className="w-full bg-[#1A1816] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none resize-none"
                 />
               </div>
 
@@ -5003,14 +5345,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsModalGastoOpen(false)}
-                  className="px-4 py-2.5 rounded-xl text-[#7A7368] hover:text-[#1A1918] font-bold"
+                  className="px-4 py-2.5 rounded-xl text-[#A69F93] hover:text-white font-bold transition-colors cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={submittingGasto}
-                  className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer transition-colors"
                 >
                   <Wallet className="w-3.5 h-3.5" />
                   <span>{submittingGasto ? 'Guardando...' : 'GUARDAR Y DEDUCIR'}</span>
@@ -5023,21 +5365,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
       {/* Modal Registrar Venta Manual (con opción de Efectivo exclusiva) */}
       {isModalVentaManualOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl w-full max-w-lg p-4 sm:p-6 space-y-4 sm:space-y-5 border border-[#E5DFD5] shadow-2xl animate-fade-in max-h-[90dvh] overflow-y-auto my-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-[#F0EAE1]">
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-[#13110F] text-white rounded-3xl w-full max-w-lg p-4 sm:p-6 space-y-4 sm:space-y-5 border border-[#26221E] shadow-2xl animate-fade-in max-h-[90dvh] overflow-y-auto my-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-[#26221E]">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
+                <div className="w-9 h-9 rounded-xl bg-emerald-950/60 text-emerald-300 border border-emerald-800/80 flex items-center justify-center font-bold">
                   <Receipt className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-black text-sm text-[#1A1918]">Registrar Venta Manual (Tienda Física / Caja)</h3>
-                  <p className="text-[11px] text-[#7A7368]">Opción exclusiva del panel administrativo para cobros directos</p>
+                  <h3 className="font-black text-sm text-white">Registrar Venta Manual (Tienda Física / Caja)</h3>
+                  <p className="text-[11px] text-[#A69F93]">Opción exclusiva del panel administrativo para cobros directos</p>
                 </div>
               </div>
               <button
                 onClick={() => setIsModalVentaManualOpen(false)}
-                className="p-1.5 rounded-full hover:bg-[#FAF8F5] text-[#7A7368] cursor-pointer"
+                className="p-1.5 rounded-full hover:bg-[#1E1B18] text-[#A69F93] hover:text-white transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -5046,7 +5388,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <form onSubmit={handleCrearVentaManualSubmit} className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="font-extrabold text-[#1A1918] block mb-1">
+                  <label className="font-extrabold text-[#E6C687] block mb-1">
                     Nombre del Cliente *
                   </label>
                   <input
@@ -5055,12 +5397,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     placeholder="Ej: Carlos González"
                     value={ventaManualCliente}
                     onChange={(e) => setVentaManualCliente(e.target.value)}
-                    className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] font-bold"
+                    className="w-full bg-[#1A1816] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D] font-bold"
                   />
                 </div>
 
                 <div>
-                  <label className="font-extrabold text-[#1A1918] block mb-1 flex items-center gap-1">
+                  <label className="font-extrabold text-[#E6C687] block mb-1 flex items-center gap-1">
                     <Phone className="w-3 h-3 text-[#C59A4D]" />
                     <span>Teléfono (ID del Cliente) *</span>
                   </label>
@@ -5070,14 +5412,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     placeholder="Ej: 6621-2802"
                     value={ventaManualTelefono}
                     onChange={(e) => setVentaManualTelefono(e.target.value)}
-                    className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] font-mono font-bold"
+                    className="w-full bg-[#1A1816] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D] font-mono font-bold"
                   />
                 </div>
               </div>
 
               {/* Selector de Método de Pago (Efectivo, Yappy, Transferencia, Abono / Contra Entrega) */}
               <div>
-                <label className="font-extrabold text-[#1A1918] block mb-1.5">
+                <label className="font-extrabold text-[#E6C687] block mb-1.5">
                   Método de Pago *
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -5086,8 +5428,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     onClick={() => setVentaManualMetodo('efectivo')}
                     className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
                       ventaManualMetodo === 'efectivo'
-                        ? 'bg-emerald-600 text-white border-emerald-600 font-black shadow-md scale-98'
-                        : 'bg-[#FAF8F5] border-[#E5DFD5] text-[#1A1918] hover:border-emerald-500'
+                        ? 'bg-emerald-600 text-white border-emerald-500 font-black shadow-md scale-98'
+                        : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-emerald-500'
                     }`}
                   >
                     <span className="text-base">💵</span>
@@ -5099,8 +5441,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     onClick={() => setVentaManualMetodo('yappy')}
                     className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
                       ventaManualMetodo === 'yappy'
-                        ? 'bg-sky-600 text-white border-sky-600 font-black shadow-md scale-98'
-                        : 'bg-[#FAF8F5] border-[#E5DFD5] text-[#1A1918] hover:border-sky-500'
+                        ? 'bg-sky-600 text-white border-sky-500 font-black shadow-md scale-98'
+                        : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-sky-500'
                     }`}
                   >
                     <span className="text-base">📱</span>
@@ -5112,8 +5454,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     onClick={() => setVentaManualMetodo('transferencia')}
                     className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
                       ventaManualMetodo === 'transferencia'
-                        ? 'bg-[#141312] text-[#E6C687] border-[#141312] font-black shadow-md scale-98'
-                        : 'bg-[#FAF8F5] border-[#E5DFD5] text-[#1A1918] hover:border-[#141312]'
+                        ? 'bg-[#C59A4D] text-black border-[#C59A4D] font-black shadow-md scale-98'
+                        : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-[#C59A4D]'
                     }`}
                   >
                     <span className="text-base">🏦</span>
@@ -5128,8 +5470,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     }}
                     className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
                       ventaManualMetodo === 'abono_contraentrega'
-                        ? 'bg-amber-500 text-slate-950 border-amber-600 font-black shadow-md scale-98'
-                        : 'bg-[#FAF8F5] border-[#E5DFD5] text-[#1A1918] hover:border-amber-500'
+                        ? 'bg-amber-500 text-black border-amber-400 font-black shadow-md scale-98'
+                        : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-amber-500'
                     }`}
                   >
                     <span className="text-base">🤝</span>
@@ -5140,13 +5482,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               {/* Opciones de Abono y saldo si se eligió abono_contraentrega */}
               {ventaManualMetodo === 'abono_contraentrega' && (
-                <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-50/90 border border-amber-200/90 space-y-3">
+                <div className="p-3.5 sm:p-4 rounded-2xl bg-[#1A1816] border border-amber-900/50 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-xs text-amber-950 flex items-center gap-1.5">
+                    <span className="font-extrabold text-xs text-[#E6C687] flex items-center gap-1.5">
                       <span>🤝</span>
                       <span>Configurar Abono Inicial & Saldo Pendiente</span>
                     </span>
-                    <span className="text-[10px] text-amber-800 font-bold">
+                    <span className="text-[10px] text-amber-400 font-bold">
                       Termina de pagar al recibir
                     </span>
                   </div>
@@ -5157,8 +5499,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       onClick={() => setVentaManualTipoAbono('mitad')}
                       className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
                         ventaManualTipoAbono === 'mitad'
-                          ? 'bg-slate-900 text-white shadow-xs'
-                          : 'bg-white border border-amber-300 text-slate-700 hover:bg-amber-100/60'
+                          ? 'bg-[#C59A4D] text-black shadow-sm'
+                          : 'bg-[#13110F] border border-[#38332B] text-[#A69F93] hover:text-white'
                       }`}
                     >
                       50% (La Mitad)
@@ -5168,8 +5510,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       onClick={() => setVentaManualTipoAbono('personalizado')}
                       className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
                         ventaManualTipoAbono === 'personalizado'
-                          ? 'bg-slate-900 text-white shadow-xs'
-                          : 'bg-white border border-amber-300 text-slate-700 hover:bg-amber-100/60'
+                          ? 'bg-[#C59A4D] text-black shadow-sm'
+                          : 'bg-[#13110F] border border-[#38332B] text-[#A69F93] hover:text-white'
                       }`}
                     >
                       Menos / Otro Monto
@@ -5179,8 +5521,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       onClick={() => setVentaManualTipoAbono('cero')}
                       className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
                         ventaManualTipoAbono === 'cero'
-                          ? 'bg-slate-900 text-white shadow-xs'
-                          : 'bg-white border border-amber-300 text-slate-700 hover:bg-amber-100/60'
+                          ? 'bg-[#C59A4D] text-black shadow-sm'
+                          : 'bg-[#13110F] border border-[#38332B] text-[#A69F93] hover:text-white'
                       }`}
                     >
                       0% (Contra Entrega Pura)
@@ -5189,7 +5531,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                   {ventaManualTipoAbono === 'personalizado' && (
                     <div>
-                      <label className="text-[11px] font-bold text-slate-800 block mb-1">
+                      <label className="text-[11px] font-bold text-[#E6C687] block mb-1">
                         ¿Cuánto abonó el cliente en este momento? ($)
                       </label>
                       <input
@@ -5199,7 +5541,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         placeholder="Ej: 15.00"
                         value={ventaManualMontoAbonado}
                         onChange={(e) => setVentaManualMontoAbonado(e.target.value)}
-                        className="w-full bg-white px-3.5 py-2 rounded-xl border border-amber-300 focus:outline-none font-black text-sm"
+                        className="w-full bg-[#13110F] px-3.5 py-2 rounded-xl border border-[#38332B] text-white focus:outline-none focus:border-[#C59A4D] font-black text-sm"
                       />
                     </div>
                   )}
@@ -5213,14 +5555,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     const pendiente = Math.max(0, totalNum - abonoNum);
 
                     return (
-                      <div className="flex items-center justify-between text-xs pt-2 border-t border-amber-200">
+                      <div className="flex items-center justify-between text-xs pt-2 border-t border-[#26221E]">
                         <div>
-                          <span className="text-slate-500 text-[10px] block font-bold">Abono Inicial recibido:</span>
-                          <strong className="text-slate-900 font-black text-sm">${abonoNum.toFixed(2)} USD</strong>
+                          <span className="text-[#A69F93] text-[10px] block font-bold">Abono Inicial recibido:</span>
+                          <strong className="text-white font-black text-sm">${abonoNum.toFixed(2)} USD</strong>
                         </div>
                         <div className="text-right">
-                          <span className="text-amber-900 text-[10px] block font-extrabold">Saldo que pagará al entregar:</span>
-                          <strong className="text-rose-700 font-black text-base">${pendiente.toFixed(2)} USD</strong>
+                          <span className="text-[#E6C687] text-[10px] block font-extrabold">Saldo que pagará al entregar:</span>
+                          <strong className="text-rose-400 font-black text-base">${pendiente.toFixed(2)} USD</strong>
                         </div>
                       </div>
                     );
@@ -5228,114 +5570,304 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               )}
 
-              {/* Producto Asociado y control de existencias */}
-              <div>
-                <label className="font-extrabold text-[#1A1918] block mb-1">
-                  Producto Asociado (Opcional)
-                </label>
-                <select
-                  value={ventaManualProductoId}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    setVentaManualProductoId(id);
-                    setVentaManualVarianteId('');
-                    const prod = productos.find((p) => p.id === id);
-                    if (prod) {
-                      const qty = Math.max(1, parseInt(ventaManualCantidad) || 1);
-                      setVentaManualMonto((prod.precio * qty).toFixed(2));
+              {/* SELECCIÓN Y AGREGADO DE PRODUCTOS A LA VENTA */}
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-[#181614] border border-[#2D2822] space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-[#E6C687] text-xs flex items-center gap-1.5">
+                    <span>👗</span>
+                    <span>Prendas / Productos a Incluir en la Venta</span>
+                  </span>
+                  <span className="text-[11px] text-[#A69F93] font-bold">
+                    {ventaManualItems.length} agregada(s)
+                  </span>
+                </div>
+
+                {/* Selector de Producto */}
+                <div>
+                  <label className="text-[11px] font-bold text-[#A69F93] block mb-1">
+                    Seleccionar Producto del Catálogo:
+                  </label>
+                  <select
+                    value={ventaManualProductoId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setVentaManualProductoId(id);
+                      setVentaManualVarianteId('');
+                      setVentaManualTalla('');
+                      setVentaManualColor('');
+                      const prod = productos.find((p) => p.id === id);
+                      if (prod && ventaManualItems.length === 0) {
+                        const qty = Math.max(1, parseInt(ventaManualCantidad) || 1);
+                        setVentaManualMonto((prod.precio * qty).toFixed(2));
+                      }
+                    }}
+                    className="w-full bg-[#13110F] text-white px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D]"
+                  >
+                    <option value="" className="bg-[#13110F] text-white">-- Escoger un producto para agregar --</option>
+                    {productos.map((p) => (
+                      <option key={p.id} value={p.id} className="bg-[#13110F] text-white">
+                        {p.nombre} (${Number(p.precio).toFixed(2)}) — Stock: {p.stock ?? 0}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Previsualización del Producto Seleccionado con Foto, Talla, Color y Botón Agregar */}
+                {(() => {
+                  const selectedProd = productos.find((p) => p.id === ventaManualProductoId);
+                  if (!selectedProd) return null;
+
+                  const prodImg = selectedProd.imagen_url || selectedProd.imagenes?.[0] || '';
+                  const stockActual = selectedProd.stock ?? 0;
+                  const hasVariantes = Array.isArray(selectedProd.variantes) && selectedProd.variantes.length > 0;
+                  const qty = Math.max(1, parseInt(ventaManualCantidad) || 1);
+                  const subtotalItem = selectedProd.precio * qty;
+
+                  const handleAgregarItem = () => {
+                    let varTitulo = '';
+                    if (ventaManualVarianteId) {
+                      const foundV = selectedProd.variantes?.find((v: any) => (v.id || v.titulo) === ventaManualVarianteId);
+                      varTitulo = foundV?.titulo || (foundV as any)?.nombre || ventaManualVarianteId;
                     }
-                  }}
-                  className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
-                >
-                  <option value="">Ninguno / Venta libre</option>
-                  {productos.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.nombre} (${p.precio}) - Stock: {p.stock ?? 0}
-                    </option>
-                  ))}
-                </select>
-              </div>
 
-              {/* Si hay un producto seleccionado, mostrar detalles de inventario, variantes y cantidad */}
-              {(() => {
-                const selectedProd = productos.find((p) => p.id === ventaManualProductoId);
-                if (!selectedProd) return null;
+                    const newItem: VentaManualItem = {
+                      producto_id: selectedProd.id,
+                      nombre: selectedProd.nombre,
+                      cantidad: qty,
+                      precio: selectedProd.precio,
+                      subtotal: subtotalItem,
+                      imagen_url: prodImg,
+                      talla: ventaManualTalla || (hasVariantes ? varTitulo : undefined),
+                      color: ventaManualColor || undefined,
+                      variante_titulo: varTitulo || undefined,
+                    };
 
-                const stockActual = selectedProd.stock ?? 0;
-                const hasVariantes = Array.isArray(selectedProd.variantes) && selectedProd.variantes.length > 0;
+                    const updated = [...ventaManualItems, newItem];
+                    setVentaManualItems(updated);
+                    const newTot = updated.reduce((s, it) => s + it.subtotal, 0);
+                    setVentaManualMonto(newTot.toFixed(2));
 
-                return (
-                  <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-amber-200/80 space-y-3">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-bold text-[#1A1918]">Inventario disponible:</span>
-                      <span
-                        className={`px-2 py-0.5 rounded-full font-black text-[11px] ${
-                          stockActual <= 0
-                            ? 'bg-rose-100 text-rose-800'
-                            : stockActual < 5
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-emerald-100 text-emerald-800'
-                        }`}
-                      >
-                        {stockActual} unidades disponibles
-                      </span>
-                    </div>
+                    // Reset selection
+                    setVentaManualProductoId('');
+                    setVentaManualVarianteId('');
+                    setVentaManualTalla('');
+                    setVentaManualColor('');
+                    setVentaManualCantidad('1');
+                  };
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="font-extrabold text-[#1A1918] block mb-1">
-                          Cantidad a vender *
-                        </label>
-                        <input
-                          type="number"
-                          min="1"
-                          required
-                          value={ventaManualCantidad}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setVentaManualCantidad(val);
-                            const parsed = parseInt(val) || 1;
-                            setVentaManualMonto((selectedProd.precio * Math.max(1, parsed)).toFixed(2));
-                          }}
-                          className="w-full bg-white px-3 py-2 rounded-xl border border-amber-300 focus:outline-none font-black text-sm"
-                        />
-                        <span className="text-[10px] text-[#7A7368] mt-0.5 block">
-                          Precio unitario: ${selectedProd.precio.toFixed(2)}
-                        </span>
+                  return (
+                    <div className="p-3 rounded-xl bg-[#13110F] border border-[#38332B] space-y-3 animate-fade-in">
+                      <div className="flex items-center gap-3">
+                        {prodImg ? (
+                          <img
+                            src={prodImg}
+                            alt={selectedProd.nombre}
+                            className="w-16 h-16 object-cover rounded-xl bg-black border border-[#2D2822] shadow-sm shrink-0"
+                          />
+                        ) : (
+                          <div className="w-16 h-16 rounded-xl bg-black border border-[#2D2822] flex items-center justify-center text-[10px] text-[#7A7368] shrink-0 font-bold">
+                            Sin foto
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-extrabold text-sm text-white truncate">{selectedProd.nombre}</h4>
+                          <span className="text-emerald-400 font-black text-sm block">
+                            ${Number(selectedProd.precio).toFixed(2)} USD
+                          </span>
+                          <span
+                            className={`inline-block px-2 py-0.2 rounded-md font-bold text-[10px] mt-0.5 ${
+                              stockActual <= 0
+                                ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
+                                : stockActual < 5
+                                ? 'bg-amber-950/80 text-amber-300 border border-amber-800'
+                                : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
+                            }`}
+                          >
+                            Existencias: {stockActual} unids.
+                          </span>
+                        </div>
                       </div>
 
-                      {hasVariantes && (
-                        <div>
-                          <label className="font-extrabold text-[#1A1918] block mb-1">
-                            Talla / Variante
-                          </label>
-                          <select
-                            value={ventaManualVarianteId}
-                            onChange={(e) => setVentaManualVarianteId(e.target.value)}
-                            className="w-full bg-white px-3 py-2 rounded-xl border border-amber-300 focus:outline-none text-xs"
-                          >
-                            <option value="">Estándar / Todas</option>
-                            {selectedProd.variantes?.map((v: any) => (
-                              <option key={v.id || v.titulo} value={v.id || v.titulo}>
-                                {v.titulo || v.nombre} (Stock: {v.stock ?? stockActual})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-                    </div>
+                      {/* Talla, Color y Variantes */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        {hasVariantes ? (
+                          <div className="sm:col-span-2">
+                            <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
+                              Variante / Talla:
+                            </label>
+                            <select
+                              value={ventaManualVarianteId}
+                              onChange={(e) => setVentaManualVarianteId(e.target.value)}
+                              className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
+                            >
+                              <option value="">Seleccionar variante</option>
+                              {selectedProd.variantes?.map((v: any) => (
+                                <option key={v.id || v.titulo} value={v.id || v.titulo}>
+                                  {v.titulo || v.nombre} (Stock: {v.stock ?? stockActual})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : (
+                          <>
+                            <div>
+                              <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
+                                Talla (ej: S, M, L, XL):
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="Talla..."
+                                value={ventaManualTalla}
+                                onChange={(e) => setVentaManualTalla(e.target.value)}
+                                className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
+                                Color:
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="Color..."
+                                value={ventaManualColor}
+                                onChange={(e) => setVentaManualColor(e.target.value)}
+                                className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
+                              />
+                            </div>
+                          </>
+                        )}
 
-                    <div className="text-[11px] text-amber-900 font-medium flex items-center gap-1.5">
-                      <span>📉</span>
-                      <span>Se descontará automáticamente del inventario y del stock del producto al guardar.</span>
+                        <div>
+                          <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
+                            Cantidad:
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={ventaManualCantidad}
+                            onChange={(e) => setVentaManualCantidad(e.target.value)}
+                            className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs font-black focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <span className="text-xs text-[#A69F93]">
+                          Subtotal prenda: <strong className="text-white">${subtotalItem.toFixed(2)}</strong>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleAgregarItem}
+                          className="px-3.5 py-1.5 rounded-xl bg-[#C59A4D] hover:bg-[#D4A95D] text-black font-black text-xs cursor-pointer shadow-md transition-all active:scale-95 flex items-center gap-1.5"
+                        >
+                          <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                          <span>AGREGAR A ESTA VENTA</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Lista de Prendas Agregadas a la Venta */}
+                {ventaManualItems.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-[#26221E]">
+                    <span className="text-[10px] font-black uppercase text-[#E6C687] block tracking-wider">
+                      Prendas en esta venta ({ventaManualItems.length}):
+                    </span>
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      {ventaManualItems.map((it, idx) => (
+                        <div
+                          key={idx}
+                          className="p-2 rounded-xl bg-[#13110F] border border-[#2D2822] flex items-center justify-between gap-2.5 text-xs"
+                        >
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            {it.imagen_url ? (
+                              <img
+                                src={it.imagen_url}
+                                alt={it.nombre}
+                                className="w-9 h-9 object-cover rounded-lg bg-black border border-[#2D2822] shrink-0"
+                              />
+                            ) : (
+                              <div className="w-9 h-9 rounded-lg bg-black border border-[#2D2822] flex items-center justify-center text-[8px] text-[#7A7368] shrink-0">
+                                Sin foto
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <span className="font-extrabold text-white block truncate text-[11px]">{it.nombre}</span>
+                              <div className="flex items-center gap-1 text-[10px] text-[#A69F93]">
+                                {it.talla && <span className="text-[#E6C687]">Talla: {it.talla}</span>}
+                                {it.color && <span>• {it.color}</span>}
+                                <span>• ${it.precio.toFixed(2)} c/u</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {/* Stepper */}
+                            <div className="flex items-center border border-[#332E27] rounded-lg overflow-hidden bg-[#1A1816]">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = [...ventaManualItems];
+                                  if (updated[idx].cantidad > 1) {
+                                    updated[idx].cantidad -= 1;
+                                    updated[idx].subtotal = updated[idx].cantidad * updated[idx].precio;
+                                    setVentaManualItems(updated);
+                                    const sumTot = updated.reduce((s, x) => s + x.subtotal, 0);
+                                    setVentaManualMonto(sumTot.toFixed(2));
+                                  }
+                                }}
+                                className="px-2 py-0.5 text-xs hover:bg-[#25221E] text-[#A69F93] hover:text-white cursor-pointer"
+                              >
+                                -
+                              </button>
+                              <span className="px-2 py-0.5 font-black text-xs text-white">
+                                {it.cantidad}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = [...ventaManualItems];
+                                  updated[idx].cantidad += 1;
+                                  updated[idx].subtotal = updated[idx].cantidad * updated[idx].precio;
+                                  setVentaManualItems(updated);
+                                  const sumTot = updated.reduce((s, x) => s + x.subtotal, 0);
+                                  setVentaManualMonto(sumTot.toFixed(2));
+                                }}
+                                className="px-2 py-0.5 text-xs hover:bg-[#25221E] text-[#A69F93] hover:text-white cursor-pointer"
+                              >
+                                +
+                              </button>
+                            </div>
+
+                            <span className="font-black text-emerald-400 text-xs w-16 text-right">
+                              ${it.subtotal.toFixed(2)}
+                            </span>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = ventaManualItems.filter((_, i) => i !== idx);
+                                setVentaManualItems(updated);
+                                const sumTot = updated.reduce((s, x) => s + x.subtotal, 0);
+                                setVentaManualMonto(sumTot.toFixed(2));
+                              }}
+                              className="p-1 rounded-lg text-rose-400 hover:bg-rose-950/60 cursor-pointer"
+                              title="Eliminar de esta venta"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                );
-              })()}
+                )}
+              </div>
 
               <div>
-                <label className="font-extrabold text-[#1A1918] block mb-1">
-                  Monto Total en USD ($) *
+                <label className="font-extrabold text-[#E6C687] block mb-1">
+                  Monto Total de la Venta en USD ($) *
                 </label>
                 <input
                   type="number"
@@ -5345,12 +5877,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   placeholder="0.00"
                   value={ventaManualMonto}
                   onChange={(e) => setVentaManualMonto(e.target.value)}
-                  className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] font-black text-base"
+                  className="w-full bg-[#1A1816] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D] font-black text-base"
                 />
+                {ventaManualItems.length > 0 && (
+                  <span className="text-[10px] text-emerald-400 mt-1 block font-bold">
+                    ✓ Calculado automáticamente de las {ventaManualItems.length} prenda(s) agregadas.
+                  </span>
+                )}
               </div>
 
               <div>
-                <label className="font-extrabold text-[#1A1918] block mb-1">
+                <label className="font-extrabold text-[#E6C687] block mb-1">
                   Notas o detalles de la venta (opcional)
                 </label>
                 <textarea
@@ -5358,7 +5895,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   placeholder="Detalles de entrega presencial, cambio entregado, tallas entregadas, etc."
                   value={ventaManualNotas}
                   onChange={(e) => setVentaManualNotas(e.target.value)}
-                  className="w-full bg-[#FAF8F5] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none resize-none"
+                  className="w-full bg-[#1A1816] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none resize-none"
                 />
               </div>
 
@@ -5366,14 +5903,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsModalVentaManualOpen(false)}
-                  className="px-4 py-2.5 rounded-xl text-[#7A7368] hover:text-[#1A1918] font-bold cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl text-[#A69F93] hover:text-white font-bold transition-colors cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={submittingVentaManual}
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer transition-colors"
                 >
                   <Receipt className="w-3.5 h-3.5" />
                   <span>{submittingVentaManual ? 'Registrando...' : 'GUARDAR VENTA MANUAL'}</span>
@@ -5386,90 +5923,107 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
       {/* Modal Abrir Caja */}
       {isModalAbrirCajaOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-4 border border-slate-200 shadow-2xl animate-fade-in my-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-[#13110F] rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-4 border border-[#26221E] shadow-2xl shadow-black/80 animate-fade-in my-auto text-white">
+            <div className="flex items-center justify-between pb-3 border-b border-[#26221E]">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center font-bold">
                   <Wallet className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-slate-900">Apertura de Turno de Caja</h3>
-                  <p className="text-[11px] text-slate-500">Inicia el turno indicando el fondo en gaveta</p>
+                  <h3 className="text-base font-black text-white">Apertura de Turno de Caja</h3>
+                  <p className="text-[11px] text-[#A69F93]">Inicia el turno indicando el fondo en gaveta</p>
                 </div>
               </div>
               <button
                 onClick={() => setIsModalAbrirCajaOpen(false)}
-                className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-800 transition-colors cursor-pointer"
+                className="p-1.5 rounded-full hover:bg-[#1A1816] text-[#A69F93] hover:text-white transition-colors cursor-pointer border border-transparent hover:border-[#38332B]"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleAbrirCajaSubmit} className="space-y-4 text-xs">
-              <div>
-                <label className="font-extrabold text-slate-900 block mb-1.5">
-                  Fondo Inicial en Gaveta (Efectivo Base) *
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-black text-slate-400 text-sm">$</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    placeholder="50.00"
-                    value={montoAperturaCaja}
-                    onChange={(e) => setMontoAperturaCaja(e.target.value)}
-                    className="w-full bg-slate-50 pl-8 pr-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-emerald-600 font-black text-base text-slate-900"
-                  />
-                </div>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className="text-[10px] text-slate-400 font-bold">Rápido:</span>
-                  {['20.00', '50.00', '100.00'].map((val) => (
-                    <button
-                      key={val}
-                      type="button"
-                      onClick={() => setMontoAperturaCaja(val)}
-                      className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[10px] transition-colors"
-                    >
-                      ${val}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="font-extrabold text-slate-900 block mb-1">
-                  Notas u Observaciones de Apertura (opcional)
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="Ej: Turno de la mañana, billetes de $5 y $1..."
-                  value={notasAperturaCaja}
-                  onChange={(e) => setNotasAperturaCaja(e.target.value)}
-                  className="w-full bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-emerald-600 resize-none text-slate-900"
-                />
-              </div>
-
-              <div className="pt-2 flex items-center justify-end gap-2.5">
+            {userRole === 'cajero' ? (
+              <div className="p-4 rounded-2xl bg-rose-950/40 border border-rose-900/60 text-center space-y-2">
+                <span className="text-2xl">🔒</span>
+                <h4 className="font-black text-rose-300 text-sm">Acceso Restringido para Cajeros</h4>
+                <p className="text-xs text-[#A69F93]">
+                  Por políticas de seguridad, solo el <strong>Dueño o Administrador</strong> tiene autorización para abrir la caja e ingresar el fondo de gaveta.
+                </p>
                 <button
                   type="button"
                   onClick={() => setIsModalAbrirCajaOpen(false)}
-                  className="px-4 py-2.5 rounded-xl text-slate-500 hover:text-slate-900 font-bold cursor-pointer"
+                  className="mt-2 px-4 py-2 rounded-xl bg-[#26221E] hover:bg-[#332E27] text-white text-xs font-bold cursor-pointer"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isCajaSubmitting}
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer"
-                >
-                  <Wallet className="w-3.5 h-3.5" />
-                  <span>{isCajaSubmitting ? 'Abriendo...' : 'INICIAR TURNO DE CAJA'}</span>
+                  Entendido
                 </button>
               </div>
-            </form>
+            ) : (
+              <form onSubmit={handleAbrirCajaSubmit} className="space-y-4 text-xs">
+                <div>
+                  <label className="font-extrabold text-[#E6C687] block mb-1.5 uppercase tracking-wider text-[11px]">
+                    Fondo Inicial en Gaveta (Efectivo Base) *
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-black text-[#A69F93] text-sm">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      placeholder="50.00"
+                      value={montoAperturaCaja}
+                      onChange={(e) => setMontoAperturaCaja(e.target.value)}
+                      className="w-full bg-[#1A1816] pl-8 pr-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-emerald-500 font-black text-base text-white placeholder-[#787168]"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-[10px] text-[#A69F93] font-bold">Rápido:</span>
+                    {['20.00', '50.00', '100.00'].map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setMontoAperturaCaja(val)}
+                        className="px-2.5 py-1 rounded-lg bg-[#1A1816] border border-[#26221E] hover:border-[#E6C687] text-[#E6C687] hover:text-white font-bold text-[10px] transition-colors cursor-pointer"
+                      >
+                        ${val}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="font-extrabold text-white block mb-1 text-[11px]">
+                    Notas u Observaciones de Apertura (opcional)
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="Ej: Turno de la mañana, billetes de $5 y $1..."
+                    value={notasAperturaCaja}
+                    onChange={(e) => setNotasAperturaCaja(e.target.value)}
+                    className="w-full bg-[#1A1816] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-emerald-500 resize-none text-white placeholder-[#787168]"
+                  />
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalAbrirCajaOpen(false)}
+                    className="px-4 py-2.5 rounded-xl text-[#A69F93] hover:text-white font-bold cursor-pointer transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isCajaSubmitting}
+                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black flex items-center gap-1.5 shadow-lg shadow-emerald-950/40 disabled:opacity-50 cursor-pointer transition-all active:scale-95"
+                  >
+                    <Wallet className="w-3.5 h-3.5" />
+                    <span>{isCajaSubmitting ? 'Abriendo...' : 'INICIAR TURNO DE CAJA'}</span>
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
@@ -5477,147 +6031,249 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* Modal Cerrar Caja / Arqueo */}
       {isModalCerrarCajaOpen && sesionCaja && (() => {
         const fechaInicio = sesionCaja.fecha_apertura ? new Date(sesionCaja.fecha_apertura).getTime() : 0;
-        const ventasEfectivoTurno = ventas
-          .filter(
-            (v) =>
-              (v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega') &&
-              v.creado_en &&
-              new Date(v.creado_en).getTime() >= fechaInicio
-          )
-          .reduce((acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0), 0);
+        const ventasEfectivoTurnoList = ventas.filter(
+          (v) =>
+            (v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega') &&
+            v.creado_en &&
+            new Date(v.creado_en).getTime() >= fechaInicio
+        );
+        const totalVentasEfectivo = ventasEfectivoTurnoList.reduce(
+          (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
+          0
+        );
 
-        const gastosEfectivoTurno = gastos
-          .filter((g) => g.creado_en && new Date(g.creado_en).getTime() >= fechaInicio)
-          .reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
+        const gastosEfectivoTurnoList = gastos.filter(
+          (g) => g.creado_en && new Date(g.creado_en).getTime() >= fechaInicio
+        );
+        const totalGastosEfectivo = gastosEfectivoTurnoList.reduce(
+          (acc, g) => acc + (Number(g.monto) || 0),
+          0
+        );
 
         const fondoInicial = Number(sesionCaja.monto_inicial) || 0;
-        const esperado = fondoInicial + ventasEfectivoTurno - gastosEfectivoTurno;
+        const esperado = fondoInicial + totalVentasEfectivo - totalGastosEfectivo;
         const real = parseFloat(montoCierreReal);
         const hasReal = !isNaN(real);
         const diferencia = hasReal ? real - esperado : 0;
+        const duracionTurno = getDuracionCaja(sesionCaja.fecha_apertura);
 
         return (
-          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-            <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-4 border border-slate-200 shadow-2xl animate-fade-in my-auto">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <div className="bg-[#13110F] rounded-3xl w-full max-w-lg p-5 sm:p-6 space-y-4 border border-[#26221E] shadow-2xl shadow-black/80 animate-fade-in my-auto text-white max-h-[90dvh] overflow-y-auto">
+              <div className="flex items-center justify-between pb-3 border-b border-[#26221E]">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-800 flex items-center justify-center font-bold">
+                  <div className="w-9 h-9 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center font-bold">
                     <Lock className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-black text-slate-900">Cierre de Caja & Arqueo</h3>
-                    <p className="text-[11px] text-slate-500">Conteo físico de efectivo y cuadre final</p>
+                    <h3 className="text-base font-black text-white">Cierre de Caja & Arqueo Final</h3>
+                    <p className="text-[11px] text-[#A69F93]">Auditoría detallada de todos los movimientos del turno</p>
                   </div>
                 </div>
                 <button
                   onClick={() => setIsModalCerrarCajaOpen(false)}
-                  className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-800 transition-colors cursor-pointer"
+                  className="p-1.5 rounded-full hover:bg-[#1A1816] text-[#A69F93] hover:text-white transition-colors cursor-pointer border border-transparent hover:border-[#38332B]"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* Resumen esperado del turno */}
-              {userRole !== 'cajero' ? (
-                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-2 text-xs">
-                  <div className="flex justify-between text-slate-600">
-                    <span>Fondo Inicial:</span>
-                    <strong className="text-slate-900">${fondoInicial.toFixed(2)}</strong>
-                  </div>
-                  <div className="flex justify-between text-emerald-700">
-                    <span>(+) Ventas Efectivo:</span>
-                    <strong>+${ventasEfectivoTurno.toFixed(2)}</strong>
-                  </div>
-                  <div className="flex justify-between text-rose-600">
-                    <span>(-) Gastos del Turno:</span>
-                    <strong>-${gastosEfectivoTurno.toFixed(2)}</strong>
-                  </div>
-                  <div className="pt-2 border-t border-slate-200 flex justify-between font-black text-slate-900">
-                    <span>Efectivo Esperado en Gaveta:</span>
-                    <span className="text-sm font-black text-emerald-800">${esperado.toFixed(2)} USD</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-xs text-slate-600">
-                  <span>Cuenta el dinero total en efectivo que se encuentra físicamente en la gaveta.</span>
-                </div>
-              )}
-
-              <form onSubmit={handleCerrarCajaSubmit} className="space-y-4 text-xs">
-                <div>
-                  <label className="font-extrabold text-slate-900 block mb-1.5">
-                    Dinero Real Contado en Gaveta (Efectivo) *
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-black text-slate-400 text-sm">$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      placeholder="0.00"
-                      value={montoCierreReal}
-                      onChange={(e) => setMontoCierreReal(e.target.value)}
-                      className="w-full bg-slate-50 pl-8 pr-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-rose-600 font-black text-base text-slate-900"
-                    />
-                  </div>
-
-                  {/* Diferencia en tiempo real para Dueño/Admin */}
-                  {hasReal && userRole !== 'cajero' && (
-                    <div
-                      className={`mt-2 p-2.5 rounded-xl text-xs font-bold flex items-center justify-between border ${
-                        Math.abs(diferencia) < 0.01
-                          ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
-                          : diferencia > 0
-                          ? 'bg-blue-50 text-blue-900 border-blue-200'
-                          : 'bg-rose-50 text-rose-900 border-rose-200'
-                      }`}
-                    >
-                      <span>
-                        {Math.abs(diferencia) < 0.01
-                          ? '✅ Cuadre Exacto'
-                          : diferencia > 0
-                          ? '🟢 Sobrante en Gaveta'
-                          : '🔴 Faltante en Gaveta'}
-                      </span>
-                      <span className="font-black">
-                        {diferencia >= 0 ? `+$${diferencia.toFixed(2)}` : `-$${Math.abs(diferencia).toFixed(2)}`}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label className="font-extrabold text-slate-900 block mb-1">
-                    Observaciones o Notas de Cierre (opcional)
-                  </label>
-                  <textarea
-                    rows={2}
-                    placeholder="Ej: Justificación de billetes, cambio entregado a dueño..."
-                    value={notasCierreCaja}
-                    onChange={(e) => setNotasCierreCaja(e.target.value)}
-                    className="w-full bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-rose-600 resize-none text-slate-900"
-                  />
-                </div>
-
-                <div className="pt-2 flex items-center justify-end gap-2.5">
+              {userRole === 'cajero' ? (
+                <div className="p-4 rounded-2xl bg-rose-950/40 border border-rose-900/60 text-center space-y-2">
+                  <span className="text-2xl">🔒</span>
+                  <h4 className="font-black text-rose-300 text-sm">Acceso Restringido para Cajeros</h4>
+                  <p className="text-xs text-[#A69F93]">
+                    Por políticas de seguridad, solo el <strong>Dueño o Administrador</strong> tiene autorización para realizar el conteo de cierre y arquear la caja.
+                  </p>
                   <button
                     type="button"
                     onClick={() => setIsModalCerrarCajaOpen(false)}
-                    className="px-4 py-2.5 rounded-xl text-slate-500 hover:text-slate-900 font-bold cursor-pointer"
+                    className="mt-2 px-4 py-2 rounded-xl bg-[#26221E] hover:bg-[#332E27] text-white text-xs font-bold cursor-pointer"
                   >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isCajaSubmitting}
-                    className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer"
-                  >
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>{isCajaSubmitting ? 'Cerrando...' : 'GUARDAR CIERRE & ARQUEO'}</span>
+                    Entendido
                   </button>
                 </div>
-              </form>
+              ) : (
+                <>
+                  {/* Badge de Duración y Apertura */}
+                  <div className="p-3 rounded-2xl bg-[#1A1816] border border-[#2D2822] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                    <div>
+                      <span className="text-[10px] text-[#A69F93] block">Abierto por:</span>
+                      <strong className="text-white font-extrabold">{sesionCaja.abierto_por}</strong>
+                      <span className="text-[10px] text-[#A69F93] block mt-0.5">
+                        {new Date(sesionCaja.fecha_apertura).toLocaleString('es-PA')}
+                      </span>
+                    </div>
+                    <div className="sm:text-right">
+                      <span className="px-3 py-1 rounded-full bg-emerald-950/80 border border-emerald-700/80 text-emerald-300 text-xs font-black inline-flex items-center gap-1.5">
+                        <span>⏱️</span>
+                        <span>Turno abierto: {duracionTurno}</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Todo lo que pasó dentro de la caja en este turno */}
+                  <div className="bg-[#181614] rounded-2xl p-3.5 border border-[#26221E] space-y-2.5">
+                    <div className="flex items-center justify-between pb-1.5 border-b border-[#26221E]">
+                      <span className="font-extrabold text-[#E6C687] text-xs flex items-center gap-1.5">
+                        <span>📋</span>
+                        <span>Todo lo que ocurrió en este turno ({ventasEfectivoTurnoList.length + gastosEfectivoTurnoList.length + 1} movimientos)</span>
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 text-xs">
+                      {/* Fondo Inicial */}
+                      <div className="p-2 rounded-xl bg-[#13110F] border border-[#2D2822] flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs">💼</span>
+                          <div>
+                            <span className="font-bold text-white block text-[11px]">Fondo Inicial en Gaveta</span>
+                            <span className="text-[10px] text-[#A69F93]">
+                              Abierto por: <strong className="text-white">{sesionCaja.abierto_por}</strong>
+                            </span>
+                          </div>
+                        </div>
+                        <span className="font-black text-white text-xs">+${fondoInicial.toFixed(2)}</span>
+                      </div>
+
+                      {/* Ventas en Efectivo */}
+                      {ventasEfectivoTurnoList.map((v) => {
+                        const cobro = Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0;
+                        return (
+                          <div key={v.id || v.codigo} className="p-2 rounded-xl bg-[#13110F] border border-[#2D2822] flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-xs">💵</span>
+                              <div className="min-w-0">
+                                <span className="font-bold text-white block text-[11px] truncate">
+                                  Venta {v.codigo} — {v.cliente_nombre}
+                                </span>
+                                <span className="text-[10px] text-[#A69F93] block">
+                                  Registrado por: <strong className="text-[#E6C687]">{v.cajero_nombre || 'Cajero'}</strong> • {v.creado_en ? new Date(v.creado_en).toLocaleTimeString('es-PA') : ''}
+                                </span>
+                              </div>
+                            </div>
+                            <span className="font-black text-emerald-400 text-xs shrink-0">+${cobro.toFixed(2)}</span>
+                          </div>
+                        );
+                      })}
+
+                      {/* Gastos del Turno */}
+                      {gastosEfectivoTurnoList.map((g) => (
+                        <div key={g.id || g.concepto} className="p-2 rounded-xl bg-[#13110F] border border-[#2D2822] flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-xs">🔻</span>
+                            <div className="min-w-0">
+                              <span className="font-bold text-rose-300 block text-[11px] truncate">
+                                Gasto: {g.concepto}
+                              </span>
+                              <span className="text-[10px] text-[#A69F93] block">
+                                Por: <strong className="text-white">{g.creado_por || 'Admin'}</strong> • {g.fecha ? new Date(g.fecha).toLocaleTimeString('es-PA') : ''}
+                              </span>
+                            </div>
+                          </div>
+                          <span className="font-black text-rose-400 text-xs shrink-0">-${Number(g.monto).toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Resumen numérico esperado */}
+                  <div className="bg-[#1A1816] p-3.5 rounded-2xl border border-[#26221E] space-y-2 text-xs">
+                    <div className="flex justify-between text-[#A69F93]">
+                      <span>Fondo Inicial:</span>
+                      <strong className="text-white">${fondoInicial.toFixed(2)}</strong>
+                    </div>
+                    <div className="flex justify-between text-emerald-400">
+                      <span>(+) Ventas Efectivo ({ventasEfectivoTurnoList.length}):</span>
+                      <strong>+${totalVentasEfectivo.toFixed(2)}</strong>
+                    </div>
+                    <div className="flex justify-between text-rose-400">
+                      <span>(-) Gastos del Turno ({gastosEfectivoTurnoList.length}):</span>
+                      <strong>-${totalGastosEfectivo.toFixed(2)}</strong>
+                    </div>
+                    <div className="pt-2 border-t border-[#26221E] flex justify-between font-black text-white">
+                      <span>Efectivo Esperado en Gaveta:</span>
+                      <span className="text-sm font-black text-[#E6C687]">${esperado.toFixed(2)} USD</span>
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleCerrarCajaSubmit} className="space-y-4 text-xs">
+                    <div>
+                      <label className="font-extrabold text-[#E6C687] block mb-1.5 uppercase tracking-wider text-[11px]">
+                        Dinero Real Contado en Gaveta (Efectivo) *
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-black text-[#A69F93] text-sm">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          required
+                          placeholder="0.00"
+                          value={montoCierreReal}
+                          onChange={(e) => setMontoCierreReal(e.target.value)}
+                          className="w-full bg-[#1A1816] pl-8 pr-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-rose-500 font-black text-base text-white placeholder-[#787168]"
+                        />
+                      </div>
+
+                      {/* Diferencia en tiempo real para Dueño/Admin */}
+                      {hasReal && (
+                        <div
+                          className={`mt-2.5 p-3 rounded-xl text-xs font-bold flex items-center justify-between border ${
+                            Math.abs(diferencia) < 0.01
+                              ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/60'
+                              : diferencia > 0
+                              ? 'bg-blue-950/40 text-blue-300 border-blue-800/60'
+                              : 'bg-rose-950/40 text-rose-300 border-rose-800/60'
+                          }`}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            {Math.abs(diferencia) < 0.01
+                              ? '✅ Cuadre Exacto'
+                              : diferencia > 0
+                              ? '🟢 Sobrante en Gaveta'
+                              : '🔴 Faltante en Gaveta'}
+                          </span>
+                          <span className="font-black text-sm">
+                            {diferencia >= 0 ? `+$${diferencia.toFixed(2)}` : `-$${Math.abs(diferencia).toFixed(2)}`}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="font-extrabold text-white block mb-1 text-[11px]">
+                        Observaciones o Notas de Cierre (opcional)
+                      </label>
+                      <textarea
+                        rows={2}
+                        placeholder="Ej: Justificación de billetes, cambio entregado a dueño..."
+                        value={notasCierreCaja}
+                        onChange={(e) => setNotasCierreCaja(e.target.value)}
+                        className="w-full bg-[#1A1816] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-rose-500 resize-none text-white placeholder-[#787168]"
+                      />
+                    </div>
+
+                    <div className="pt-2 flex items-center justify-end gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setIsModalCerrarCajaOpen(false)}
+                        className="px-4 py-2.5 rounded-xl text-[#A69F93] hover:text-white font-bold cursor-pointer transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isCajaSubmitting}
+                        className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black flex items-center gap-1.5 shadow-lg shadow-rose-950/40 disabled:opacity-50 cursor-pointer transition-all active:scale-95"
+                      >
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>{isCajaSubmitting ? 'Cerrando...' : 'GUARDAR CIERRE & ARQUEO'}</span>
+                      </button>
+                    </div>
+                  </form>
+                </>
+              )}
             </div>
           </div>
         );

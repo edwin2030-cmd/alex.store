@@ -823,6 +823,8 @@ export async function crearVentaManual(venta: {
   monto_abonado?: number;
   saldo_pendiente?: number;
   estado_pago?: 'completo' | 'abono_pendiente' | 'contra_entrega_pendiente';
+  cajero_nombre?: string;
+  registrado_por?: string;
   items: any[];
   tipo?: 'web' | 'manual';
   notas?: string;
@@ -846,6 +848,8 @@ export async function crearVentaManual(venta: {
         ? 'contra_entrega_pendiente'
         : 'completo');
 
+    const author = venta.cajero_nombre || venta.registrado_por || 'Cajero';
+
     const newVentaRecord: Venta = {
       id: `vnt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       codigo,
@@ -856,6 +860,8 @@ export async function crearVentaManual(venta: {
       monto_abonado: abonadoNum,
       saldo_pendiente: saldoPendiente,
       estado_pago: estadoPago,
+      cajero_nombre: author,
+      registrado_por: author,
       items: venta.items || [],
       tipo: venta.tipo || 'manual',
       notas: venta.notas?.trim() || null,
@@ -876,6 +882,7 @@ export async function crearVentaManual(venta: {
             monto_abonado: newVentaRecord.monto_abonado,
             saldo_pendiente: newVentaRecord.saldo_pendiente,
             estado_pago: newVentaRecord.estado_pago,
+            cajero_nombre: newVentaRecord.cajero_nombre,
             items: newVentaRecord.items,
             tipo: newVentaRecord.tipo,
             notas: newVentaRecord.notas,

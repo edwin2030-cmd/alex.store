@@ -134,6 +134,18 @@ export interface Pedido {
   actualizado_en?: string;
 }
 
+export interface VentaManualItem {
+  producto_id: string;
+  nombre: string;
+  cantidad: number;
+  precio: number;
+  subtotal: number;
+  imagen_url?: string;
+  talla?: string;
+  color?: string;
+  variante_titulo?: string;
+}
+
 export interface Venta {
   id?: string;
   codigo: string;
@@ -146,6 +158,8 @@ export interface Venta {
   monto_abonado?: number;
   saldo_pendiente?: number;
   estado_pago?: 'completo' | 'abono_pendiente' | 'contra_entrega_pendiente';
+  cajero_nombre?: string | null;
+  registrado_por?: string | null;
   items: any[];
   tipo: 'web' | 'manual';
   notas?: string | null;

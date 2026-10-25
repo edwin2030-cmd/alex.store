@@ -340,28 +340,28 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-fade-in">
-      <div className="relative w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-[#E5DFD5] overflow-hidden my-3 sm:my-6 max-h-[90dvh] flex flex-col">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-fade-in">
+      <div className="relative w-full max-w-3xl bg-[#13110F] text-white rounded-3xl shadow-2xl shadow-black/80 border border-[#26221E] overflow-hidden my-3 sm:my-6 max-h-[90dvh] flex flex-col">
         {/* Header */}
-        <div className="p-4 sm:p-7 border-b border-[#F0EAE1] flex items-start justify-between bg-[#FCFAF7] shrink-0">
+        <div className="p-4 sm:p-7 border-b border-[#26221E] flex items-start justify-between bg-[#1A1816]/70 shrink-0">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#C59A4D]" />
-              <span className="text-[10px] font-black uppercase tracking-widest text-[#9C9488]">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#E6C687]" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-[#E6C687]">
                 CATÁLOGO & INVENTARIO ALEXSTORE
               </span>
             </div>
-            <h2 className="text-xl sm:text-2xl font-extrabold text-[#1A1918] font-heading leading-tight">
+            <h2 className="text-xl sm:text-2xl font-extrabold text-white font-heading leading-tight">
               {isEditing ? 'Editar Producto & Variantes' : 'Nuevo Producto & Variantes'}
             </h2>
-            <p className="text-xs sm:text-sm text-[#7A7368] mt-1">
+            <p className="text-xs sm:text-sm text-[#A69F93] mt-1">
               Configura detalles, fotos, precios, atributos y combinaciones con control individual de existencias y SKU.
             </p>
           </div>
 
           <button
             onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-[#F2ECE1] text-[#7A7368] hover:text-[#1A1918] transition-colors"
+            className="p-1.5 rounded-full hover:bg-[#1A1816] text-[#A69F93] hover:text-white transition-colors cursor-pointer border border-transparent hover:border-[#38332B]"
           >
             <X className="w-5 h-5" />
           </button>
@@ -1141,11 +1141,11 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
           </div>
 
           {/* Footer actions */}
-          <div className="pt-4 border-t border-[#F0EAE1] flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5 sm:gap-3 sticky bottom-0 bg-white py-2">
+          <div className="pt-4 border-t border-[#26221E] flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5 sm:gap-3 sticky bottom-0 bg-[#13110F] py-2">
             <button
               type="button"
               onClick={onClose}
-              className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider text-[#7A7368] hover:text-[#1A1918] cursor-pointer text-center"
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider text-[#A69F93] hover:text-white cursor-pointer text-center transition-colors"
             >
               Cancelar
             </button>
@@ -1153,7 +1153,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
             <button
               type="submit"
               disabled={isSubmitting || uploadingImage}
-              className="w-full sm:w-auto px-7 py-3 rounded-2xl bg-[#141312] hover:bg-black text-[#F5E6BE] font-extrabold text-xs tracking-wider uppercase transition-all shadow-lg active:scale-98 disabled:opacity-50 cursor-pointer text-center justify-center"
+              className="w-full sm:w-auto px-7 py-3 rounded-2xl bg-gradient-to-r from-[#D4AF37] to-[#AA7C11] text-black font-extrabold text-xs tracking-wider uppercase transition-all shadow-lg active:scale-98 disabled:opacity-50 cursor-pointer text-center justify-center hover:brightness-110"
             >
               {isSubmitting
                 ? 'Guardando...'

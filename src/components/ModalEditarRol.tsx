@@ -73,39 +73,39 @@ export const ModalEditarRol: React.FC<ModalEditarRolProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-md">
       <div className="min-h-full flex items-center justify-center p-3 sm:p-4 py-8">
-        <div className="relative w-full max-w-md bg-white rounded-3xl p-4 sm:p-8 shadow-2xl border border-[#E5DFD5] space-y-5 sm:space-y-6 my-auto animate-fade-in max-h-[92dvh] overflow-y-auto">
+        <div className="relative w-full max-w-md bg-[#13110F] rounded-3xl p-4 sm:p-8 shadow-2xl shadow-black/80 border border-[#26221E] space-y-5 sm:space-y-6 my-auto animate-fade-in max-h-[92dvh] overflow-y-auto text-white">
           {/* Header */}
-          <div className="flex items-start justify-between pb-4 border-b border-[#F0EAE1]">
+          <div className="flex items-start justify-between pb-4 border-b border-[#26221E]">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-[#141312] text-[#E6C687] flex items-center justify-center">
+              <div className="w-10 h-10 rounded-2xl bg-[#1A1816] border border-[#38332B] text-[#E6C687] flex items-center justify-center">
                 <Shield className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-black text-lg text-[#1A1918]">Modificar Privilegios</h3>
-                <span className="text-xs text-[#7A7368] font-mono">{targetUser.email}</span>
+                <h3 className="font-black text-lg text-white">Modificar Privilegios</h3>
+                <span className="text-xs text-[#A69F93] font-mono">{targetUser.email}</span>
               </div>
             </div>
 
             <button
               onClick={onClose}
-              className="p-1.5 rounded-full hover:bg-[#F2ECE1] text-[#7A7368] hover:text-[#1A1918] transition-colors cursor-pointer"
+              className="p-1.5 rounded-full hover:bg-[#1A1816] text-[#A69F93] hover:text-white transition-colors cursor-pointer border border-transparent hover:border-[#38332B]"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
           {errorMsg && (
-            <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2.5">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <div className="p-3.5 rounded-2xl bg-rose-950/40 border border-rose-850/60 text-rose-300 text-xs flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
               <span>{errorMsg}</span>
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="text-xs font-bold text-[#1A1918] block mb-1.5">
+              <label className="text-xs font-bold text-[#E6C687] block mb-1.5">
                 Nombre del Usuario
               </label>
               <input
@@ -113,12 +113,12 @@ export const ModalEditarRol: React.FC<ModalEditarRolProps> = ({
                 required
                 value={nombre}
                 onChange={(e) => setNombre(e.target.value)}
-                className="w-full bg-[#FCFAF7] text-sm text-[#1A1918] px-4 py-2.5 rounded-2xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                className="w-full bg-[#1A1816] text-sm text-white px-4 py-2.5 rounded-2xl border border-[#38332B] focus:outline-none focus:border-[#E6C687]"
               />
             </div>
 
             <div>
-              <label className="text-xs font-bold text-[#1A1918] block mb-1.5">
+              <label className="text-xs font-bold text-[#E6C687] block mb-1.5">
                 Rol Asignado
               </label>
 
@@ -126,7 +126,7 @@ export const ModalEditarRol: React.FC<ModalEditarRolProps> = ({
                 <label
                   onClick={() => setRol('cajero')}
                   className={`flex items-start gap-3 p-3 rounded-2xl border cursor-pointer transition-colors ${
-                    rol === 'cajero' ? 'border-emerald-600 bg-emerald-50/70' : 'border-[#E5DFD5] bg-[#FCFAF7]'
+                    rol === 'cajero' ? 'border-emerald-500 bg-emerald-950/30' : 'border-[#26221E] bg-[#1A1816]'
                   }`}
                 >
                   <input
@@ -134,11 +134,11 @@ export const ModalEditarRol: React.FC<ModalEditarRolProps> = ({
                     name="role_radio"
                     checked={rol === 'cajero'}
                     onChange={() => setRol('cajero')}
-                    className="mt-1 accent-emerald-600"
+                    className="mt-1 accent-emerald-500"
                   />
                   <div>
-                    <strong className="text-xs text-[#1A1918] block">Trabajador o Cajero</strong>
-                    <span className="text-[11px] text-[#7A7368]">
+                    <strong className="text-xs text-white block">Trabajador o Cajero</strong>
+                    <span className="text-[11px] text-[#A69F93]">
                       Productos, Inventario, Pedidos, Clientes y Categorías.
                     </span>
                   </div>
@@ -148,7 +148,7 @@ export const ModalEditarRol: React.FC<ModalEditarRolProps> = ({
                   <label
                     onClick={() => setRol('dueno')}
                     className={`flex items-start gap-3 p-3 rounded-2xl border cursor-pointer transition-colors ${
-                      rol === 'dueno' ? 'border-[#C59A4D] bg-[#FCFAF5]' : 'border-[#E5DFD5] bg-[#FCFAF7]'
+                      rol === 'dueno' ? 'border-[#E6C687] bg-[#E6C687]/10' : 'border-[#26221E] bg-[#1A1816]'
                     }`}
                   >
                     <input
@@ -159,8 +159,8 @@ export const ModalEditarRol: React.FC<ModalEditarRolProps> = ({
                       className="mt-1 accent-[#C59A4D]"
                     />
                     <div>
-                      <strong className="text-xs text-[#1A1918] block">Dueño del Negocio</strong>
-                      <span className="text-[11px] text-[#7A7368]">
+                      <strong className="text-xs text-white block">Dueño del Negocio</strong>
+                      <span className="text-[11px] text-[#A69F93]">
                         Acceso total sin restricciones a todos los módulos y usuarios.
                       </span>
                     </div>
@@ -169,10 +169,10 @@ export const ModalEditarRol: React.FC<ModalEditarRolProps> = ({
               </div>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-[#FCFAF7] border border-[#E5DFD5] flex items-center justify-between">
+            <div className="p-3.5 rounded-2xl bg-[#1A1816] border border-[#26221E] flex items-center justify-between">
               <div>
-                <span className="font-extrabold text-xs text-[#1A1918] block">Estado de Acceso</span>
-                <span className="text-[11px] text-[#7A7368]">
+                <span className="font-extrabold text-xs text-white block">Estado de Acceso</span>
+                <span className="text-[11px] text-[#A69F93]">
                   {activo ? 'Cuenta activa con acceso al panel' : 'Cuenta bloqueada / suspendida'}
                 </span>
               </div>
@@ -181,22 +181,22 @@ export const ModalEditarRol: React.FC<ModalEditarRolProps> = ({
                 checked={activo}
                 disabled={targetUser.rol === 'dueno' && currentUser.id === targetUser.id}
                 onChange={(e) => setActivo(e.target.checked)}
-                className="w-5 h-5 accent-emerald-600 rounded cursor-pointer disabled:opacity-30"
+                className="w-5 h-5 accent-emerald-500 rounded cursor-pointer disabled:opacity-30"
               />
             </div>
 
-            <div className="pt-3 border-t border-[#F0EAE1] flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-2.5">
+            <div className="pt-3 border-t border-[#26221E] flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-2.5">
               <button
                 type="button"
                 onClick={onClose}
-                className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold text-[#7A7368] hover:text-[#1A1918] cursor-pointer text-center"
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold text-[#A69F93] hover:text-white cursor-pointer text-center transition-colors"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-[#141312] hover:bg-black text-[#E6C687] text-xs font-black uppercase tracking-wider disabled:opacity-50 cursor-pointer shadow-sm text-center justify-center"
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#AA7C11] text-black text-xs font-black uppercase tracking-wider disabled:opacity-50 cursor-pointer shadow-md text-center justify-center hover:brightness-110 active:scale-95"
               >
                 {loading ? 'Guardando...' : 'Guardar Cambios'}
               </button>

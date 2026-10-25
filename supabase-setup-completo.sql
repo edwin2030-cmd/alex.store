@@ -151,7 +151,7 @@ END $$;
 
 ALTER TABLE public.pedidos ENABLE ROW LEVEL SECURITY;
 
--- 5. TABLA DE VENTAS Y FACTURACIÓN
+-- 5. TABLA DE VENTAS Y FACTURACIÓN (CON SOPORTE PARA ABONOS Y CAJERO)
 CREATE TABLE IF NOT EXISTS public.ventas (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   codigo TEXT NOT NULL UNIQUE,
@@ -160,11 +160,32 @@ CREATE TABLE IF NOT EXISTS public.ventas (
   cliente_telefono TEXT,
   metodo_pago TEXT NOT NULL,
   total NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+  monto_abonado NUMERIC(12, 2) DEFAULT 0.00,
+  saldo_pendiente NUMERIC(12, 2) DEFAULT 0.00,
+  estado_pago TEXT DEFAULT 'completado',
+  cajero_nombre TEXT,
   items JSONB NOT NULL DEFAULT '[]'::jsonb,
   tipo TEXT NOT NULL DEFAULT 'web',
   notas TEXT,
   creado_en TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Asegurar columnas si la tabla ya existía
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ventas' AND column_name='monto_abonado') THEN
+    ALTER TABLE public.ventas ADD COLUMN monto_abonado NUMERIC(12, 2) DEFAULT 0.00;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ventas' AND column_name='saldo_pendiente') THEN
+    ALTER TABLE public.ventas ADD COLUMN saldo_pendiente NUMERIC(12, 2) DEFAULT 0.00;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ventas' AND column_name='estado_pago') THEN
+    ALTER TABLE public.ventas ADD COLUMN estado_pago TEXT DEFAULT 'completado';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ventas' AND column_name='cajero_nombre') THEN
+    ALTER TABLE public.ventas ADD COLUMN cajero_nombre TEXT;
+  END IF;
+END $$;
 
 ALTER TABLE public.ventas ENABLE ROW LEVEL SECURITY;
 
@@ -181,6 +202,48 @@ CREATE TABLE IF NOT EXISTS public.gastos (
 );
 
 ALTER TABLE public.gastos ENABLE ROW LEVEL SECURITY;
+
+-- 6.1 TABLA DE REGISTROS DE CAJA Y ARQUEOS DE TURNO
+CREATE TABLE IF NOT EXISTS public.registros_caja (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  usuario_id TEXT,
+  abierto_por TEXT NOT NULL,
+  cerrado_por TEXT,
+  monto_inicial NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+  monto_final_real NUMERIC(12, 2),
+  monto_esperado NUMERIC(12, 2),
+  diferencia NUMERIC(12, 2),
+  estado TEXT NOT NULL DEFAULT 'abierta' CHECK (estado IN ('abierta', 'cerrada')),
+  fecha_apertura TIMESTAMPTZ NOT NULL DEFAULT now(),
+  fecha_cierre TIMESTAMPTZ,
+  notas TEXT,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.registros_caja ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Acceso total registros_caja" ON public.registros_caja;
+CREATE POLICY "Acceso total registros_caja" ON public.registros_caja FOR ALL USING (true);
+
+-- 6.2 TABLA DE AUDITORÍA Y MOVIMIENTOS DE TRABAJADORES
+CREATE TABLE IF NOT EXISTS public.movimientos_trabajadores (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  usuario_id TEXT,
+  usuario_nombre TEXT NOT NULL,
+  usuario_email TEXT NOT NULL,
+  rol TEXT NOT NULL DEFAULT 'cajero',
+  accion TEXT NOT NULL,
+  modulo TEXT DEFAULT 'general',
+  detalles TEXT,
+  ip_address TEXT,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.movimientos_trabajadores ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Acceso total movimientos_trabajadores" ON public.movimientos_trabajadores;
+CREATE POLICY "Acceso total movimientos_trabajadores" ON public.movimientos_trabajadores FOR ALL USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_movimientos_usuario_email ON public.movimientos_trabajadores (usuario_email);
+CREATE INDEX IF NOT EXISTS idx_movimientos_creado_en ON public.movimientos_trabajadores (creado_en DESC);
 
 -- ==============================================================================
 -- 7. SUPABASE STORAGE: BUCKET 'comprobantes'
