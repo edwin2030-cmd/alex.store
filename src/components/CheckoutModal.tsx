@@ -326,8 +326,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         `   • *Cantidad:* ${item.cantidad} ${item.cantidad === 1 ? 'unidad' : 'unidades'}\n` +
         `   • *Precio Unitario:* $${item.precio.toFixed(2)} USD\n` +
         `   • *Subtotal Artículo:* $${(item.cantidad * item.precio).toFixed(2)} USD`;
-      if (item.imagen_url && item.imagen_url.startsWith('http')) {
-        itemBlock += `\n   • *Foto del producto:* ${item.imagen_url}`;
+      const imgLink = item.imagen_url || (item as any).producto?.imagen_url;
+      if (imgLink) {
+        itemBlock += `\n   • *Foto del producto:* ${imgLink}`;
       }
       lineas.push(itemBlock);
     });
@@ -1033,20 +1034,22 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   </div>
                 </div>
 
-                {/* Dirección de Entrega */}
-                <div>
-                  <label className="text-xs font-bold text-[#1A1918] flex items-center gap-1.5 mb-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-[#C59A4D]" />
-                    <span>Dirección de Entrega / Provincia (opcional)</span>
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ej: Ciudad de Panamá, Betania, Calle 3ra, Casa 12"
-                    value={direccion}
-                    onChange={(e) => setDireccion(e.target.value)}
-                    className="w-full bg-[#FCFAF7] text-sm text-[#1A1918] placeholder-[#9C9488] px-4 py-3 rounded-2xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] focus:bg-white focus:ring-2 focus:ring-[#C59A4D]/20 transition-all shadow-inner font-medium"
-                  />
-                </div>
+                {/* Dirección de Entrega (solo requerida para Transferencia y Yappy, no para pedido rápido WhatsApp) */}
+                {metodoPago !== 'whatsapp' && (
+                  <div>
+                    <label className="text-xs font-bold text-[#1A1918] flex items-center gap-1.5 mb-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-[#C59A4D]" />
+                      <span>Dirección de Entrega / Provincia (opcional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Ciudad de Panamá, Betania, Calle 3ra, Casa 12"
+                      value={direccion}
+                      onChange={(e) => setDireccion(e.target.value)}
+                      className="w-full bg-[#FCFAF7] text-sm text-[#1A1918] placeholder-[#9C9488] px-4 py-3 rounded-2xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] focus:bg-white focus:ring-2 focus:ring-[#C59A4D]/20 transition-all shadow-inner font-medium"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* SECCIÓN 3: INSTRUCCIONES DE PAGO ESPECÍFICAS (YAPPY O TRANSFERENCIA) */}
@@ -1297,169 +1300,171 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 )}
               </div>
 
-              {/* SECCIÓN 4: COMPROBANTE DE PAGO (PREVISUALIZAR Y CAMBIAR IMAGEN) */}
-              <div className="space-y-3 pt-1">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-black uppercase tracking-wider text-[#1A1918] flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-full bg-[#1A1918] text-white text-[10px] font-black flex items-center justify-center">
-                      4
+              {/* SECCIÓN 4: COMPROBANTE DE PAGO (SOLO PARA YAPPY O TRANSFERENCIA, NO PARA WHATSAPP) */}
+              {metodoPago !== 'whatsapp' && (
+                <div className="space-y-3 pt-1">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-[#1A1918] flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-[#1A1918] text-white text-[10px] font-black flex items-center justify-center">
+                        4
+                      </span>
+                      COMPROBANTE O CAPTURA DE PAGO
+                    </h3>
+                    <span className="text-[10px] text-[#9C9488] font-bold">
+                      JPG, PNG o WEBP
                     </span>
-                    {metodoPago === 'whatsapp' ? 'COMPROBANTE O REFERENCIA (OPCIONAL)' : 'COMPROBANTE O CAPTURA DE PAGO'}
-                  </h3>
-                  <span className="text-[10px] text-[#9C9488] font-bold">
-                    {metodoPago === 'whatsapp' ? 'Opcional' : 'JPG, PNG o WEBP'}
-                  </span>
-                </div>
+                  </div>
 
-                {/* Si ya hay imagen montada -> MOSTRARLA CLARAMENTE Y PERMITIR CAMBIARLA O QUITARLA */}
-                {comprobantePreview ? (
-                  <div className="rounded-2xl border-2 border-[#C59A4D] bg-[#FCFBF8] p-4 sm:p-5 space-y-4 shadow-sm animate-fade-in">
-                    {/* Header de la imagen cargada */}
-                    <div className="flex items-center justify-between flex-wrap gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center">
-                          <Check className="w-3.5 h-3.5 stroke-[3]" />
-                        </span>
-                        <div>
-                          <span className="font-extrabold text-xs text-[#1A1918] block">
-                            Comprobante montado correctamente
+                  {/* Si ya hay imagen montada -> MOSTRARLA CLARAMENTE Y PERMITIR CAMBIARLA O QUITARLA */}
+                  {comprobantePreview ? (
+                    <div className="rounded-2xl border-2 border-[#C59A4D] bg-[#FCFBF8] p-4 sm:p-5 space-y-4 shadow-sm animate-fade-in">
+                      {/* Header de la imagen cargada */}
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center">
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
                           </span>
-                          <span className="text-[11px] text-[#7A7368]">
-                            {comprobanteFile ? comprobanteFile.name : 'Captura adjunta'}
-                            {comprobanteFile && ` • ${(comprobanteFile.size / 1024).toFixed(0)} KB`}
-                          </span>
+                          <div>
+                            <span className="font-extrabold text-xs text-[#1A1918] block">
+                              Comprobante montado correctamente
+                            </span>
+                            <span className="text-[11px] text-[#7A7368]">
+                              {comprobanteFile ? comprobanteFile.name : 'Captura adjunta'}
+                              {comprobanteFile && ` • ${(comprobanteFile.size / 1024).toFixed(0)} KB`}
+                            </span>
+                          </div>
                         </div>
-                      </div>
 
-                      {/* Botones de acción: Cambiar o Eliminar */}
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={handleTriggerFileInput}
-                          className="px-3 py-1.5 rounded-xl bg-white hover:bg-[#FAF8F5] border border-[#DDD7CC] hover:border-[#1A1918] text-[#1A1918] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                          title="Elegir otra imagen"
-                        >
-                          <RefreshCw className="w-3.5 h-3.5 text-[#C59A4D]" />
-                          <span>Cambiar imagen</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={handleRemoveImage}
-                          className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                          title="Eliminar esta foto"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Quitar</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Contenedor de la Imagen con zoom preview */}
-                    <div className="relative group bg-[#141312] rounded-xl overflow-hidden border border-[#E5DFD5] flex items-center justify-center p-2 min-h-[180px] max-h-[300px]">
-                      <img
-                        src={comprobantePreview}
-                        alt="Comprobante montado"
-                        className="max-h-[280px] w-auto max-w-full object-contain rounded-lg shadow-md cursor-pointer group-hover:opacity-95 transition-opacity"
-                        onClick={() => setIsZoomingImage(true)}
-                      />
-
-                      {/* Botón flotante para ver en grande */}
-                      <button
-                        type="button"
-                        onClick={() => setIsZoomingImage(true)}
-                        className="absolute bottom-3 right-3 px-3 py-1.5 rounded-lg bg-black/70 hover:bg-black text-white text-[11px] font-bold flex items-center gap-1.5 backdrop-blur-sm transition-all cursor-pointer"
-                      >
-                        <Maximize2 className="w-3.5 h-3.5" />
-                        <span>Ver en grande</span>
-                      </button>
-                    </div>
-
-                    {/* Public link status badge & copy */}
-                    {isUploadingProof ? (
-                      <div className="flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold animate-pulse">
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
-                        <span>Subiendo foto a la nube y generando link público...</span>
-                      </div>
-                    ) : comprobantePublicUrl ? (
-                      <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="font-extrabold text-emerald-950 flex items-center gap-1.5 text-[11px]">
-                            <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
-                            Enlace público listo para WhatsApp:
-                          </span>
+                        {/* Botones de acción: Cambiar o Eliminar */}
+                        <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => handleCopy(comprobantePublicUrl, 'comprobante_ready_link')}
-                            className="px-2 py-0.5 rounded-lg bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 font-bold text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
+                            onClick={handleTriggerFileInput}
+                            className="px-3 py-1.5 rounded-xl bg-white hover:bg-[#FAF8F5] border border-[#DDD7CC] hover:border-[#1A1918] text-[#1A1918] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                            title="Elegir otra imagen"
                           >
-                            {copiedField === 'comprobante_ready_link' ? (
-                              <Check className="w-3 h-3 text-emerald-600" />
-                            ) : (
-                              <Copy className="w-3 h-3" />
-                            )}
-                            <span>Copiar</span>
+                            <RefreshCw className="w-3.5 h-3.5 text-[#C59A4D]" />
+                            <span>Cambiar imagen</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleRemoveImage}
+                            className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                            title="Eliminar esta foto"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Quitar</span>
                           </button>
                         </div>
-                        <a
-                          href={comprobantePublicUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-emerald-700 underline text-[11px] font-mono break-all block hover:text-emerald-900"
-                        >
-                          {comprobantePublicUrl}
-                        </a>
                       </div>
-                    ) : null}
 
-                    <p className="text-[11px] text-[#7A7368] text-center">
-                      El comprobante como enlace web y el pedido detallado se enviarán juntos en el chat oficial de WhatsApp <strong>66212802</strong>.
-                    </p>
-                  </div>
-                ) : (
-                  /* DROPZONE CUANDO NO HAY IMAGEN */
-                  <div
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    onClick={handleTriggerFileInput}
-                    className={`relative border-2 border-dashed rounded-2xl p-6 sm:p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all ${
-                      isDragging
-                        ? 'border-[#0284C7] bg-[#E0F2FE]'
-                        : 'border-[#DDD7CC] hover:border-[#C59A4D] bg-[#FAF8F5]/80 hover:bg-[#FAF8F5]'
-                    }`}
-                  >
-                    <div className="w-12 h-12 rounded-2xl bg-white border border-[#E5DFD5] flex items-center justify-center text-[#8C8375] shadow-xs mb-2.5">
-                      <UploadCloud className="w-6 h-6 stroke-[1.8] text-[#C59A4D]" />
+                      {/* Contenedor de la Imagen con zoom preview */}
+                      <div className="relative group bg-[#141312] rounded-xl overflow-hidden border border-[#E5DFD5] flex items-center justify-center p-2 min-h-[180px] max-h-[300px]">
+                        <img
+                          src={comprobantePreview}
+                          alt="Comprobante montado"
+                          className="max-h-[280px] w-auto max-w-full object-contain rounded-lg shadow-md cursor-pointer group-hover:opacity-95 transition-opacity"
+                          onClick={() => setIsZoomingImage(true)}
+                        />
+
+                        {/* Botón flotante para ver en grande */}
+                        <button
+                          type="button"
+                          onClick={() => setIsZoomingImage(true)}
+                          className="absolute bottom-3 right-3 px-3 py-1.5 rounded-lg bg-black/70 hover:bg-black text-white text-[11px] font-bold flex items-center gap-1.5 backdrop-blur-sm transition-all cursor-pointer"
+                        >
+                          <Maximize2 className="w-3.5 h-3.5" />
+                          <span>Ver en grande</span>
+                        </button>
+                      </div>
+
+                      {/* Public link status badge & copy */}
+                      {isUploadingProof ? (
+                        <div className="flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold animate-pulse">
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                          <span>Subiendo foto a la nube y generando link público...</span>
+                        </div>
+                      ) : comprobantePublicUrl ? (
+                        <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-extrabold text-emerald-950 flex items-center gap-1.5 text-[11px]">
+                              <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
+                              Enlace público listo para WhatsApp:
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(comprobantePublicUrl, 'comprobante_ready_link')}
+                              className="px-2 py-0.5 rounded-lg bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 font-bold text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
+                            >
+                              {copiedField === 'comprobante_ready_link' ? (
+                                <Check className="w-3 h-3 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3 h-3" />
+                              )}
+                              <span>Copiar</span>
+                            </button>
+                          </div>
+                          <a
+                            href={comprobantePublicUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-emerald-700 underline text-[11px] font-mono break-all block hover:text-emerald-900"
+                          >
+                            {comprobantePublicUrl}
+                          </a>
+                        </div>
+                      ) : null}
+
+                      <p className="text-[11px] text-[#7A7368] text-center">
+                        El comprobante como enlace web y el pedido detallado se enviarán juntos en el chat oficial de WhatsApp <strong>66212802</strong>.
+                      </p>
                     </div>
+                  ) : (
+                    /* DROPZONE CUANDO NO HAY IMAGEN */
+                    <div
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onClick={handleTriggerFileInput}
+                      className={`relative border-2 border-dashed rounded-2xl p-6 sm:p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all ${
+                        isDragging
+                          ? 'border-[#0284C7] bg-[#E0F2FE]'
+                          : 'border-[#DDD7CC] hover:border-[#C59A4D] bg-[#FAF8F5]/80 hover:bg-[#FAF8F5]'
+                      }`}
+                    >
+                      <div className="w-12 h-12 rounded-2xl bg-white border border-[#E5DFD5] flex items-center justify-center text-[#8C8375] shadow-xs mb-2.5">
+                        <UploadCloud className="w-6 h-6 stroke-[1.8] text-[#C59A4D]" />
+                      </div>
 
-                    <span className="text-xs sm:text-sm font-extrabold text-[#1A1918]">
-                      Toca aquí para seleccionar la foto o captura del comprobante
-                    </span>
-                    <span className="text-[11px] text-[#7A7368] mt-1">
-                      O arrastra la imagen aquí o pégala directamente con Ctrl+V
-                    </span>
-                    <span className="text-[10px] text-[#9C9488] mt-2 font-bold bg-white px-2.5 py-0.5 rounded-full border border-[#E5DFD5]">
-                      Admite JPG, PNG y WEBP
-                    </span>
+                      <span className="text-xs sm:text-sm font-extrabold text-[#1A1918]">
+                        Toca aquí para seleccionar la foto o captura del comprobante
+                      </span>
+                      <span className="text-[11px] text-[#7A7368] mt-1">
+                        O arrastra la imagen aquí o pégala directamente con Ctrl+V
+                      </span>
+                      <span className="text-[10px] text-[#9C9488] mt-2 font-bold bg-white px-2.5 py-0.5 rounded-full border border-[#E5DFD5]">
+                        Admite JPG, PNG y WEBP
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Nota o aclaración opcional */}
+                  <div className="pt-1">
+                    <label className="text-[11px] font-bold text-[#5A554D] flex items-center gap-1.5 mb-1">
+                      <FileText className="w-3.5 h-3.5 text-[#9C9488]" />
+                      <span>Nota o aclaración para AlexStore (opcional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Favor coordinar entrega para la tarde o llamar al llegar"
+                      value={nota}
+                      onChange={(e) => setNota(e.target.value)}
+                      className="w-full bg-[#FCFAF7] text-xs text-[#1A1918] placeholder-[#9C9488] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] focus:bg-white transition-all font-medium"
+                    />
                   </div>
-                )}
-
-                {/* Nota o aclaración opcional */}
-                <div className="pt-1">
-                  <label className="text-[11px] font-bold text-[#5A554D] flex items-center gap-1.5 mb-1">
-                    <FileText className="w-3.5 h-3.5 text-[#9C9488]" />
-                    <span>Nota o aclaración para AlexStore (opcional)</span>
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ej: Favor coordinar entrega para la tarde o llamar al llegar"
-                    value={nota}
-                    onChange={(e) => setNota(e.target.value)}
-                    className="w-full bg-[#FCFAF7] text-xs text-[#1A1918] placeholder-[#9C9488] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] focus:bg-white transition-all font-medium"
-                  />
                 </div>
-              </div>
+              )}
 
               {/* SECCIÓN 5: RESUMEN DETALLADO ANTES DE FINALIZAR */}
               <div className="space-y-3 pt-2">

@@ -155,7 +155,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       .map(([k, v]) => `${k}: ${v}`)
       .join(', ');
     const variantInfo = optText ? ` (Opciones: ${optText})` : '';
-    const text = `¡Hola AlexStore! 👋 Estoy interesado en el producto: *${producto.nombre}*${variantInfo} - Precio: $${precioUnitario.toFixed(2)}. ¿Tienen disponibilidad para entrega inmediata?`;
+    const imgUrl = producto.imagen_url || (producto.imagenes && producto.imagenes[0]) || '';
+    const fotoText = imgUrl ? `\n📸 *Foto del producto:* ${imgUrl}` : '';
+    const text = `¡Hola AlexStore! 👋 Estoy interesado en el producto: *${producto.nombre}*${variantInfo} - Precio: $${precioUnitario.toFixed(2)}.${fotoText}\n¿Tienen disponibilidad para entrega inmediata?`;
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
   };
 

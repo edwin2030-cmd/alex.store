@@ -1,6 +1,6 @@
 import React from 'react';
 import { ItemCarrito } from '../types';
-import { X, Trash2, Plus, Minus, ShoppingBag, Landmark, Smartphone, Phone, ArrowRight } from 'lucide-react';
+import { X, Trash2, Plus, Minus, ShoppingBag, Landmark, Smartphone, Phone, ArrowRight, MessageCircle } from 'lucide-react';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -9,7 +9,7 @@ interface CartDrawerProps {
   onUpdateCantidad: (index: number, delta: number) => void;
   onRemoveItem: (index: number) => void;
   onClearCart: () => void;
-  onProceedToCheckout: (method?: 'transferencia' | 'yappy') => void;
+  onProceedToCheckout: (method?: 'transferencia' | 'yappy' | 'whatsapp') => void;
 }
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({
@@ -208,6 +208,15 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   </button>
                 </div>
 
+                {/* Botón directo Pedir por WhatsApp sin comprobante */}
+                <button
+                  onClick={() => onProceedToCheckout('whatsapp')}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white p-3 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-98"
+                >
+                  <MessageCircle className="w-4 h-4 fill-current" />
+                  <span>PEDIR POR WHATSAPP (SOLO NOMBRE Y TELÉFONO)</span>
+                </button>
+
                 <p className="text-[10px] sm:text-[11px] text-[#7A7368] leading-relaxed pt-0.5">
                   Al confirmar el pago obtendrás tu <strong className="text-[#1A1918]">Recibo Oficial</strong> y podrás enviarlo con el comprobante adjunto directamente al WhatsApp oficial <strong className="text-[#1A1918]">66212802</strong>.
                 </p>
@@ -229,7 +238,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
           {/* Footer Checkout Summary */}
           {items.length > 0 && (
-            <div className="p-4 sm:p-6 pb-6 sm:pb-6 border-t border-[#EFEAE2] bg-[#FAF8F5] space-y-3 sm:space-y-4 pb-safe">
+            <div className="p-4 sm:p-6 pb-6 sm:pb-6 border-t border-[#EFEAE2] bg-[#FAF8F5] space-y-2.5 pb-safe">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] sm:text-xs font-black tracking-wider uppercase text-[#7A7368]">
                   TOTAL DEL PEDIDO
@@ -239,13 +248,23 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 </span>
               </div>
 
-              <button
-                onClick={() => onProceedToCheckout()}
-                className="w-full py-3.5 sm:py-4 px-3 rounded-2xl bg-[#141312] hover:bg-black text-white font-extrabold text-[10px] sm:text-xs tracking-wider uppercase flex items-center justify-center gap-2 shadow-xl transition-all active:scale-98 cursor-pointer text-center leading-tight"
-              >
-                <Landmark className="w-4 h-4 text-[#E6C687] shrink-0" />
-                <span>FINALIZAR PEDIDO (TRANSFERENCIA / YAPPY)</span>
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  onClick={() => onProceedToCheckout('whatsapp')}
+                  className="w-full py-3 px-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] tracking-wider uppercase flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-98 cursor-pointer text-center"
+                >
+                  <MessageCircle className="w-4 h-4 fill-current shrink-0" />
+                  <span>PEDIR POR WHATSAPP</span>
+                </button>
+
+                <button
+                  onClick={() => onProceedToCheckout('transferencia')}
+                  className="w-full py-3 px-3 rounded-2xl bg-[#141312] hover:bg-black text-white font-extrabold text-[11px] tracking-wider uppercase flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-98 cursor-pointer text-center"
+                >
+                  <Landmark className="w-3.5 h-3.5 text-[#E6C687] shrink-0" />
+                  <span>TRANSFERENCIA / YAPPY</span>
+                </button>
+              </div>
             </div>
           )}
         </div>

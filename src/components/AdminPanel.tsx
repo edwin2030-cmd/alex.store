@@ -33,7 +33,10 @@ import {
   crearVentaManual,
   liquidarSaldoVenta,
   eliminarPedido,
+  eliminarTodosLosPedidos,
   eliminarVenta,
+  eliminarTodasLasVentas,
+  eliminarVentasPorIds,
   eliminarCliente,
   getMovimientosTrabajadores,
   registrarMovimiento,
@@ -44,6 +47,8 @@ import {
   getHistorialCaja,
   abrirCaja,
   cerrarCaja,
+  eliminarTodosLosGastos,
+  eliminarGastosPorIds,
 } from '../lib/supabase';
 import {
   ROLE_PERMISSIONS,
@@ -248,6 +253,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Clientes filter
   const [clienteSearch, setClienteSearch] = useState('');
 
+  // Zoom de fotos de productos
+  const [zoomedProductImage, setZoomedProductImage] = useState<{
+    url: string;
+    title: string;
+    subtitle?: string;
+  } | null>(null);
+
+  // Cliente seleccionado para ver historial de pedidos
+  const [clienteSeleccionadoParaPedidos, setClienteSeleccionadoParaPedidos] = useState<ClienteResumen | null>(null);
+
+  // Filtros de fecha y período para Ventas
+  const [ventasFiltroPeriodo, setVentasFiltroPeriodo] = useState<'todos' | 'hoy' | 'mes' | 'ano' | 'rango'>('todos');
+  const [ventasFechaExacta, setVentasFechaExacta] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [ventasMesExacto, setVentasMesExacto] = useState<string>(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [ventasAnoExacto, setVentasAnoExacto] = useState<string>(() => String(new Date().getFullYear()));
+  const [ventasFechaDesde, setVentasFechaDesde] = useState<string>('');
+  const [ventasFechaHasta, setVentasFechaHasta] = useState<string>('');
+
+  // Filtro de fecha para Movimientos
+  const [movimientosFechaFilter, setMovimientosFechaFilter] = useState<string>('');
+
   const reloadAllData = async () => {
     setLoading(true);
     try {
@@ -450,6 +479,85 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     if (confirm(`¿Estás seguro de eliminar la categoría "${nombre}"?`)) {
       await eliminarCategoria(id);
       await reloadAllData();
+    }
+  };
+
+  const handleVaciarPedidos = async () => {
+    if (!confirm('⚠️ ¿Estás seguro de que deseas ELIMINAR TODOS los pedidos de Supabase? Esta acción no se puede deshacer.')) return;
+    setLoading(true);
+    try {
+      await eliminarTodosLosPedidos();
+      await reloadAllData();
+      setUserFeedback({ type: 'success', msg: '✅ Todos los pedidos han sido eliminados de Supabase.' });
+      setTimeout(() => setUserFeedback(null), 4000);
+    } catch (e: any) {
+      alert('Error eliminando pedidos: ' + e?.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVaciarVentas = async () => {
+    if (!confirm('⚠️ ¿Estás seguro de que deseas ELIMINAR TODAS las ventas registradas de Supabase?')) return;
+    setLoading(true);
+    try {
+      await eliminarTodasLasVentas();
+      await reloadAllData();
+      setUserFeedback({ type: 'success', msg: '✅ Todas las ventas han sido eliminadas de Supabase.' });
+      setTimeout(() => setUserFeedback(null), 4000);
+    } catch (e: any) {
+      alert('Error eliminando ventas: ' + e?.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEliminarVentasFiltradas = async (ventasABorrar: Venta[]) => {
+    if (ventasABorrar.length === 0) return;
+    if (!confirm(`⚠️ ¿Deseas eliminar permanentemente las ${ventasABorrar.length} venta(s) filtradas del período seleccionado de Supabase?`)) return;
+    setLoading(true);
+    try {
+      const ids = ventasABorrar.map((v) => v.id || v.codigo);
+      await eliminarVentasPorIds(ids);
+      await reloadAllData();
+      setUserFeedback({ type: 'success', msg: `✅ Se eliminaron ${ventasABorrar.length} ventas de Supabase.` });
+      setTimeout(() => setUserFeedback(null), 4000);
+    } catch (e: any) {
+      alert('Error eliminando ventas filtradas: ' + e?.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVaciarGastos = async () => {
+    if (!confirm('⚠️ ¿Estás seguro de que deseas ELIMINAR TODOS los gastos registrados de Supabase?')) return;
+    setLoading(true);
+    try {
+      await eliminarTodosLosGastos();
+      await reloadAllData();
+      setUserFeedback({ type: 'success', msg: '✅ Todos los gastos han sido eliminados de Supabase.' });
+      setTimeout(() => setUserFeedback(null), 4000);
+    } catch (e: any) {
+      alert('Error eliminando gastos: ' + e?.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEliminarGastosFiltrados = async (gastosABorrar: Gasto[]) => {
+    if (gastosABorrar.length === 0) return;
+    if (!confirm(`⚠️ ¿Deseas eliminar los ${gastosABorrar.length} gastos filtrados de Supabase?`)) return;
+    setLoading(true);
+    try {
+      const ids = gastosABorrar.map((g) => g.id || '').filter(Boolean);
+      await eliminarGastosPorIds(ids);
+      await reloadAllData();
+      setUserFeedback({ type: 'success', msg: `✅ Se eliminaron ${gastosABorrar.length} gastos de Supabase.` });
+      setTimeout(() => setUserFeedback(null), 4000);
+    } catch (e: any) {
+      alert('Error: ' + e?.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -2140,90 +2248,249 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               )}
 
-              {/* Filters bar */}
-              <div className="bg-[#13110F] rounded-3xl p-4 border border-[#26221E] flex flex-wrap items-center justify-between gap-3 shadow-md">
-                <div className="relative flex-1 min-w-[200px] max-w-sm">
-                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#A69F93]" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Buscar venta, cliente o código..."
-                    className="w-full bg-[#1A1816] text-xs text-white px-10 py-2.5 rounded-2xl border border-[#2D2822] focus:outline-none focus:border-[#C59A4D] placeholder-[#7A7368]"
-                  />
-                </div>
+              {/* Filters bar & Period Selector */}
+              {(() => {
+                const ventasFiltradasPorPeriodo = ventas.filter((v) => {
+                  if (searchQuery.trim()) {
+                    const q = searchQuery.toLowerCase();
+                    const match =
+                      v.codigo.toLowerCase().includes(q) ||
+                      v.cliente_nombre.toLowerCase().includes(q) ||
+                      (v.cliente_telefono && v.cliente_telefono.includes(q)) ||
+                      (v.cajero_nombre && v.cajero_nombre.toLowerCase().includes(q));
+                    if (!match) return false;
+                  }
 
-                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                  <button
-                    onClick={reloadAllData}
-                    className="p-2.5 rounded-xl border border-[#2D2822] bg-[#1A1816] hover:bg-[#25221E] text-white transition-colors cursor-pointer"
-                    title="Recargar ventas"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setVentaManualCliente('');
-                      setVentaManualTelefono('');
-                      setVentaManualMonto('');
-                      setVentaManualMontoAbonado('');
-                      setVentaManualTipoAbono('mitad');
-                      setVentaManualProductoId('');
-                      setVentaManualNotas('');
-                      setVentaManualMetodo('efectivo');
-                      setIsModalVentaManualOpen(true);
-                    }}
-                    className="px-4 py-2.5 rounded-xl bg-[#C59A4D] hover:bg-[#B3873B] text-[#141312] text-xs font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all"
-                  >
-                    <Plus className="w-4 h-4 stroke-[3]" />
-                    <span>+ REGISTRAR VENTA MANUAL</span>
-                  </button>
-                </div>
-              </div>
+                  if (!v.creado_en) return true;
+                  const dateObj = new Date(v.creado_en);
+                  const yyyy = dateObj.getFullYear();
+                  const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                  const dd = String(dateObj.getDate()).padStart(2, '0');
+                  const yyyyMmDd = `${yyyy}-${mm}-${dd}`;
+                  const yyyyMm = `${yyyy}-${mm}`;
 
-              {/* Ventas Table or Empty state */}
-              {ventas.length === 0 ? (
-                <div className="bg-[#13110F] rounded-3xl p-8 sm:p-12 border border-[#26221E] text-center space-y-3 shadow-md text-white">
-                  <TrendingUp className="w-10 h-10 mx-auto text-[#7A7368]" />
-                  <h3 className="font-extrabold text-white">
-                    No se encontraron ventas registradas
-                  </h3>
-                  <p className="text-xs text-[#A69F93] max-w-md mx-auto">
-                    Al aceptar y aprobar pedidos web verificados, se registrarán automáticamente aquí descontando del inventario. También puedes pulsar en &quot;Registrar Venta Manual&quot;.
-                  </p>
-                </div>
-              ) : (
-                <div className="bg-[#13110F] rounded-2xl sm:rounded-3xl border border-[#26221E] overflow-hidden shadow-xl text-white">
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[950px] text-left text-xs">
-                      <thead className="bg-[#1A1816] border-b border-[#26221E] text-[10px] font-black uppercase text-[#A69F93] tracking-wider">
-                        <tr>
-                          <th className="py-3.5 px-4">Código</th>
-                          <th className="py-3.5 px-4">Prendas / Productos</th>
-                          <th className="py-3.5 px-4">Cliente</th>
-                          <th className="py-3.5 px-4">Método / Estado</th>
-                          <th className="py-3.5 px-4">Registrado Por</th>
-                          <th className="py-3.5 px-4">Fecha</th>
-                          <th className="py-3.5 px-4 text-right">
-                            {userRole === 'cajero' ? 'Artículos' : 'Total'}
-                          </th>
-                          <th className="py-3.5 px-4 text-center">Acciones</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#221F1C]">
-                        {ventas
-                          .filter((v) => {
-                            if (!searchQuery.trim()) return true;
-                            const q = searchQuery.toLowerCase();
-                            return (
-                              v.codigo.toLowerCase().includes(q) ||
-                              v.cliente_nombre.toLowerCase().includes(q) ||
-                              (v.cliente_telefono && v.cliente_telefono.includes(q)) ||
-                              (v.cajero_nombre && v.cajero_nombre.toLowerCase().includes(q))
-                            );
-                          })
-                          .map((v) => {
+                  if (ventasFiltroPeriodo === 'hoy') {
+                    return yyyyMmDd === ventasFechaExacta;
+                  }
+                  if (ventasFiltroPeriodo === 'mes') {
+                    return yyyyMm === ventasMesExacto;
+                  }
+                  if (ventasFiltroPeriodo === 'ano') {
+                    return String(yyyy) === ventasAnoExacto;
+                  }
+                  if (ventasFiltroPeriodo === 'rango') {
+                    if (ventasFechaDesde && yyyyMmDd < ventasFechaDesde) return false;
+                    if (ventasFechaHasta && yyyyMmDd > ventasFechaHasta) return false;
+                    return true;
+                  }
+
+                  return true;
+                });
+
+                const totalMontoFiltrado = ventasFiltradasPorPeriodo.reduce(
+                  (acc, v) => acc + (Number(v.total) || 0),
+                  0
+                );
+
+                return (
+                  <div className="space-y-3">
+                    <div className="bg-[#13110F] rounded-3xl p-4 border border-[#26221E] flex flex-wrap items-center justify-between gap-3 shadow-md">
+                      <div className="relative flex-1 min-w-[200px] max-w-sm">
+                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#A69F93]" />
+                        <input
+                          type="text"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          placeholder="Buscar venta, cliente o código..."
+                          className="w-full bg-[#1A1816] text-xs text-white px-10 py-2.5 rounded-2xl border border-[#2D2822] focus:outline-none focus:border-[#C59A4D] placeholder-[#7A7368]"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                        <button
+                          onClick={reloadAllData}
+                          className="p-2.5 rounded-xl border border-[#2D2822] bg-[#1A1816] hover:bg-[#25221E] text-white transition-colors cursor-pointer"
+                          title="Recargar ventas"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setVentaManualCliente('');
+                            setVentaManualTelefono('');
+                            setVentaManualMonto('');
+                            setVentaManualMontoAbonado('');
+                            setVentaManualTipoAbono('mitad');
+                            setVentaManualProductoId('');
+                            setVentaManualNotas('');
+                            setVentaManualMetodo('efectivo');
+                            setIsModalVentaManualOpen(true);
+                          }}
+                          className="px-4 py-2.5 rounded-xl bg-[#C59A4D] hover:bg-[#B3873B] text-[#141312] text-xs font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all"
+                        >
+                          <Plus className="w-4 h-4 stroke-[3]" />
+                          <span>+ REGISTRAR VENTA MANUAL</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Barra de Filtro de Período (Día / Mes / Año / Rango) y Botones de Eliminación Masiva */}
+                    <div className="bg-[#141210] rounded-2xl p-3.5 border border-[#26221E] flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] font-black uppercase text-[#E6C687] tracking-wider">
+                          Filtrar Ventas Por:
+                        </span>
+
+                        <div className="flex items-center bg-[#1A1816] p-1 rounded-xl border border-[#2D2822] gap-1">
+                          {(
+                            [
+                              { id: 'todos', label: 'Todas' },
+                              { id: 'hoy', label: 'Por Día' },
+                              { id: 'mes', label: 'Por Mes' },
+                              { id: 'ano', label: 'Por Año' },
+                              { id: 'rango', label: 'Rango Fechas' },
+                            ] as const
+                          ).map((tab) => (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              onClick={() => setVentasFiltroPeriodo(tab.id)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                ventasFiltroPeriodo === tab.id
+                                  ? 'bg-[#C59A4D] text-[#141312] font-black shadow-xs'
+                                  : 'text-[#A69F93] hover:text-white'
+                              }`}
+                            >
+                              {tab.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Controles específicos del período seleccionado */}
+                        {ventasFiltroPeriodo === 'hoy' && (
+                          <div className="flex items-center gap-1.5 bg-[#1A1816] px-3 py-1.5 rounded-xl border border-[#2D2822]">
+                            <span className="text-[10px] text-[#A69F93] font-bold">Fecha:</span>
+                            <input
+                              type="date"
+                              value={ventasFechaExacta}
+                              onChange={(e) => setVentasFechaExacta(e.target.value)}
+                              className="bg-transparent text-xs text-white focus:outline-none cursor-pointer font-mono"
+                            />
+                          </div>
+                        )}
+
+                        {ventasFiltroPeriodo === 'mes' && (
+                          <div className="flex items-center gap-1.5 bg-[#1A1816] px-3 py-1.5 rounded-xl border border-[#2D2822]">
+                            <span className="text-[10px] text-[#A69F93] font-bold">Mes:</span>
+                            <input
+                              type="month"
+                              value={ventasMesExacto}
+                              onChange={(e) => setVentasMesExacto(e.target.value)}
+                              className="bg-transparent text-xs text-white focus:outline-none cursor-pointer font-mono"
+                            />
+                          </div>
+                        )}
+
+                        {ventasFiltroPeriodo === 'ano' && (
+                          <div className="flex items-center gap-1.5 bg-[#1A1816] px-3 py-1.5 rounded-xl border border-[#2D2822]">
+                            <span className="text-[10px] text-[#A69F93] font-bold">Año:</span>
+                            <input
+                              type="number"
+                              min="2020"
+                              max="2035"
+                              value={ventasAnoExacto}
+                              onChange={(e) => setVentasAnoExacto(e.target.value)}
+                              className="bg-transparent text-xs text-white focus:outline-none cursor-pointer font-mono w-20"
+                            />
+                          </div>
+                        )}
+
+                        {ventasFiltroPeriodo === 'rango' && (
+                          <div className="flex items-center gap-2 bg-[#1A1816] px-3 py-1.5 rounded-xl border border-[#2D2822] flex-wrap">
+                            <span className="text-[10px] text-[#A69F93] font-bold">Desde:</span>
+                            <input
+                              type="date"
+                              value={ventasFechaDesde}
+                              onChange={(e) => setVentasFechaDesde(e.target.value)}
+                              className="bg-transparent text-xs text-white focus:outline-none cursor-pointer font-mono"
+                            />
+                            <span className="text-[10px] text-[#A69F93] font-bold">Hasta:</span>
+                            <input
+                              type="date"
+                              value={ventasFechaHasta}
+                              onChange={(e) => setVentasFechaHasta(e.target.value)}
+                              className="bg-transparent text-xs text-white focus:outline-none cursor-pointer font-mono"
+                            />
+                          </div>
+                        )}
+
+                        {/* Indicador de ventas filtradas */}
+                        <span className="px-2.5 py-1 rounded-xl bg-[#1C1A17] border border-[#332E27] text-[11px] font-bold text-slate-300">
+                          {ventasFiltradasPorPeriodo.length} venta(s)
+                          {userRole !== 'cajero' && ` • $${totalMontoFiltrado.toFixed(2)} USD`}
+                        </span>
+                      </div>
+
+                      {/* Botones de Eliminación (Disponibles para Dueño y Admin) */}
+                      {(userRole === 'dueno' || userRole === 'administrador') && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {ventasFiltroPeriodo !== 'todos' && ventasFiltradasPorPeriodo.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleEliminarVentasFiltradas(ventasFiltradasPorPeriodo)}
+                              className="px-3 py-1.5 rounded-xl bg-amber-950/60 hover:bg-amber-900 text-[#E6C687] border border-amber-800 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs"
+                              title="Eliminar solo las ventas del período actualmente filtrado"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Eliminar ({ventasFiltradasPorPeriodo.length}) Filtradas</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={handleVaciarVentas}
+                            className="px-3 py-1.5 rounded-xl bg-rose-950/50 hover:bg-rose-900 text-rose-300 border border-rose-800 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs"
+                            title="Eliminar absolutamente todas las ventas de la base de datos"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Vaciar Todo</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Ventas Table or Empty state */}
+                    {ventasFiltradasPorPeriodo.length === 0 ? (
+                      <div className="bg-[#13110F] rounded-3xl p-8 sm:p-12 border border-[#26221E] text-center space-y-3 shadow-md text-white">
+                        <TrendingUp className="w-10 h-10 mx-auto text-[#7A7368]" />
+                        <h3 className="font-extrabold text-white">
+                          No se encontraron ventas en el período seleccionado
+                        </h3>
+                        <p className="text-xs text-[#A69F93] max-w-md mx-auto">
+                          Prueba cambiando el filtro de fecha o registrando una nueva venta manual.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="bg-[#13110F] rounded-2xl sm:rounded-3xl border border-[#26221E] overflow-hidden shadow-xl text-white">
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[950px] text-left text-xs">
+                            <thead className="bg-[#1A1816] border-b border-[#26221E] text-[10px] font-black uppercase text-[#A69F93] tracking-wider">
+                              <tr>
+                                <th className="py-3.5 px-4">Código</th>
+                                <th className="py-3.5 px-4">Prendas / Productos</th>
+                                <th className="py-3.5 px-4">Cliente</th>
+                                <th className="py-3.5 px-4">Método / Estado</th>
+                                <th className="py-3.5 px-4">Registrado Por</th>
+                                <th className="py-3.5 px-4">Fecha</th>
+                                <th className="py-3.5 px-4 text-right">
+                                  {userRole === 'cajero' ? 'Artículos' : 'Total'}
+                                </th>
+                                <th className="py-3.5 px-4 text-center">Acciones</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#221F1C]">
+                              {ventasFiltradasPorPeriodo.map((v) => {
                             const hasSaldo = Boolean(v.saldo_pendiente && v.saldo_pendiente > 0 && v.estado_pago !== 'completo');
 
                             return (
@@ -2262,7 +2529,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                               <img
                                                 src={prodImg}
                                                 alt={it.nombre}
-                                                className="w-10 h-10 object-cover rounded-lg bg-black border border-[#2D2822] shrink-0"
+                                                onClick={() => setZoomedProductImage({ url: prodImg, title: it.nombre, subtitle: varDesc || undefined })}
+                                                className="w-10 h-10 object-cover rounded-lg bg-black border border-[#2D2822] shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                                                title="Click para ampliar foto del producto"
                                               />
                                             ) : (
                                               <div className="w-10 h-10 rounded-lg bg-[#1A1816] border border-[#2D2822] flex items-center justify-center text-[9px] font-bold text-[#7A7368] shrink-0">
@@ -2384,7 +2653,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                       </button>
                                     )}
 
-                                    {canModifyUser(userRole, { rol: 'dueno' } as any) && (
+                                    {(userRole === 'dueno' || userRole === 'administrador') && (
                                       <button
                                         type="button"
                                         onClick={() => handleEliminarVenta(v.id || v.codigo)}
@@ -2405,6 +2674,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
                 </div>
               )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -2573,7 +2845,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           </span>
                         </div>
 
-                        <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                        <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
                           {/* Entrada Base */}
                           <div className="p-2.5 rounded-xl bg-[#1A1816] border border-[#26221E] flex items-center justify-between gap-3 text-xs">
                             <div className="flex items-center gap-2.5">
@@ -2594,13 +2866,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           {ventasEfectivoTurno.map((v) => {
                             const cobro = Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0;
                             return (
-                              <div key={v.id || v.codigo} className="p-2.5 rounded-xl bg-[#1A1816] border border-[#26221E] flex items-center justify-between gap-3 text-xs hover:border-[#38332B] transition-colors">
-                                <div className="flex items-center gap-2.5">
-                                  <span className="w-7 h-7 rounded-lg bg-emerald-950/80 border border-emerald-700/60 text-emerald-400 flex items-center justify-center font-black text-xs">
+                              <div key={v.id || v.codigo} className="p-2.5 rounded-xl bg-[#1A1816] border border-[#26221E] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs hover:border-[#38332B] transition-colors">
+                                <div className="flex items-start gap-2.5 min-w-0">
+                                  <span className="w-7 h-7 rounded-lg bg-emerald-950/80 border border-emerald-700/60 text-emerald-400 flex items-center justify-center font-black text-xs shrink-0 mt-0.5">
                                     💵
                                   </span>
-                                  <div>
-                                    <div className="flex items-center gap-1.5">
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="font-black text-white text-[11px]">Venta {v.codigo}</span>
                                       <span className="text-[10px] text-[#E6C687] font-bold">({v.cliente_nombre})</span>
                                       <span className="px-1.5 py-0.2 rounded bg-black border border-[#2D2822] text-[#A69F93] text-[9px] uppercase font-mono">
@@ -2611,9 +2883,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                       Registrado por: <strong className="text-white">{v.cajero_nombre || 'Cajero'}</strong> • {v.creado_en ? new Date(v.creado_en).toLocaleTimeString('es-PA') : ''}
                                       {v.items && v.items.length > 0 && ` • ${v.items.length} prenda(s)`}
                                     </span>
+
+                                    {/* Thumbnails de productos vendidos en este registro */}
+                                    {v.items && v.items.length > 0 && (
+                                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                        {v.items.map((it, idx) => {
+                                          const prodImg = it.imagen_url || productos.find((p) => p.id === (it.producto_id || it.id))?.imagen_url;
+                                          return (
+                                            <div
+                                              key={idx}
+                                              className="flex items-center gap-1 bg-[#13110F] px-1.5 py-0.5 rounded-lg border border-[#2D2822]"
+                                            >
+                                              {prodImg && (
+                                                <img
+                                                  src={prodImg}
+                                                  alt={it.nombre}
+                                                  onClick={() => setZoomedProductImage({ url: prodImg, title: it.nombre, subtitle: it.talla ? `Talla: ${it.talla}` : undefined })}
+                                                  className="w-5 h-6 object-cover rounded bg-black cursor-pointer hover:opacity-80"
+                                                  title="Click para ampliar foto"
+                                                />
+                                              )}
+                                              <span className="text-[9px] text-white truncate max-w-[90px]">
+                                                {it.nombre}
+                                              </span>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
-                                <span className="font-black text-emerald-400 text-sm">
+                                <span className="font-black text-emerald-400 text-sm shrink-0 self-end sm:self-center">
                                   +${cobro.toFixed(2)}
                                 </span>
                               </div>
@@ -2899,6 +3199,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             ✕ Ver Todos
                           </button>
                         )}
+
+                        {/* Botones de eliminación masiva de Gastos (Dueño / Admin) */}
+                        {(userRole === 'dueno' || userRole === 'administrador') && (
+                          <div className="flex items-center gap-1.5 ml-auto">
+                            {gastoFechaFilter && gastosFiltrados.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => handleEliminarGastosFiltrados(gastosFiltrados)}
+                                className="px-3 py-1.5 rounded-xl bg-amber-950/60 hover:bg-amber-900 text-[#E6C687] border border-amber-800 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs"
+                                title="Eliminar los gastos del día actualmente filtrado"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Eliminar ({gastosFiltrados.length}) del Día</span>
+                              </button>
+                            )}
+
+                            {gastos.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={handleVaciarGastos}
+                                className="px-3 py-1.5 rounded-xl bg-rose-950/50 hover:bg-rose-900 text-rose-300 border border-rose-800 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs"
+                                title="Eliminar absolutamente todos los gastos registrados en Supabase"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Vaciar Todos los Gastos</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -3097,6 +3426,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2.5 flex-wrap">
+                  {/* Filtro por Día */}
+                  <div className="flex items-center gap-1.5 bg-[#1A1816] px-3 py-1.5 rounded-2xl border border-[#38332B]">
+                    <span className="text-[10px] text-[#A69F93] font-bold">📅 Día:</span>
+                    <input
+                      type="date"
+                      value={movimientosFechaFilter}
+                      onChange={(e) => setMovimientosFechaFilter(e.target.value)}
+                      className="bg-transparent text-xs text-white focus:outline-none cursor-pointer font-mono"
+                    />
+                    {movimientosFechaFilter && (
+                      <button
+                        type="button"
+                        onClick={() => setMovimientosFechaFilter('')}
+                        className="text-[10px] text-rose-400 hover:text-rose-300 ml-1 font-bold cursor-pointer"
+                        title="Ver todos los días"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
                   <select
                     value={movimientosModuloFilter}
                     onChange={(e) => setMovimientosModuloFilter(e.target.value)}
@@ -3144,6 +3494,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         .filter((m) => {
                           if (movimientosModuloFilter !== 'todos' && m.modulo !== movimientosModuloFilter) return false;
                           if (movimientosRolFilter !== 'todos' && m.rol !== movimientosRolFilter) return false;
+                          if (movimientosFechaFilter) {
+                            const dStr = m.creado_en ? new Date(m.creado_en).toISOString().slice(0, 10) : '';
+                            if (dStr !== movimientosFechaFilter) return false;
+                          }
                           if (movimientosSearch.trim()) {
                             const query = movimientosSearch.toLowerCase();
                             const matchesNombre = m.usuario_nombre.toLowerCase().includes(query);
@@ -3338,6 +3692,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
                   </button>
+
+                  {(userRole === 'dueno' || userRole === 'administrador') && pedidos.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleVaciarPedidos}
+                      className="px-3 py-1.5 rounded-xl bg-rose-950/50 hover:bg-rose-900 text-rose-300 border border-rose-800 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs"
+                      title="Eliminar absolutamente todos los pedidos de la base de datos de Supabase"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Vaciar Todos los Pedidos</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -3752,7 +4118,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                         <img
                                           src={prodImg}
                                           alt={it.nombre}
-                                          className="w-12 h-14 object-cover rounded-xl bg-black border border-[#2D2822] shadow-xs shrink-0"
+                                          onClick={() => setZoomedProductImage({ url: prodImg, title: it.nombre, subtitle: varDesc || undefined })}
+                                          className="w-12 h-14 object-cover rounded-xl bg-black border border-[#2D2822] shadow-xs shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                                          title="Click para ampliar foto del producto"
                                         />
                                       ) : (
                                         <div className="w-12 h-14 rounded-xl bg-black border border-[#2D2822] flex items-center justify-center text-[#7A7368] shrink-0 text-[10px] font-bold">
@@ -4390,6 +4758,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                           <td className="py-4 px-6 text-right">
                             <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setClienteSeleccionadoParaPedidos(cli)}
+                                className="px-3 py-1.5 rounded-xl bg-[#1E1B18] hover:bg-[#2A2621] text-[#E6C687] border border-[#38332B] font-bold text-[11px] inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                                title="Ver todas las órdenes y prendas compradas por este cliente"
+                              >
+                                <Receipt className="w-3.5 h-3.5 text-[#C59A4D]" />
+                                <span>Ver Pedidos</span>
+                              </button>
+
                               <button
                                 onClick={() => {
                                   const cleanPhone = cli.telefono.replace(/\D/g, '') || '66212802';
@@ -6057,6 +6435,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         const diferencia = hasReal ? real - esperado : 0;
         const duracionTurno = getDuracionCaja(sesionCaja.fecha_apertura);
 
+        const pedidosAprobadosTurno = pedidos.filter(
+          (p) =>
+            (p.estado === 'aprobado' || p.estado === 'entregado') &&
+            p.creado_en &&
+            new Date(p.creado_en).getTime() >= fechaInicio
+        );
+
         return (
           <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <div className="bg-[#13110F] rounded-3xl w-full max-w-lg p-5 sm:p-6 space-y-4 border border-[#26221E] shadow-2xl shadow-black/80 animate-fade-in my-auto text-white max-h-[90dvh] overflow-y-auto">
@@ -6175,6 +6560,61 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         </div>
                       ))}
                     </div>
+                  </div>
+
+                  {/* Pedidos procesados y aceptados durante este turno */}
+                  <div className="bg-[#181614] rounded-2xl p-3.5 border border-[#26221E] space-y-2.5">
+                    <div className="flex items-center justify-between pb-1.5 border-b border-[#26221E]">
+                      <span className="font-extrabold text-[#E6C687] text-xs flex items-center gap-1.5">
+                        <span>📦</span>
+                        <span>Pedidos Aceptados / Entregados en este Turno ({pedidosAprobadosTurno.length})</span>
+                      </span>
+                    </div>
+
+                    {pedidosAprobadosTurno.length === 0 ? (
+                      <p className="text-[11px] text-[#A69F93] italic py-1">
+                        No se aprobaron pedidos de la tienda online durante este turno.
+                      </p>
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1 text-xs">
+                        {pedidosAprobadosTurno.map((p) => (
+                          <div key={p.id || p.codigo} className="p-2.5 rounded-xl bg-[#13110F] border border-[#26221E] space-y-1.5">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <div>
+                                <span className="font-mono font-black text-white">{p.codigo}</span>
+                                <span className="text-[#A69F93] ml-1.5 font-bold">({p.cliente_nombre})</span>
+                              </div>
+                              <span className="font-black text-emerald-400">${p.total} USD</span>
+                            </div>
+                            <div className="text-[10px] text-[#A69F93]">
+                              Aceptado por: <strong className="text-[#E6C687]">{p.revisado_por || 'Administrador'}</strong> • {p.revisado_en ? new Date(p.revisado_en).toLocaleTimeString('es-PA') : (p.creado_en ? new Date(p.creado_en).toLocaleTimeString('es-PA') : '')}
+                            </div>
+                            {/* Prendas del pedido con thumbnail */}
+                            <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                              {p.items?.map((it, idx) => {
+                                const prodImg = it.imagen_url || productos.find((prod) => prod.id === (it.producto_id || it.id))?.imagen_url;
+                                return (
+                                  <div key={idx} className="flex items-center gap-1 bg-[#1A1816] px-1.5 py-0.5 rounded-lg border border-[#2D2822] text-[10px]">
+                                    {prodImg && (
+                                      <img
+                                        src={prodImg}
+                                        alt={it.nombre}
+                                        onClick={() => setZoomedProductImage({ url: prodImg, title: it.nombre, subtitle: it.talla ? `Talla: ${it.talla}` : undefined })}
+                                        className="w-5 h-6 object-cover rounded bg-black cursor-pointer hover:opacity-80"
+                                        title="Click para ampliar foto"
+                                      />
+                                    )}
+                                    <span className="text-white truncate max-w-[100px]">{it.nombre}</span>
+                                    {it.talla && <span className="text-[#E6C687]">T:{it.talla}</span>}
+                                    <span className="text-[#A69F93]">x{it.cantidad || 1}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Resumen numérico esperado */}
@@ -6318,6 +6758,180 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         isOpen={isModalSqlAuthOpen}
         onClose={() => setIsModalSqlAuthOpen(false)}
       />
+
+      {/* Modal Zoom / Lightbox de Foto de Producto */}
+      {zoomedProductImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fade-in"
+          onClick={() => setZoomedProductImage(null)}
+        >
+          <div
+            className="bg-[#13110F] border border-[#2D2822] rounded-3xl p-4 sm:p-6 max-w-lg w-full shadow-2xl space-y-3 relative text-white my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-[#26221E]">
+              <div className="min-w-0 pr-2">
+                <h3 className="font-black text-sm text-white truncate">{zoomedProductImage.title}</h3>
+                {zoomedProductImage.subtitle && (
+                  <span className="text-xs text-[#E6C687] font-bold block truncate">{zoomedProductImage.subtitle}</span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setZoomedProductImage(null)}
+                className="p-1.5 rounded-full hover:bg-[#1A1816] text-[#A69F93] hover:text-white transition-colors cursor-pointer shrink-0 border border-transparent hover:border-[#332E27]"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-center overflow-hidden rounded-2xl bg-black border border-[#26221E] max-h-[70vh]">
+              <img
+                src={zoomedProductImage.url}
+                alt={zoomedProductImage.title}
+                className="w-full h-auto max-h-[70vh] object-contain"
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-1 text-xs text-[#A69F93] flex-wrap gap-2">
+              <span>Vista de producto en alta resolución</span>
+              <a
+                href={zoomedProductImage.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1 rounded-xl bg-[#1A1816] border border-[#332E27] text-[#E6C687] hover:text-white font-bold transition-colors cursor-pointer"
+              >
+                Abrir imagen completa ↗
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Historial de Pedidos por Cliente */}
+      {clienteSeleccionadoParaPedidos && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fade-in"
+          onClick={() => setClienteSeleccionadoParaPedidos(null)}
+        >
+          <div
+            className="bg-[#13110F] rounded-3xl w-full max-w-2xl p-5 sm:p-6 space-y-4 border border-[#26221E] shadow-2xl text-white max-h-[90vh] overflow-y-auto my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-[#26221E]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-950/60 text-[#E6C687] border border-amber-800/80 flex items-center justify-center font-black shrink-0">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white">Historial de Pedidos del Cliente</h3>
+                  <p className="text-xs text-[#A69F93]">
+                    <strong className="text-white">{clienteSeleccionadoParaPedidos.nombre}</strong> • Tel: {clienteSeleccionadoParaPedidos.telefono}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setClienteSeleccionadoParaPedidos(null)}
+                className="p-1.5 rounded-full hover:bg-[#1A1816] text-[#A69F93] hover:text-white transition-colors cursor-pointer border border-transparent hover:border-[#332E27]"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Resumen del cliente */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div className="p-3 rounded-2xl bg-[#181614] border border-[#2D2822]">
+                <span className="text-[10px] text-[#A69F93] font-bold uppercase block">Total Pedidos</span>
+                <span className="text-lg font-black text-white">{clienteSeleccionadoParaPedidos.totalPedidos}</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-[#181614] border border-[#2D2822]">
+                <span className="text-[10px] text-[#A69F93] font-bold uppercase block">Total Comprado</span>
+                <span className="text-lg font-black text-emerald-400">${clienteSeleccionadoParaPedidos.totalGastado.toFixed(2)} USD</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-[#181614] border border-[#2D2822]">
+                <span className="text-[10px] text-[#A69F93] font-bold uppercase block">Dirección</span>
+                <span className="text-xs font-bold text-slate-300 truncate block">{clienteSeleccionadoParaPedidos.direccion || 'Por coordinar'}</span>
+              </div>
+            </div>
+
+            {/* Lista de Pedidos de este cliente */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-black uppercase text-[#E6C687] tracking-wider">
+                Órdenes & Compras Registradas ({
+                  pedidos.filter((p) => {
+                    const cleanPhone = (p.cliente_telefono || '').replace(/\D/g, '');
+                    const selPhone = (clienteSeleccionadoParaPedidos.telefono || '').replace(/\D/g, '');
+                    return (cleanPhone && selPhone && cleanPhone === selPhone) || p.cliente_nombre.toLowerCase().trim() === clienteSeleccionadoParaPedidos.nombre.toLowerCase().trim();
+                  }).length
+                })
+              </h4>
+
+              <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                {pedidos
+                  .filter((p) => {
+                    const cleanPhone = (p.cliente_telefono || '').replace(/\D/g, '');
+                    const selPhone = (clienteSeleccionadoParaPedidos.telefono || '').replace(/\D/g, '');
+                    return (cleanPhone && selPhone && cleanPhone === selPhone) || p.cliente_nombre.toLowerCase().trim() === clienteSeleccionadoParaPedidos.nombre.toLowerCase().trim();
+                  })
+                  .map((p) => (
+                    <div key={p.id || p.codigo} className="p-3.5 rounded-2xl bg-[#181614] border border-[#2D2822] space-y-2.5">
+                      <div className="flex items-center justify-between text-xs pb-2 border-b border-[#26221E]">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-black text-[#E6C687]">{p.codigo}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                            p.estado === 'pendiente' ? 'bg-amber-950/70 text-amber-300 border border-amber-800' :
+                            p.estado === 'aprobado' || p.estado === 'entregado' ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-800' :
+                            'bg-rose-950/70 text-rose-300 border border-rose-800'
+                          }`}>
+                            {p.estado}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-[#A69F93] block">
+                            {p.creado_en ? new Date(p.creado_en).toLocaleString('es-PA') : 'Reciente'}
+                          </span>
+                          <span className="font-black text-sm text-emerald-400">${p.total} USD</span>
+                        </div>
+                      </div>
+
+                      {/* Prendas del pedido con fotos clickeables para zoom */}
+                      <div className="space-y-1.5">
+                        {p.items?.map((it, idx) => {
+                          const prodImg = it.imagen_url || productos.find((prod) => prod.id === (it.producto_id || it.id))?.imagen_url;
+                          return (
+                            <div key={idx} className="flex items-center justify-between gap-2.5 bg-[#13110F] p-2 rounded-xl border border-[#26221E] text-xs">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                {prodImg && (
+                                  <img
+                                    src={prodImg}
+                                    alt={it.nombre}
+                                    onClick={() => setZoomedProductImage({ url: prodImg, title: it.nombre, subtitle: it.talla ? `Talla: ${it.talla}` : undefined })}
+                                    className="w-10 h-12 object-cover rounded-lg bg-black border border-[#2D2822] cursor-pointer hover:opacity-80 transition-opacity shrink-0"
+                                    title="Click para ampliar foto"
+                                  />
+                                )}
+                                <div className="min-w-0">
+                                  <span className="font-bold text-white block truncate">{it.nombre}</span>
+                                  <span className="text-[10px] text-[#A69F93]">
+                                    {it.talla ? `Talla: ${it.talla} • ` : ''}Cant: {it.cantidad || 1}
+                                  </span>
+                                </div>
+                              </div>
+                              <span className="font-black text-white shrink-0">
+                                ${((it.precio || 0) * (it.cantidad || 1)).toFixed(2)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

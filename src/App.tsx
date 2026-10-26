@@ -38,7 +38,7 @@ export default function App() {
   const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [checkoutMethod, setCheckoutMethod] = useState<'transferencia' | 'yappy'>('transferencia');
+  const [checkoutMethod, setCheckoutMethod] = useState<'transferencia' | 'yappy' | 'whatsapp'>('transferencia');
 
   // Toast notification (Image 4 bottom)
   const [toastMessage, setToastMessage] = useState<string | null>(null);

@@ -625,6 +625,15 @@ export async function eliminarPedido(idOrCodigo: string): Promise<{ success: boo
   }
 }
 
+export async function eliminarTodosLosPedidos(): Promise<{ success: boolean; error?: string }> {
+  try {
+    await supabase.from('pedidos').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+}
+
 // ==========================================
 // VENTAS & FACTURACIÓN (SUPABASE + LOCAL STORAGE)
 // ==========================================
@@ -1003,6 +1012,37 @@ export async function eliminarVenta(idOrCodigo: string): Promise<{ success: bool
   return { success: true };
 }
 
+export async function eliminarTodasLasVentas(): Promise<{ success: boolean; error?: string }> {
+  try {
+    await supabase.from('ventas').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  } catch (err) {
+    console.warn('Aviso eliminando todas las ventas en Supabase:', err);
+  }
+  try {
+    localStorage.removeItem(STORAGE_KEY_VENTAS);
+  } catch {}
+  return { success: true };
+}
+
+export async function eliminarVentasPorIds(ids: string[]): Promise<{ success: boolean; error?: string }> {
+  if (!ids || ids.length === 0) return { success: true };
+  try {
+    await supabase.from('ventas').delete().in('id', ids);
+    await supabase.from('ventas').delete().in('codigo', ids);
+  } catch (err) {
+    console.warn('Aviso eliminando ventas filtradas en Supabase:', err);
+  }
+  try {
+    const local = localStorage.getItem(STORAGE_KEY_VENTAS);
+    if (local) {
+      const list: Venta[] = JSON.parse(local);
+      const filtered = list.filter((v) => !ids.includes(v.id || '') && !ids.includes(v.codigo));
+      localStorage.setItem(STORAGE_KEY_VENTAS, JSON.stringify(filtered));
+    }
+  } catch {}
+  return { success: true };
+}
+
 export async function eliminarCliente(telefonoONombre: string): Promise<{ success: boolean; error?: string }> {
   try {
     const cleanPhone = telefonoONombre.replace(/\D/g, '');
@@ -1259,6 +1299,36 @@ export async function eliminarGasto(id: string): Promise<{ success: boolean; err
   } catch (err: any) {
     return { success: false, error: err.message };
   }
+}
+
+export async function eliminarTodosLosGastos(): Promise<{ success: boolean; error?: string }> {
+  try {
+    await supabase.from('gastos').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  } catch (err) {
+    console.warn('Aviso eliminando todos los gastos de Supabase:', err);
+  }
+  try {
+    localStorage.removeItem(STORAGE_KEY_GASTOS);
+  } catch {}
+  return { success: true };
+}
+
+export async function eliminarGastosPorIds(ids: string[]): Promise<{ success: boolean; error?: string }> {
+  if (!ids || ids.length === 0) return { success: true };
+  try {
+    await supabase.from('gastos').delete().in('id', ids);
+  } catch (err) {
+    console.warn('Aviso eliminando gastos filtrados en Supabase:', err);
+  }
+  try {
+    const local = localStorage.getItem(STORAGE_KEY_GASTOS);
+    if (local) {
+      const list: Gasto[] = JSON.parse(local);
+      const filtered = list.filter((g) => !ids.includes(g.id || ''));
+      localStorage.setItem(STORAGE_KEY_GASTOS, JSON.stringify(filtered));
+    }
+  } catch {}
+  return { success: true };
 }
 
 // ==========================================
