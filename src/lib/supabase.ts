@@ -140,18 +140,40 @@ export async function getProductos(): Promise<Producto[]> {
       const tallas = (Array.isArray(p.tallas) && p.tallas.length > 0) ? p.tallas : (det?.tallas || []);
       const colores = (Array.isArray(p.colores) && p.colores.length > 0) ? p.colores : (det?.colores || []);
 
+      // Extraer tallas_stock si existen en la columna p.tallas_stock o reconstruirlas de p.variantes
+      let tallas_stock: Record<string, number> = {};
+      if (p.tallas_stock && typeof p.tallas_stock === 'object') {
+        tallas_stock = { ...p.tallas_stock };
+      } else if (Array.isArray(p.variantes) && p.variantes.length > 0) {
+        p.variantes.forEach((v: any) => {
+          const tName = v.opciones?.Talla || v.opciones?.talla || (v.titulo ? v.titulo.replace(/^Talla:\s*/i, '').trim() : '');
+          if (tName) {
+            tallas_stock[tName] = Number(v.stock) || 0;
+          }
+        });
+      }
+
+      // Si hay tallas pero no tienen cantidades definidas en tallas_stock, inicializar con el stock del producto
+      if (tallas.length > 0 && Object.keys(tallas_stock).length === 0) {
+        const baseStock = stockMap[p.id]?.cantidad ?? p.stock ?? 0;
+        tallas.forEach((t: string) => {
+          tallas_stock[t] = baseStock;
+        });
+      }
+
       return {
         ...p,
         tallas,
         colores,
+        tallas_stock,
         activo: p.activo ?? true,
         tiene_variantes: Boolean(p.tiene_variantes || tallas.length > 0 || colores.length > 0),
         atributos: p.atributos || [],
         variantes: p.variantes || [],
         sku: p.sku || '',
         costo: p.costo || 0,
-        stock: stockMap[p.id]?.cantidad ?? 0,
-        stock_minimo: stockMap[p.id]?.stock_minimo ?? 5,
+        stock: stockMap[p.id]?.cantidad ?? (p.stock || 0),
+        stock_minimo: stockMap[p.id]?.stock_minimo ?? (p.stock_minimo || 5),
       };
     });
   } catch (err) {
@@ -162,6 +184,7 @@ export async function getProductos(): Promise<Producto[]> {
 
 export async function crearProducto(
   producto: {
+    id?: string;
     nombre: string;
     descripcion?: string;
     precio: number;
@@ -173,6 +196,7 @@ export async function crearProducto(
     sku?: string;
     tallas?: string[];
     colores?: string[];
+    tallas_stock?: Record<string, number>;
     tiene_variantes?: boolean;
     atributos?: any[];
     variantes?: any[];
@@ -181,52 +205,89 @@ export async function crearProducto(
   stockMinimo = 5
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
+    const prodId = producto.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
+    
+    // Cálculo de tallas y variantes con stock individual por talla
+    const tallas = producto.tallas || (producto.tallas_stock ? Object.keys(producto.tallas_stock) : []);
+    const tallasStock = producto.tallas_stock || {};
+    let finalStock = cantidadInicial;
+    if (tallasStock && Object.keys(tallasStock).length > 0) {
+      finalStock = Object.values(tallasStock).reduce((acc, v) => acc + (Number(v) || 0), 0);
+    }
+
+    let variantesToSave = producto.variantes || [];
+    if (variantesToSave.length === 0 && tallas.length > 0) {
+      variantesToSave = tallas.map((t) => ({
+        id: `var_${t.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+        titulo: `Talla: ${t}`,
+        opciones: { Talla: t },
+        stock: Number(tallasStock[t] ?? finalStock),
+        activo: true,
+      }));
+    }
+
     const insertPayload: any = {
-      nombre: producto.nombre,
+      id: prodId,
+      nombre: producto.nombre.trim(),
       descripcion: producto.descripcion || null,
-      precio: producto.precio,
-      costo: producto.costo || 0,
-      categoria_id: producto.categoria_id || null,
-      imagen_url: producto.imagen_url || null,
+      precio: Number(producto.precio) || 0,
+      costo: Number(producto.costo) || 0,
+      categoria_id: producto.categoria_id && producto.categoria_id.trim() ? producto.categoria_id.trim() : null,
+      imagen_url: producto.imagen_url || (producto.imagenes && producto.imagenes[0]) || null,
       imagenes: producto.imagenes || [],
-      activo: producto.activo,
+      activo: producto.activo ?? true,
       sku: producto.sku || null,
-      tallas: producto.tallas || [],
+      stock: finalStock,
+      tallas: tallas,
       colores: producto.colores || [],
-      tiene_variantes: producto.tiene_variantes ?? false,
+      tallas_stock: tallasStock,
+      tiene_variantes: Boolean(producto.tiene_variantes || tallas.length > 0 || (producto.colores && producto.colores.length > 0)),
       atributos: producto.atributos || [],
-      variantes: producto.variantes || [],
+      variantes: variantesToSave,
     };
 
-    let prodData: any = null;
-    let prodErr: any = null;
-
-    // 1. Intentar insertar con tallas y colores
-    const res = await supabase.from('productos').insert([insertPayload]).select();
-    prodData = res.data;
-    prodErr = res.error;
-
-    // Fallback si la tabla productos no tiene aún las columnas tallas/colores
-    if (prodErr && prodErr.message && (prodErr.message.includes('tallas') || prodErr.message.includes('colores'))) {
-      delete insertPayload.tallas;
-      delete insertPayload.colores;
-      const retry = await supabase.from('productos').insert([insertPayload]).select();
-      prodData = retry.data;
-      prodErr = retry.error;
+    // Resilient insert con eliminación automática de columnas no existentes en la BD
+    const optionalCols = ['costo', 'sku', 'tallas', 'colores', 'tallas_stock', 'atributos', 'variantes', 'tiene_variantes', 'imagenes', 'stock'];
+    let res = await supabase.from('productos').insert([insertPayload]).select();
+    
+    // Si la BD reporta que alguna columna opcional no existe, eliminarla y reintentar
+    let attempts = 0;
+    while (res.error && res.error.message && attempts < 10) {
+      attempts++;
+      const msg = res.error.message.toLowerCase();
+      let stripped = false;
+      for (const col of optionalCols) {
+        if (insertPayload[col] !== undefined && (msg.includes(col.toLowerCase()) || msg.includes(`"${col.toLowerCase()}"`))) {
+          delete insertPayload[col];
+          stripped = true;
+          break;
+        }
+      }
+      if (!stripped && (msg.includes('foreign key') || msg.includes('categoria_id'))) {
+        if (insertPayload.categoria_id !== null) {
+          insertPayload.categoria_id = null;
+          stripped = true;
+        }
+      }
+      if (stripped) {
+        res = await supabase.from('productos').insert([insertPayload]).select();
+      } else {
+        break;
+      }
     }
 
-    if (prodErr || !prodData || prodData.length === 0) {
-      throw prodErr || new Error('No se pudo crear el producto');
+    if (res.error || !res.data || res.data.length === 0) {
+      throw res.error || new Error('No se pudo crear el producto');
     }
 
-    const nuevoProd = prodData[0];
+    const nuevoProd = res.data[0];
 
     // 2. Guardar en la tabla detalles_productos para persistencia en SQL
     try {
       await supabase.from('detalles_productos').upsert([
         {
           producto_id: nuevoProd.id,
-          tallas: producto.tallas || [],
+          tallas: tallas,
           colores: producto.colores || [],
           actualizado_en: new Date().toISOString(),
         }
@@ -235,20 +296,21 @@ export async function crearProducto(
       console.warn("Aviso al guardar en detalles_productos:", detErr);
     }
 
-    // 3. Insert initial inventory
+    // 3. Insertar o actualizar inventario asociado
     try {
-      await supabase.from('inventario').insert([
+      await supabase.from('inventario').upsert([
         {
           producto_id: nuevoProd.id,
-          cantidad: cantidadInicial,
+          cantidad: finalStock,
           stock_minimo: stockMinimo,
+          actualizado_en: new Date().toISOString(),
         }
-      ]);
+      ], { onConflict: 'producto_id' });
     } catch (invErr) {
       console.warn("Aviso al crear inventario asociado:", invErr);
     }
 
-    return { success: true, data: { ...nuevoProd, tallas: producto.tallas, colores: producto.colores } };
+    return { success: true, data: { ...nuevoProd, tallas, colores: producto.colores, tallas_stock: tallasStock, stock: finalStock } };
   } catch (err: any) {
     return { success: false, error: err.message || 'Error al registrar producto' };
   }
@@ -268,6 +330,7 @@ export async function actualizarProducto(
     sku?: string;
     tallas?: string[];
     colores?: string[];
+    tallas_stock?: Record<string, number>;
     tiene_variantes?: boolean;
     atributos?: any[];
     variantes?: any[];
@@ -276,41 +339,80 @@ export async function actualizarProducto(
   stockMinimo?: number
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    const tallas = producto.tallas || (producto.tallas_stock ? Object.keys(producto.tallas_stock) : []);
+    const tallasStock = producto.tallas_stock || {};
+    let finalStock = stock;
+    if (tallasStock && Object.keys(tallasStock).length > 0) {
+      finalStock = Object.values(tallasStock).reduce((acc, v) => acc + (Number(v) || 0), 0);
+    }
+
+    let variantesToSave = producto.variantes || [];
+    if (variantesToSave.length === 0 && tallas.length > 0) {
+      variantesToSave = tallas.map((t) => ({
+        id: `var_${t.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+        titulo: `Talla: ${t}`,
+        opciones: { Talla: t },
+        stock: Number(tallasStock[t] ?? finalStock ?? 0),
+        activo: true,
+      }));
+    }
+
     const updatePayload: any = {
-      nombre: producto.nombre,
+      nombre: producto.nombre.trim(),
       descripcion: producto.descripcion || null,
-      precio: producto.precio,
-      costo: producto.costo || 0,
-      categoria_id: producto.categoria_id || null,
-      imagen_url: producto.imagen_url || null,
+      precio: Number(producto.precio) || 0,
+      costo: Number(producto.costo) || 0,
+      categoria_id: producto.categoria_id && producto.categoria_id.trim() ? producto.categoria_id.trim() : null,
+      imagen_url: producto.imagen_url || (producto.imagenes && producto.imagenes[0]) || null,
       imagenes: producto.imagenes || [],
       activo: producto.activo,
       sku: producto.sku || null,
-      tallas: producto.tallas || [],
+      stock: finalStock,
+      tallas: tallas,
       colores: producto.colores || [],
-      tiene_variantes: producto.tiene_variantes ?? false,
+      tallas_stock: tallasStock,
+      tiene_variantes: Boolean(producto.tiene_variantes || tallas.length > 0 || (producto.colores && producto.colores.length > 0)),
       atributos: producto.atributos || [],
-      variantes: producto.variantes || [],
+      variantes: variantesToSave,
       actualizado_en: new Date().toISOString(),
     };
 
-    let { error } = await supabase.from('productos').update(updatePayload).eq('id', id);
+    const optionalCols = ['costo', 'sku', 'tallas', 'colores', 'tallas_stock', 'atributos', 'variantes', 'tiene_variantes', 'imagenes', 'stock'];
+    let res = await supabase.from('productos').update(updatePayload).eq('id', id);
 
-    if (error && error.message && (error.message.includes('tallas') || error.message.includes('colores'))) {
-      delete updatePayload.tallas;
-      delete updatePayload.colores;
-      const retry = await supabase.from('productos').update(updatePayload).eq('id', id);
-      error = retry.error;
+    let attempts = 0;
+    while (res.error && res.error.message && attempts < 10) {
+      attempts++;
+      const msg = res.error.message.toLowerCase();
+      let stripped = false;
+      for (const col of optionalCols) {
+        if (updatePayload[col] !== undefined && (msg.includes(col.toLowerCase()) || msg.includes(`"${col.toLowerCase()}"`))) {
+          delete updatePayload[col];
+          stripped = true;
+          break;
+        }
+      }
+      if (!stripped && (msg.includes('foreign key') || msg.includes('categoria_id'))) {
+        if (updatePayload.categoria_id !== null) {
+          updatePayload.categoria_id = null;
+          stripped = true;
+        }
+      }
+      if (stripped) {
+        res = await supabase.from('productos').update(updatePayload).eq('id', id);
+      } else {
+        break;
+      }
     }
 
-    if (error) throw error;
+    if (res.error) throw res.error;
 
     // Sincronizar en la tabla detalles_productos
     try {
       await supabase.from('detalles_productos').upsert([
         {
           producto_id: id,
-          tallas: producto.tallas || [],
+          tallas: tallas,
           colores: producto.colores || [],
           actualizado_en: new Date().toISOString(),
         }
@@ -319,8 +421,8 @@ export async function actualizarProducto(
       console.warn("Aviso sincronizando en detalles_productos:", detErr);
     }
 
-    if (stock !== undefined) {
-      await actualizarStockRapido(id, stock, stockMinimo);
+    if (finalStock !== undefined) {
+      await actualizarStockRapido(id, finalStock, stockMinimo);
     }
 
     return { success: true };
@@ -329,11 +431,75 @@ export async function actualizarProducto(
   }
 }
 
+export async function actualizarStockPorTallas(
+  productoId: string,
+  tallasStock: Record<string, number>,
+  stockMinimo = 5
+): Promise<{ success: boolean; nuevoStockTotal?: number; error?: string }> {
+  try {
+    const tallas = Object.keys(tallasStock);
+    const total = Object.values(tallasStock).reduce((acc, v) => acc + (Number(v) || 0), 0);
+
+    const variantes: any[] = tallas.map((t) => ({
+      id: `var_${t.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+      titulo: `Talla: ${t}`,
+      opciones: { Talla: t },
+      stock: Number(tallasStock[t]) || 0,
+      activo: true,
+    }));
+
+    // Actualizar en productos
+    try {
+      await supabase.from('productos').update({
+        tallas_stock: tallasStock,
+        tallas: tallas,
+        variantes: variantes,
+        stock: total,
+        actualizado_en: new Date().toISOString(),
+      }).eq('id', productoId);
+    } catch (e) {
+      console.warn("Aviso actualizando tallas_stock en productos:", e);
+    }
+
+    // Actualizar en inventario
+    await actualizarStockRapido(productoId, total, stockMinimo);
+
+    return { success: true, nuevoStockTotal: total };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+}
+
 export async function eliminarProducto(id: string): Promise<{ success: boolean; error?: string }> {
   try {
-    // delete inventory row first
-    await supabase.from('inventario').delete().eq('producto_id', id);
-    // delete product
+    // 1. Obtener producto para borrar sus fotos del Supabase Storage
+    try {
+      const { data: prod } = await supabase.from('productos').select('*').eq('id', id).maybeSingle();
+      if (prod) {
+        const imgsABorrar: string[] = [];
+        if (prod.imagen_url) imgsABorrar.push(prod.imagen_url);
+        if (Array.isArray(prod.imagenes)) {
+          prod.imagenes.forEach((img: string) => {
+            if (img && !imgsABorrar.includes(img)) imgsABorrar.push(img);
+          });
+        }
+        for (const imgUrl of imgsABorrar) {
+          await eliminarArchivoStorage(imgUrl, 'productos');
+        }
+      }
+    } catch (stErr) {
+      console.warn("Aviso limpiando fotos de storage para producto:", stErr);
+    }
+
+    // 2. Eliminar de tablas relacionadas
+    try {
+      await supabase.from('detalles_productos').delete().eq('producto_id', id);
+    } catch {}
+    try {
+      await supabase.from('inventario').delete().eq('producto_id', id);
+    } catch {}
+
+    // 3. Eliminar de la tabla productos
     const { error } = await supabase.from('productos').delete().eq('id', id);
     if (error) throw error;
     return { success: true };
@@ -612,9 +778,77 @@ export async function vincularComprobanteAPedido(
   }
 }
 
+/**
+ * Extrae el nombre del bucket y la ruta interna de un archivo en Supabase Storage
+ */
+export function extraerStoragePath(url: string): { bucket: string; path: string } | null {
+  if (!url || typeof url !== 'string') return null;
+  const match = url.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
+  if (match) {
+    const rawPath = match[2].split('?')[0];
+    return { bucket: match[1], path: decodeURIComponent(rawPath) };
+  }
+  return null;
+}
+
+/**
+ * Elimina permanentemente un archivo de Supabase Storage
+ */
+export async function eliminarArchivoStorage(urlOrPath: string, bucketDefault = 'productos'): Promise<boolean> {
+  try {
+    if (!urlOrPath) return false;
+    let bucket = bucketDefault;
+    let path = urlOrPath;
+
+    const extracted = extraerStoragePath(urlOrPath);
+    if (extracted) {
+      bucket = extracted.bucket;
+      path = extracted.path;
+    } else {
+      if (path.startsWith('productos/')) {
+        bucket = 'productos';
+      } else if (path.startsWith('recibos/')) {
+        bucket = 'comprobantes';
+      }
+    }
+
+    const { error } = await supabase.storage.from(bucket).remove([path]);
+    if (error) {
+      console.warn(`Aviso eliminando de storage [${bucket}/${path}]:`, error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Error en eliminarArchivoStorage:', err);
+    return false;
+  }
+}
+
 export async function eliminarPedido(idOrCodigo: string): Promise<{ success: boolean; error?: string }> {
   try {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCodigo);
+    // 1. Obtener pedido para borrar su comprobante de pago de Supabase Storage
+    try {
+      let q = supabase.from('pedidos').select('comprobante_url, comprobante_path');
+      if (isUuid) {
+        q = q.eq('id', idOrCodigo);
+      } else {
+        q = q.eq('codigo', idOrCodigo);
+      }
+      const { data: ped } = await q.maybeSingle();
+      if (ped) {
+        if (ped.comprobante_url) {
+          await eliminarArchivoStorage(ped.comprobante_url, 'comprobantes');
+        }
+        if (ped.comprobante_path) {
+          await eliminarArchivoStorage(ped.comprobante_path, 'comprobantes');
+        }
+      }
+    } catch (stErr) {
+      console.warn("Aviso eliminando comprobante de storage:", stErr);
+    }
+
+    // 2. Eliminar fila de la tabla pedidos
     if (isUuid) {
       await supabase.from('pedidos').delete().eq('id', idOrCodigo);
     }
@@ -627,6 +861,20 @@ export async function eliminarPedido(idOrCodigo: string): Promise<{ success: boo
 
 export async function eliminarTodosLosPedidos(): Promise<{ success: boolean; error?: string }> {
   try {
+    // 1. Obtener todos los comprobantes para borrarlos del Storage
+    try {
+      const { data: todos } = await supabase.from('pedidos').select('comprobante_url, comprobante_path');
+      if (todos && todos.length > 0) {
+        for (const p of todos) {
+          if (p.comprobante_url) await eliminarArchivoStorage(p.comprobante_url, 'comprobantes');
+          if (p.comprobante_path) await eliminarArchivoStorage(p.comprobante_path, 'comprobantes');
+        }
+      }
+    } catch (stErr) {
+      console.warn("Aviso limpiando comprobantes de storage:", stErr);
+    }
+
+    // 2. Eliminar todos los pedidos
     await supabase.from('pedidos').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     return { success: true };
   } catch (err: any) {
@@ -724,20 +972,122 @@ export async function getVentas(): Promise<Venta[]> {
 }
 
 /**
- * Descuenta stock automáticamente de las tablas 'inventario' y 'productos' (incluyendo variantes)
+ * Descuenta stock automáticamente de las tablas 'inventario' y 'productos'
+ * Descuenta EXCLUSIVAMENTE de la talla vendida (ej: solo XL, dejando intactas las demás)
+ * y recalcula el stock total del producto.
  */
 export async function descontarStockProducto(
   productoId: string,
   cantidadADescontar: number,
   varianteId?: string,
-  varianteTitulo?: string
+  varianteTitulo?: string,
+  talla?: string
 ): Promise<{ success: boolean; nuevoStock?: number; error?: string }> {
   try {
     const cant = Math.max(1, Number(cantidadADescontar) || 1);
     const now = new Date().toISOString();
 
-    // 1. Descontar en la tabla 'inventario' (fuente principal para getProductos e inventario en admin)
-    let nuevoStockInventario = 0;
+    // 1. Obtener estado actual del producto (stock, tallas_stock y variantes)
+    let prodData: any = null;
+    try {
+      const { data } = await supabase
+        .from('productos')
+        .select('id, stock, variantes, tiene_variantes, tallas, tallas_stock')
+        .eq('id', productoId)
+        .maybeSingle();
+      prodData = data;
+    } catch (e) {
+      console.warn('Aviso leyendo producto para descuento:', e);
+    }
+
+    let nuevoStockProd = 0;
+    let nuevasTallasStock: Record<string, number> | undefined = undefined;
+    let nuevasVariantes: any[] | undefined = undefined;
+
+    if (prodData) {
+      const currentStock = Number(prodData.stock) || 0;
+
+      // Descuento específico por TALLA si el producto maneja tallas_stock
+      if (prodData.tallas_stock && typeof prodData.tallas_stock === 'object' && Object.keys(prodData.tallas_stock).length > 0) {
+        const tallasMap: Record<string, number> = { ...prodData.tallas_stock };
+
+        // Buscar coincidencia exacta o insensible a mayúsculas/minúsculas de la talla
+        const searchTalla = (talla || varianteTitulo || '').trim().toLowerCase();
+        let targetKey: string | null = null;
+
+        if (searchTalla) {
+          targetKey = Object.keys(tallasMap).find(
+            (k) => k.toLowerCase() === searchTalla || searchTalla.includes(k.toLowerCase())
+          ) || null;
+        }
+
+        // Si encontramos la talla exacta (ej: XL)
+        if (targetKey) {
+          const actualTallaStock = Number(tallasMap[targetKey]) || 0;
+          tallasMap[targetKey] = Math.max(0, actualTallaStock - cant);
+        } else {
+          // Si no vino talla especificada pero el producto tiene tallas, descontar del primer registro disponible
+          const firstKey = Object.keys(tallasMap)[0];
+          if (firstKey) {
+            const actual = Number(tallasMap[firstKey]) || 0;
+            tallasMap[firstKey] = Math.max(0, actual - cant);
+          }
+        }
+
+        nuevasTallasStock = tallasMap;
+
+        // El stock total del producto es la SUMA exacta de las tallas actualizadas
+        nuevoStockProd = Object.values(tallasMap).reduce(
+          (sum, q) => sum + (Number(q) || 0),
+          0
+        );
+      } else {
+        // Descuento estándar si no tiene desglose de tallas
+        nuevoStockProd = Math.max(0, currentStock - cant);
+      }
+
+      // Descontar también en el array de variantes si existen
+      if (Array.isArray(prodData.variantes) && prodData.variantes.length > 0) {
+        const searchVar = (talla || varianteTitulo || varianteId || '').trim().toLowerCase();
+        nuevasVariantes = prodData.variantes.map((v: any) => {
+          const matches =
+            (varianteId && (v.id === varianteId || v.titulo === varianteId)) ||
+            (varianteTitulo && (v.titulo === varianteTitulo || v.id === varianteTitulo)) ||
+            (searchVar && (
+              (v.opciones?.Talla && v.opciones.Talla.toLowerCase() === searchVar) ||
+              (v.titulo && v.titulo.toLowerCase().includes(searchVar))
+            ));
+          if (matches) {
+            const varStock = Number(v.stock) || 0;
+            return { ...v, stock: Math.max(0, varStock - cant) };
+          }
+          return v;
+        });
+      }
+
+      // Actualizar tabla productos en Supabase
+      const updateProdPayload: any = {
+        stock: nuevoStockProd,
+        actualizado_en: now,
+      };
+      if (nuevasTallasStock) {
+        updateProdPayload.tallas_stock = nuevasTallasStock;
+      }
+      if (nuevasVariantes) {
+        updateProdPayload.variantes = nuevasVariantes;
+      }
+
+      try {
+        await supabase
+          .from('productos')
+          .update(updateProdPayload)
+          .eq('id', productoId);
+      } catch (errProd) {
+        console.warn('Aviso actualizando producto con nuevo stock por talla:', errProd);
+      }
+    }
+
+    // 2. Sincronizar en la tabla 'inventario'
     try {
       const { data: invData } = await supabase
         .from('inventario')
@@ -746,31 +1096,21 @@ export async function descontarStockProducto(
         .maybeSingle();
 
       if (invData) {
-        const actual = Number(invData.cantidad) || 0;
-        nuevoStockInventario = Math.max(0, actual - cant);
         await supabase
           .from('inventario')
           .update({
-            cantidad: nuevoStockInventario,
+            cantidad: nuevoStockProd,
             actualizado_en: now,
           })
           .eq('producto_id', productoId);
       } else {
-        const { data: prodInfo } = await supabase
-          .from('productos')
-          .select('stock')
-          .eq('id', productoId)
-          .maybeSingle();
-
-        const base = Number(prodInfo?.stock) || 0;
-        nuevoStockInventario = Math.max(0, base - cant);
         await supabase
           .from('inventario')
           .insert([
             {
               producto_id: productoId,
-              cantidad: nuevoStockInventario,
-              stock_minimo: 5,
+              cantidad: nuevoStockProd,
+              stock_minimo: 3,
             }
           ]);
       }
@@ -778,46 +1118,7 @@ export async function descontarStockProducto(
       console.warn('Aviso descontando en tabla inventario:', invErr);
     }
 
-    // 2. Descontar en la tabla 'productos' (stock general y array de variantes)
-    try {
-      const { data: prodData } = await supabase
-        .from('productos')
-        .select('id, stock, variantes, tiene_variantes')
-        .eq('id', productoId)
-        .maybeSingle();
-
-      if (prodData) {
-        const currentStock = Number(prodData.stock) || 0;
-        const nuevoStockProd = Math.max(0, currentStock - cant);
-
-        let nuevasVariantes = prodData.variantes;
-        if (Array.isArray(nuevasVariantes) && (varianteId || varianteTitulo)) {
-          nuevasVariantes = nuevasVariantes.map((v: any) => {
-            if (
-              (varianteId && (v.id === varianteId || v.titulo === varianteId)) ||
-              (varianteTitulo && (v.titulo === varianteTitulo || v.id === varianteTitulo))
-            ) {
-              const varStock = Number(v.stock) || 0;
-              return { ...v, stock: Math.max(0, varStock - cant) };
-            }
-            return v;
-          });
-        }
-
-        await supabase
-          .from('productos')
-          .update({
-            stock: nuevoStockProd,
-            variantes: nuevasVariantes,
-            actualizado_en: now,
-          })
-          .eq('id', productoId);
-      }
-    } catch (prodErr) {
-      console.warn('Aviso descontando en tabla productos:', prodErr);
-    }
-
-    return { success: true, nuevoStock: nuevoStockInventario };
+    return { success: true, nuevoStock: nuevoStockProd };
   } catch (err: any) {
     console.error('Error en descontarStockProducto:', err);
     return { success: false, error: err.message };
@@ -922,7 +1223,7 @@ export async function crearVentaManual(venta: {
         const prodId = item.producto_id || item.id;
         const cant = Number(item.cantidad) || 1;
         if (prodId) {
-          await descontarStockProducto(prodId, cant, item.variante_id, item.variante_titulo);
+          await descontarStockProducto(prodId, cant, item.variante_id, item.variante_titulo, item.talla);
         }
       }
     }
@@ -1109,7 +1410,7 @@ export async function aprobarPedidoYDescontarStock(
         const prodId = item.producto_id || item.id;
         const cant = Number(item.cantidad) || 1;
         if (prodId) {
-          await descontarStockProducto(prodId, cant, item.variante_id, item.variante_titulo);
+          await descontarStockProducto(prodId, cant, item.variante_id, item.variante_titulo, item.talla);
         }
       }
     }

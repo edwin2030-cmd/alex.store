@@ -63,6 +63,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
   // Tallas y Colores directos para el cliente
   const [tallas, setTallas] = useState<string[]>(productoToEdit?.tallas || []);
   const [colores, setColores] = useState<string[]>(productoToEdit?.colores || []);
+  const [tallasStock, setTallasStock] = useState<Record<string, number>>(productoToEdit?.tallas_stock || {});
   const [tallaInput, setTallaInput] = useState('');
   const [colorInput, setColorInput] = useState('');
 
@@ -83,6 +84,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
       setImagenes(productoToEdit.imagenes || (productoToEdit.imagen_url ? [productoToEdit.imagen_url] : []));
       setTallas(productoToEdit.tallas || []);
       setColores(productoToEdit.colores || []);
+      setTallasStock(productoToEdit.tallas_stock || {});
       setTieneVariantes(Boolean(productoToEdit.tiene_variantes || (productoToEdit.variantes && productoToEdit.variantes.length > 0)));
       setAtributos(productoToEdit.atributos || []);
       setVariantes(productoToEdit.variantes || []);
@@ -99,11 +101,49 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
       setImagenes([]);
       setTallas([]);
       setColores([]);
+      setTallasStock({});
       setTieneVariantes(false);
       setAtributos([]);
       setVariantes([]);
     }
   }, [productoToEdit, categorias]);
+
+  // Stock total de tallas sumado dinámicamente
+  const stockTotalTallas = useMemo(() => {
+    if (tallas.length === 0) return 0;
+    return tallas.reduce((acc, t) => acc + (Number(tallasStock[t]) || 0), 0);
+  }, [tallas, tallasStock]);
+
+  const handleSetStockTalla = (talla: string, qty: number) => {
+    setTallasStock((prev) => ({
+      ...prev,
+      [talla]: Math.max(0, qty),
+    }));
+  };
+
+  const handleToggleTalla = (t: string) => {
+    if (tallas.includes(t)) {
+      setTallas((prev) => prev.filter((x) => x !== t));
+    } else {
+      setTallas((prev) => [...prev, t]);
+      setTallasStock((prev) => ({
+        ...prev,
+        [t]: prev[t] !== undefined ? prev[t] : 5,
+      }));
+    }
+  };
+
+  const handleAddManualTalla = () => {
+    const clean = tallaInput.trim();
+    if (clean && !tallas.includes(clean)) {
+      setTallas((prev) => [...prev, clean]);
+      setTallasStock((prev) => ({
+        ...prev,
+        [clean]: prev[clean] !== undefined ? prev[clean] : 5,
+      }));
+      setTallaInput('');
+    }
+  };
 
   // Si tiene variantes, calcular el stock total sumando las variantes
   const stockTotalVariantes = useMemo(() => {
@@ -302,7 +342,12 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
     const numPrecio = parseFloat(precio) || 0;
     const numCosto = parseFloat(costo) || 0;
     const numStockMin = parseInt(stockMinimo, 10) || 3;
-    const finalStock = tieneVariantes && variantes.length > 0 ? stockTotalVariantes : (parseInt(cantidad, 10) || 0);
+    const finalStock =
+      tallas.length > 0
+        ? stockTotalTallas
+        : tieneVariantes && variantes.length > 0
+        ? stockTotalVariantes
+        : parseInt(cantidad, 10) || 0;
     const mainImageUrl = imagenes[0] || null;
 
     const payload = {
@@ -317,6 +362,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
       sku: skuGeneral.trim() || undefined,
       tallas,
       colores,
+      tallas_stock: tallasStock,
       tiene_variantes: tieneVariantes || tallas.length > 0 || colores.length > 0,
       atributos: tieneVariantes ? atributos : [],
       variantes: tieneVariantes ? variantes : [],
@@ -520,13 +566,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
                     <button
                       key={t}
                       type="button"
-                      onClick={() => {
-                        if (exists) {
-                          setTallas(tallas.filter((x) => x !== t));
-                        } else {
-                          setTallas([...tallas, t]);
-                        }
-                      }}
+                      onClick={() => handleToggleTalla(t)}
                       className={`px-2.5 py-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                         exists
                           ? 'bg-[#141312] text-[#E6C687] border border-[#141312] shadow-xs'
@@ -549,47 +589,82 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      if (tallaInput.trim() && !tallas.includes(tallaInput.trim())) {
-                        setTallas([...tallas, tallaInput.trim()]);
-                        setTallaInput('');
-                      }
+                      handleAddManualTalla();
                     }
                   }}
                   className="flex-1 bg-[#FAF8F5] text-xs px-3.5 py-2 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
                 />
                 <button
                   type="button"
-                  onClick={() => {
-                    if (tallaInput.trim() && !tallas.includes(tallaInput.trim())) {
-                      setTallas([...tallas, tallaInput.trim()]);
-                      setTallaInput('');
-                    }
-                  }}
+                  onClick={handleAddManualTalla}
                   className="px-3.5 py-2 rounded-xl bg-[#141312] text-[#F5E6BE] text-xs font-bold hover:bg-black transition-colors cursor-pointer shrink-0"
                 >
                   + Agregar Talla
                 </button>
               </div>
 
-              {/* Chips de tallas activas */}
+              {/* Chips de tallas activas y control de inventario por talla */}
               {tallas.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {tallas.map((t, idx) => (
-                    <span
-                      key={idx}
-                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#141312] text-white text-xs font-bold shadow-xs"
-                    >
-                      <span>{t}</span>
-                      <button
-                        type="button"
-                        onClick={() => setTallas(tallas.filter((_, i) => i !== idx))}
-                        className="text-[#E6C687] hover:text-white cursor-pointer"
-                        title="Eliminar talla"
+                <div className="space-y-3 pt-2">
+                  <div className="flex flex-wrap gap-1.5">
+                    {tallas.map((t, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#141312] text-white text-xs font-bold shadow-xs"
                       >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </span>
-                  ))}
+                        <span>{t}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleTalla(t)}
+                          className="text-[#E6C687] hover:text-white cursor-pointer"
+                          title="Eliminar talla"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Panel de asignación de cantidades por talla */}
+                  <div className="p-3.5 bg-[#FAF8F5] rounded-2xl border border-[#E0D9CD] space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Boxes className="w-4 h-4 text-[#C59A4D]" />
+                        <span className="text-xs font-black uppercase text-[#1A1918]">
+                          Stock Específico por Talla
+                        </span>
+                      </div>
+                      <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-[#141312] text-[#E6C687]">
+                        Total: {stockTotalTallas} unids.
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#7A7368]">
+                      Define cuántas unidades físicas tienes disponibles de cada talla para controlar el inventario con precisión:
+                    </p>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 pt-1">
+                      {tallas.map((t) => (
+                        <div
+                          key={t}
+                          className="flex items-center justify-between p-2 rounded-xl bg-white border border-[#E2DBD0] shadow-xs"
+                        >
+                          <span className="font-black text-xs text-[#1A1918] px-2 py-0.5 rounded-lg bg-[#FAF8F5] border border-[#E2DBD0]">
+                            {t}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              min="0"
+                              value={tallasStock[t] ?? 0}
+                              onChange={(e) => handleSetStockTalla(t, parseInt(e.target.value, 10) || 0)}
+                              className="w-14 text-center font-black text-xs bg-[#FAF8F5] border border-[#DDD7CC] rounded-lg py-1 px-1 focus:outline-none focus:border-[#C59A4D]"
+                            />
+                            <span className="text-[10px] text-[#7A7368] font-bold">u.</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -997,19 +1072,33 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
               /* Inventario estándar simple si no tiene variantes */
               <div className="p-3.5 rounded-2xl bg-white border border-[#EBE6DD] space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[11px] font-bold text-[#5A554D] block mb-1">
-                      Cantidad de Unidades Disponibles (Stock)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={cantidad}
-                      onChange={(e) => setCantidad(e.target.value)}
-                      placeholder="10"
-                      className="w-full bg-white text-xs text-[#1A1918] px-3 py-2 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
-                    />
-                  </div>
+                  {tallas.length > 0 ? (
+                    <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#DDD7CC]">
+                      <label className="text-[11px] font-bold text-[#5A554D] block mb-1">
+                        Stock Total Calculado de Tallas
+                      </label>
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-sm text-[#C59A4D]">{stockTotalTallas} unidades</span>
+                        <span className="text-[10px] text-[#7A7368] font-mono">
+                          ({tallas.map((t) => `${t}: ${tallasStock[t] ?? 0}`).join(' | ')})
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="text-[11px] font-bold text-[#5A554D] block mb-1">
+                        Cantidad de Unidades Disponibles (Stock)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={cantidad}
+                        onChange={(e) => setCantidad(e.target.value)}
+                        placeholder="10"
+                        className="w-full bg-white text-xs text-[#1A1918] px-3 py-2 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <label className="text-[11px] font-bold text-[#5A554D] block mb-1">

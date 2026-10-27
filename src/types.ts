@@ -43,6 +43,7 @@ export interface Producto {
   // Opciones directas: tallas y colores manuales
   tallas?: string[];
   colores?: string[];
+  tallas_stock?: Record<string, number>;
   detalles_personalizados?: Record<string, any>;
   // Variantes personalizables
   tiene_variantes?: boolean;

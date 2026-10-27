@@ -92,6 +92,18 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='productos' AND column_name='sku') THEN
     ALTER TABLE public.productos ADD COLUMN sku TEXT;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='productos' AND column_name='costo') THEN
+    ALTER TABLE public.productos ADD COLUMN costo NUMERIC(12, 2) DEFAULT 0.00;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='productos' AND column_name='tallas') THEN
+    ALTER TABLE public.productos ADD COLUMN tallas JSONB DEFAULT '[]'::jsonb;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='productos' AND column_name='colores') THEN
+    ALTER TABLE public.productos ADD COLUMN colores JSONB DEFAULT '[]'::jsonb;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='productos' AND column_name='tallas_stock') THEN
+    ALTER TABLE public.productos ADD COLUMN tallas_stock JSONB DEFAULT '{}'::jsonb;
+  END IF;
 END $$;
 
 ALTER TABLE public.productos ENABLE ROW LEVEL SECURITY;
@@ -246,7 +258,7 @@ CREATE INDEX IF NOT EXISTS idx_movimientos_usuario_email ON public.movimientos_t
 CREATE INDEX IF NOT EXISTS idx_movimientos_creado_en ON public.movimientos_trabajadores (creado_en DESC);
 
 -- ==============================================================================
--- 7. SUPABASE STORAGE: BUCKET 'comprobantes'
+-- 7. SUPABASE STORAGE: BUCKETS 'productos' Y 'comprobantes' (CON BORRADO REAL)
 -- ==============================================================================
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
@@ -261,30 +273,43 @@ ON CONFLICT (id) DO UPDATE SET
   file_size_limit = 10485760,
   allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 
--- Políticas RLS para storage.objects
-DROP POLICY IF EXISTS "Permitir subida publica comprobantes" ON storage.objects;
-CREATE POLICY "Permitir subida publica comprobantes"
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'productos',
+  'productos',
+  true,
+  10485760, -- 10 MB límite
+  ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+)
+ON CONFLICT (id) DO UPDATE SET
+  public = true,
+  file_size_limit = 10485760,
+  allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
+-- Políticas RLS para storage.objects (Permitir subida, lectura, actualización y ELIMINACIÓN)
+DROP POLICY IF EXISTS "Permitir subida publica storage" ON storage.objects;
+CREATE POLICY "Permitir subida publica storage"
 ON storage.objects FOR INSERT
 TO public
-WITH CHECK (bucket_id = 'comprobantes');
+WITH CHECK (bucket_id IN ('comprobantes', 'productos'));
 
-DROP POLICY IF EXISTS "Lectura publica comprobantes" ON storage.objects;
-CREATE POLICY "Lectura publica comprobantes"
+DROP POLICY IF EXISTS "Lectura publica storage" ON storage.objects;
+CREATE POLICY "Lectura publica storage"
 ON storage.objects FOR SELECT
 TO public
-USING (bucket_id = 'comprobantes');
+USING (bucket_id IN ('comprobantes', 'productos'));
 
-DROP POLICY IF EXISTS "Permitir actualizar comprobantes" ON storage.objects;
-CREATE POLICY "Permitir actualizar comprobantes"
+DROP POLICY IF EXISTS "Permitir actualizar storage" ON storage.objects;
+CREATE POLICY "Permitir actualizar storage"
 ON storage.objects FOR UPDATE
 TO public
-USING (bucket_id = 'comprobantes');
+USING (bucket_id IN ('comprobantes', 'productos'));
 
-DROP POLICY IF EXISTS "Permitir borrar comprobantes" ON storage.objects;
-CREATE POLICY "Permitir borrar comprobantes"
+DROP POLICY IF EXISTS "Permitir borrar permanente storage" ON storage.objects;
+CREATE POLICY "Permitir borrar permanente storage"
 ON storage.objects FOR DELETE
 TO public
-USING (bucket_id = 'comprobantes');
+USING (bucket_id IN ('comprobantes', 'productos'));
 
 -- ==============================================================================
 -- 8. POLÍTICAS RLS EN TABLAS (LECTURA Y ESCRITURA SEGURA)
@@ -339,10 +364,14 @@ SECURITY DEFINER
 AS $$
 DECLARE
   v_pedido RECORD;
+  v_prod RECORD;
   v_item JSONB;
   v_prod_id TEXT;
   v_cantidad INT;
   v_var_id TEXT;
+  v_talla TEXT;
+  v_tallas_stock JSONB;
+  v_talla_curr_stock INT;
   v_codigo_venta TEXT;
 BEGIN
   -- 1. Obtener pedido
@@ -360,22 +389,43 @@ BEGIN
       actualizado_en = now()
   WHERE id = p_pedido_id;
 
-  -- 3. Descontar existencias del inventario
+  -- 3. Descontar existencias del inventario (específicamente por talla)
   IF v_pedido.items IS NOT NULL THEN
     FOR v_item IN SELECT * FROM jsonb_array_elements(v_pedido.items)
     LOOP
-      v_prod_id := v_item->>'producto_id';
-      IF v_prod_id IS NULL THEN
-        v_prod_id := v_item->>'id';
-      END IF;
+      v_prod_id := COALESCE(v_item->>'producto_id', v_item->>'id');
       v_cantidad := COALESCE((v_item->>'cantidad')::INT, 1);
-      v_var_id := v_item->>'variante_id';
+      v_talla := NULLIF(TRIM(COALESCE(v_item->>'talla', '')), '');
 
-      -- Descontar stock general del producto
-      UPDATE public.productos
-      SET stock = GREATEST(0, stock - v_cantidad),
-          actualizado_en = now()
-      WHERE id = v_prod_id;
+      SELECT * INTO v_prod FROM public.productos WHERE id = v_prod_id;
+      IF FOUND THEN
+        IF v_talla IS NOT NULL AND v_prod.tallas_stock IS NOT NULL AND v_prod.tallas_stock ? v_talla THEN
+          -- Descontar exclusivamente la talla seleccionada (ej: solo XL)
+          v_talla_curr_stock := COALESCE((v_prod.tallas_stock->>v_talla)::INT, 0);
+          v_tallas_stock := jsonb_set(
+            v_prod.tallas_stock,
+            ARRAY[v_talla],
+            to_jsonb(GREATEST(0, v_talla_curr_stock - v_cantidad))
+          );
+
+          UPDATE public.productos
+          SET tallas_stock = v_tallas_stock,
+              stock = GREATEST(0, stock - v_cantidad),
+              actualizado_en = now()
+          WHERE id = v_prod_id;
+        ELSE
+          UPDATE public.productos
+          SET stock = GREATEST(0, stock - v_cantidad),
+              actualizado_en = now()
+          WHERE id = v_prod_id;
+        END IF;
+
+        -- Sincronizar en tabla inventario
+        UPDATE public.inventario
+        SET cantidad = GREATEST(0, cantidad - v_cantidad),
+            actualizado_en = now()
+        WHERE producto_id = v_prod_id;
+      END IF;
     END LOOP;
   END IF;
 

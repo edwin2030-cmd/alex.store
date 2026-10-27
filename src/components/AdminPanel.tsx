@@ -49,6 +49,7 @@ import {
   cerrarCaja,
   eliminarTodosLosGastos,
   eliminarGastosPorIds,
+  actualizarStockPorTallas,
 } from '../lib/supabase';
 import {
   ROLE_PERMISSIONS,
@@ -64,6 +65,7 @@ import { ModalNuevaCategoria } from './ModalNuevaCategoria';
 import { ModalNuevoUsuario } from './ModalNuevoUsuario';
 import { ModalEditarRol } from './ModalEditarRol';
 import { ModalSqlAuth } from './ModalSqlAuth';
+import { ModalStockTallasRapido } from './ModalStockTallasRapido';
 import {
   LayoutDashboard,
   Receipt,
@@ -276,6 +278,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Filtro de fecha para Movimientos
   const [movimientosFechaFilter, setMovimientosFechaFilter] = useState<string>('');
+
+  // Modal para ajuste rápido de stock por tallas directamente en Inventario
+  const [productoAjustarTallas, setProductoAjustarTallas] = useState<Producto | null>(null);
 
   const reloadAllData = async () => {
     setLoading(true);
@@ -814,20 +819,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 (it) => it.producto_id === prod.id || it.id === prod.id
               );
               if (!itemMatch) return prod;
-              const nextStock = Math.max(0, (prod.stock ?? 0) - itemMatch.cantidad);
+
+              // Descontar talla específica de tallas_stock
+              let nextTallasStock = prod.tallas_stock ? { ...prod.tallas_stock } : undefined;
+              if (nextTallasStock && itemMatch.talla) {
+                const search = itemMatch.talla.trim().toLowerCase();
+                const targetKey = Object.keys(nextTallasStock).find(
+                  (k) => k.toLowerCase() === search || search.includes(k.toLowerCase())
+                );
+                if (targetKey) {
+                  const curr = Number(nextTallasStock[targetKey]) || 0;
+                  nextTallasStock[targetKey] = Math.max(0, curr - itemMatch.cantidad);
+                }
+              }
+
+              const nextStock =
+                nextTallasStock && Object.keys(nextTallasStock).length > 0
+                  ? Object.values(nextTallasStock).reduce((sum, q) => sum + (Number(q) || 0), 0)
+                  : Math.max(0, (prod.stock ?? 0) - itemMatch.cantidad);
+
               let nextVars = prod.variantes;
-              if (Array.isArray(nextVars) && (itemMatch.variante_id || itemMatch.variante_titulo)) {
+              if (Array.isArray(nextVars)) {
                 nextVars = nextVars.map((v) => {
-                  if (
+                  const isMatch =
                     (itemMatch.variante_id && v.id === itemMatch.variante_id) ||
-                    (itemMatch.variante_titulo && v.titulo === itemMatch.variante_titulo)
-                  ) {
+                    (itemMatch.variante_titulo && v.titulo === itemMatch.variante_titulo) ||
+                    (itemMatch.talla && (
+                      (v.opciones?.Talla && v.opciones.Talla.toLowerCase() === itemMatch.talla.toLowerCase()) ||
+                      (v.titulo && v.titulo.toLowerCase().includes(itemMatch.talla.toLowerCase()))
+                    ));
+                  if (isMatch) {
                     return { ...v, stock: Math.max(0, (v.stock ?? 0) - itemMatch.cantidad) };
                   }
                   return v;
                 });
               }
-              return { ...prod, stock: nextStock, variantes: nextVars };
+              return { ...prod, stock: nextStock, tallas_stock: nextTallasStock, variantes: nextVars };
             })
           );
         }
@@ -1123,18 +1150,47 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               const matchedItems = itemsToSave.filter((it) => (it.producto_id || it.id) === prod.id);
               if (matchedItems.length === 0) return prod;
               const totalCantVendida = matchedItems.reduce((acc, it) => acc + (it.cantidad || 1), 0);
-              const nextStock = Math.max(0, (prod.stock ?? 0) - totalCantVendida);
+
+              let nextTallasStock = prod.tallas_stock ? { ...prod.tallas_stock } : undefined;
+              if (nextTallasStock) {
+                matchedItems.forEach((it) => {
+                  if (it.talla) {
+                    const search = it.talla.trim().toLowerCase();
+                    const targetKey = Object.keys(nextTallasStock!).find(
+                      (k) => k.toLowerCase() === search || search.includes(k.toLowerCase())
+                    );
+                    if (targetKey) {
+                      const curr = Number(nextTallasStock![targetKey]) || 0;
+                      nextTallasStock![targetKey] = Math.max(0, curr - (it.cantidad || 1));
+                    }
+                  }
+                });
+              }
+
+              const nextStock =
+                nextTallasStock && Object.keys(nextTallasStock).length > 0
+                  ? Object.values(nextTallasStock).reduce((sum, q) => sum + (Number(q) || 0), 0)
+                  : Math.max(0, (prod.stock ?? 0) - totalCantVendida);
+
               let nextVars = prod.variantes;
               if (Array.isArray(nextVars)) {
                 nextVars = nextVars.map((v: any) => {
-                  const varMatch = matchedItems.find((it) => (it.variante_id && v.id === it.variante_id) || (it.variante_titulo && v.titulo === it.variante_titulo));
+                  const varMatch = matchedItems.find(
+                    (it) =>
+                      (it.variante_id && v.id === it.variante_id) ||
+                      (it.variante_titulo && v.titulo === it.variante_titulo) ||
+                      (it.talla && (
+                        (v.opciones?.Talla && v.opciones.Talla.toLowerCase() === it.talla.toLowerCase()) ||
+                        (v.titulo && v.titulo.toLowerCase().includes(it.talla.toLowerCase()))
+                      ))
+                  );
                   if (varMatch) {
                     return { ...v, stock: Math.max(0, (v.stock ?? 0) - (varMatch.cantidad || 1)) };
                   }
                   return v;
                 });
               }
-              return { ...prod, stock: nextStock, variantes: nextVars };
+              return { ...prod, stock: nextStock, tallas_stock: nextTallasStock, variantes: nextVars };
             })
           );
         }
@@ -4586,6 +4642,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   <span className="text-[11px] text-[#A69F93]">
                                     {categorias.find((c) => c.id === prod.categoria_id)?.nombre || 'General'}
                                   </span>
+                                  {prod.tallas_stock && Object.keys(prod.tallas_stock).length > 0 ? (
+                                    <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                                      <span className="text-[9px] font-bold text-[#A69F93] uppercase mr-0.5">Tallas:</span>
+                                      {Object.entries(prod.tallas_stock).map(([talla, cant]) => (
+                                        <span
+                                          key={talla}
+                                          className={`text-[10px] px-1.5 py-0.5 rounded-lg border font-mono font-bold ${
+                                            cant <= 0
+                                              ? 'bg-rose-950/40 text-rose-300 border-rose-900/60'
+                                              : cant <= 2
+                                              ? 'bg-amber-950/40 text-amber-300 border-amber-900/60'
+                                              : 'bg-[#1E1B18] text-[#E6C687] border-[#38332B]'
+                                          }`}
+                                        >
+                                          {talla}: {cant}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : prod.tallas && prod.tallas.length > 0 ? (
+                                    <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                                      <span className="text-[9px] font-bold text-[#A69F93] uppercase mr-0.5">Tallas:</span>
+                                      {prod.tallas.map((t) => (
+                                        <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-lg bg-[#1E1B18] border border-[#38332B] text-[#E6C687] font-mono">
+                                          {t}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : null}
                                 </div>
                               </div>
                             </td>
@@ -4638,16 +4722,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             </td>
 
                             <td className="py-3 px-6 text-right">
-                              <button
-                                onClick={() => {
-                                  setProductoToEdit(prod);
-                                  setIsModalProductoOpen(true);
-                                }}
-                                className="px-3 py-1.5 rounded-xl border border-[#38332B] hover:bg-[#1E1B18] text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer text-[#E6C687]"
-                              >
-                                <Edit2 className="w-3.5 h-3.5 text-[#C59A4D]" />
-                                <span>Editar</span>
-                              </button>
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => setProductoAjustarTallas(prod)}
+                                  className="px-2.5 py-1.5 rounded-xl border border-[#C59A4D]/40 bg-[#C59A4D]/10 hover:bg-[#C59A4D]/25 text-xs font-bold inline-flex items-center gap-1.5 transition-all cursor-pointer text-[#E6C687]"
+                                  title="Ajustar stock por tallas directamente"
+                                >
+                                  <Layers className="w-3.5 h-3.5 text-[#E6C687]" />
+                                  <span>Tallas / Stock</span>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setProductoToEdit(prod);
+                                    setIsModalProductoOpen(true);
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-xl border border-[#38332B] hover:bg-[#1E1B18] text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer text-[#E6C687]"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5 text-[#C59A4D]" />
+                                  <span>Editar</span>
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -6068,14 +6162,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                       {/* Talla, Color y Variantes */}
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                        {hasVariantes ? (
+                        {selectedProd.tallas_stock && Object.keys(selectedProd.tallas_stock).length > 0 ? (
+                          <div className="sm:col-span-2">
+                            <label className="text-[10px] font-bold text-[#E6C687] block mb-1">
+                              👕 Talla a Vender (Existencias de cada talla):
+                            </label>
+                            <select
+                              value={ventaManualTalla}
+                              onChange={(e) => setVentaManualTalla(e.target.value)}
+                              className="w-full bg-[#1A1816] text-[#E6C687] font-bold px-2.5 py-1.5 rounded-lg border border-[#C59A4D]/50 text-xs focus:outline-none"
+                            >
+                              <option value="">-- Seleccionar Talla a Descontar --</option>
+                              {Object.entries(selectedProd.tallas_stock).map(([t, cant]) => (
+                                <option key={t} value={t}>
+                                  Talla {t} — ({cant} disponible{cant === 1 ? '' : 's'}{cant <= 0 ? ' • AGOTADA' : ''})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : hasVariantes ? (
                           <div className="sm:col-span-2">
                             <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
                               Variante / Talla:
                             </label>
                             <select
                               value={ventaManualVarianteId}
-                              onChange={(e) => setVentaManualVarianteId(e.target.value)}
+                              onChange={(e) => {
+                                setVentaManualVarianteId(e.target.value);
+                                const found = selectedProd.variantes?.find((v: any) => (v.id || v.titulo) === e.target.value);
+                                if (found?.opciones?.Talla) {
+                                  setVentaManualTalla(found.opciones.Talla);
+                                }
+                              }}
                               className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
                             >
                               <option value="">Seleccionar variante</option>
@@ -6086,34 +6204,51 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               ))}
                             </select>
                           </div>
+                        ) : selectedProd.tallas && selectedProd.tallas.length > 0 ? (
+                          <div className="sm:col-span-2">
+                            <label className="text-[10px] font-bold text-[#E6C687] block mb-1">
+                              👕 Talla a Vender:
+                            </label>
+                            <select
+                              value={ventaManualTalla}
+                              onChange={(e) => setVentaManualTalla(e.target.value)}
+                              className="w-full bg-[#1A1816] text-[#E6C687] font-bold px-2.5 py-1.5 rounded-lg border border-[#C59A4D]/50 text-xs focus:outline-none"
+                            >
+                              <option value="">-- Seleccionar Talla --</option>
+                              {selectedProd.tallas.map((t) => (
+                                <option key={t} value={t}>
+                                  Talla {t}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         ) : (
-                          <>
-                            <div>
-                              <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
-                                Talla (ej: S, M, L, XL):
-                              </label>
-                              <input
-                                type="text"
-                                placeholder="Talla..."
-                                value={ventaManualTalla}
-                                onChange={(e) => setVentaManualTalla(e.target.value)}
-                                className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
-                                Color:
-                              </label>
-                              <input
-                                type="text"
-                                placeholder="Color..."
-                                value={ventaManualColor}
-                                onChange={(e) => setVentaManualColor(e.target.value)}
-                                className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
-                              />
-                            </div>
-                          </>
+                          <div>
+                            <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
+                              Talla (ej: S, M, L, XL):
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="Talla..."
+                              value={ventaManualTalla}
+                              onChange={(e) => setVentaManualTalla(e.target.value)}
+                              className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
+                            />
+                          </div>
                         )}
+
+                        <div>
+                          <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
+                            Color:
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Color..."
+                            value={ventaManualColor}
+                            onChange={(e) => setVentaManualColor(e.target.value)}
+                            className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
+                          />
+                        </div>
 
                         <div>
                           <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
@@ -6757,6 +6892,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       <ModalSqlAuth
         isOpen={isModalSqlAuthOpen}
         onClose={() => setIsModalSqlAuthOpen(false)}
+      />
+
+      <ModalStockTallasRapido
+        isOpen={Boolean(productoAjustarTallas)}
+        producto={productoAjustarTallas}
+        onClose={() => setProductoAjustarTallas(null)}
+        onSaved={reloadAllData}
       />
 
       {/* Modal Zoom / Lightbox de Foto de Producto */}

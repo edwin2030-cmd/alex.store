@@ -314,6 +314,12 @@ CREATE TABLE IF NOT EXISTS public.detalles_productos (
 -- Asegurar columnas tallas y colores directamente en la tabla productos
 ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS tallas JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS colores JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS tallas_stock JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS variantes JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS costo NUMERIC(12, 2) DEFAULT 0.00;
+ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS sku TEXT;
+ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS tiene_variantes BOOLEAN DEFAULT false;
+ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS atributos JSONB DEFAULT '[]'::jsonb;
 
 ALTER TABLE public.detalles_productos ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Acceso total a detalles_productos" ON public.detalles_productos;
@@ -413,12 +419,28 @@ DROP POLICY IF EXISTS "Acceso total a usuarios" ON public.usuarios;
 CREATE POLICY "Acceso total a usuarios" ON public.usuarios FOR ALL USING (true) WITH CHECK (true);
 GRANT ALL ON public.usuarios TO anon, authenticated;
 
--- Consulta para verificar tamaño exacto de tus tablas en el SQL Editor de Supabase:
--- SELECT table_name AS tabla,
---        pg_size_pretty(pg_total_relation_size(quote_ident(table_name))) AS tamano_en_disco
--- FROM information_schema.tables 
--- WHERE table_schema = 'public' 
--- ORDER BY pg_total_relation_size(quote_ident(table_name)) DESC;
+-- ==============================================================================
+-- 11. BUCKETS DE STORAGE Y POLÍTICAS DE ELIMINACIÓN PERMANENTE
+-- ==============================================================================
+INSERT INTO storage.buckets (id, name, public) 
+VALUES ('productos', 'productos', true) 
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+INSERT INTO storage.buckets (id, name, public) 
+VALUES ('comprobantes', 'comprobantes', true) 
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+DROP POLICY IF EXISTS "Permitir subida storage" ON storage.objects;
+CREATE POLICY "Permitir subida storage" ON storage.objects FOR INSERT TO public WITH CHECK (bucket_id IN ('productos', 'comprobantes'));
+
+DROP POLICY IF EXISTS "Lectura publica storage" ON storage.objects;
+CREATE POLICY "Lectura publica storage" ON storage.objects FOR SELECT TO public USING (bucket_id IN ('productos', 'comprobantes'));
+
+DROP POLICY IF EXISTS "Permitir actualizar storage" ON storage.objects;
+CREATE POLICY "Permitir actualizar storage" ON storage.objects FOR UPDATE TO public USING (bucket_id IN ('productos', 'comprobantes'));
+
+DROP POLICY IF EXISTS "Permitir borrar permanente storage" ON storage.objects;
+CREATE POLICY "Permitir borrar permanente storage" ON storage.objects FOR DELETE TO public USING (bucket_id IN ('productos', 'comprobantes'));
 `;
 
   const handleCopy = () => {
