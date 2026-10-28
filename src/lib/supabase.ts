@@ -140,9 +140,9 @@ export async function getProductos(): Promise<Producto[]> {
       const tallas = (Array.isArray(p.tallas) && p.tallas.length > 0) ? p.tallas : (det?.tallas || []);
       const colores = (Array.isArray(p.colores) && p.colores.length > 0) ? p.colores : (det?.colores || []);
 
-      // Extraer tallas_stock si existen en la columna p.tallas_stock o reconstruirlas de p.variantes
+      // Extraer tallas_stock si existen en la columna p.tallas_stock, de p.variantes o de caché local
       let tallas_stock: Record<string, number> = {};
-      if (p.tallas_stock && typeof p.tallas_stock === 'object') {
+      if (p.tallas_stock && typeof p.tallas_stock === 'object' && Object.keys(p.tallas_stock).length > 0) {
         tallas_stock = { ...p.tallas_stock };
       } else if (Array.isArray(p.variantes) && p.variantes.length > 0) {
         p.variantes.forEach((v: any) => {
@@ -153,11 +153,25 @@ export async function getProductos(): Promise<Producto[]> {
         });
       }
 
+      // Respaldo de seguridad en caché local para evitar que se reviertan cambios
+      if (Object.keys(tallas_stock).length === 0) {
+        try {
+          const cached = localStorage.getItem('alexstore_tallas_stock_' + p.id);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && typeof parsed === 'object') {
+              tallas_stock = parsed;
+            }
+          }
+        } catch {}
+      }
+
       // Si hay tallas pero no tienen cantidades definidas en tallas_stock, inicializar con el stock del producto
       if (tallas.length > 0 && Object.keys(tallas_stock).length === 0) {
         const baseStock = stockMap[p.id]?.cantidad ?? p.stock ?? 0;
+        const perTalla = Math.max(0, Math.floor(baseStock / tallas.length));
         tallas.forEach((t: string) => {
-          tallas_stock[t] = baseStock;
+          tallas_stock[t] = perTalla;
         });
       }
 
@@ -357,6 +371,13 @@ export async function actualizarProducto(
       }));
     }
 
+    // Guardar en caché local inmediato para que nunca se pierda
+    try {
+      if (tallasStock && Object.keys(tallasStock).length > 0) {
+        localStorage.setItem('alexstore_tallas_stock_' + id, JSON.stringify(tallasStock));
+      }
+    } catch {}
+
     const updatePayload: any = {
       nombre: producto.nombre.trim(),
       descripcion: producto.descripcion || null,
@@ -448,15 +469,30 @@ export async function actualizarStockPorTallas(
       activo: true,
     }));
 
+    // Cache local inmediato de máxima prioridad para garantizar que nunca se revierta
+    try {
+      localStorage.setItem('alexstore_tallas_stock_' + productoId, JSON.stringify(tallasStock));
+    } catch {}
+
     // Actualizar en productos
     try {
-      await supabase.from('productos').update({
+      const updateRes = await supabase.from('productos').update({
         tallas_stock: tallasStock,
         tallas: tallas,
         variantes: variantes,
         stock: total,
         actualizado_en: new Date().toISOString(),
       }).eq('id', productoId);
+
+      if (updateRes.error) {
+        console.warn("Aviso actualizando tallas_stock, reintentando con variantes:", updateRes.error);
+        await supabase.from('productos').update({
+          tallas: tallas,
+          variantes: variantes,
+          stock: total,
+          actualizado_en: new Date().toISOString(),
+        }).eq('id', productoId);
+      }
     } catch (e) {
       console.warn("Aviso actualizando tallas_stock en productos:", e);
     }
@@ -1072,6 +1108,9 @@ export async function descontarStockProducto(
       };
       if (nuevasTallasStock) {
         updateProdPayload.tallas_stock = nuevasTallasStock;
+        try {
+          localStorage.setItem('alexstore_tallas_stock_' + productoId, JSON.stringify(nuevasTallasStock));
+        } catch {}
       }
       if (nuevasVariantes) {
         updateProdPayload.variantes = nuevasVariantes;

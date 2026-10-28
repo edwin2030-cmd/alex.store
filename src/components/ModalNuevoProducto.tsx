@@ -646,20 +646,20 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
                       {tallas.map((t) => (
                         <div
                           key={t}
-                          className="flex items-center justify-between p-2 rounded-xl bg-white border border-[#E2DBD0] shadow-xs"
+                          className="flex items-center justify-between p-2.5 rounded-xl bg-white border-2 border-[#D5CDC0] shadow-xs"
                         >
-                          <span className="font-black text-xs text-[#1A1918] px-2 py-0.5 rounded-lg bg-[#FAF8F5] border border-[#E2DBD0]">
+                          <span className="font-black text-xs text-black px-2.5 py-1 rounded-lg bg-amber-100 border border-amber-300">
                             {t}
                           </span>
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1.5">
                             <input
                               type="number"
                               min="0"
                               value={tallasStock[t] ?? 0}
                               onChange={(e) => handleSetStockTalla(t, parseInt(e.target.value, 10) || 0)}
-                              className="w-14 text-center font-black text-xs bg-[#FAF8F5] border border-[#DDD7CC] rounded-lg py-1 px-1 focus:outline-none focus:border-[#C59A4D]"
+                              className="w-16 text-center font-black text-sm bg-zinc-100 text-black border-2 border-zinc-400 rounded-lg py-1 px-1 focus:outline-none focus:border-[#C59A4D] focus:bg-white"
                             />
-                            <span className="text-[10px] text-[#7A7368] font-bold">u.</span>
+                            <span className="text-[11px] text-zinc-700 font-extrabold">u.</span>
                           </div>
                         </div>
                       ))}
@@ -1014,7 +1014,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
                                   onChange={(e) =>
                                     handleUpdateVariant(v.id, 'precio', parseFloat(e.target.value) || 0)
                                   }
-                                  className="w-full bg-[#FAF8F5] text-[11px] font-bold px-2 py-1 rounded-lg border border-[#E5DFD5]"
+                                  className="w-full bg-white text-black font-extrabold text-xs px-2.5 py-1.5 rounded-lg border-2 border-zinc-300 focus:outline-none focus:border-[#C59A4D]"
                                 />
                               </td>
                               <td className="py-2 px-3 min-w-[80px]">
@@ -1025,7 +1025,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
                                   onChange={(e) =>
                                     handleUpdateVariant(v.id, 'stock', Math.max(0, parseInt(e.target.value, 10) || 0))
                                   }
-                                  className="w-full bg-[#FAF8F5] text-[11px] font-bold px-2 py-1 rounded-lg border border-[#E5DFD5]"
+                                  className="w-full bg-white text-black font-black text-xs px-2.5 py-1.5 rounded-lg border-2 border-zinc-300 focus:outline-none focus:border-[#C59A4D]"
                                 />
                               </td>
                               <td className="py-2 px-3 text-center">

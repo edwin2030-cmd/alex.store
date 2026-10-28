@@ -226,7 +226,7 @@ export const ModalStockTallasRapido: React.FC<ModalStockTallasRapidoProps> = ({
                           min="0"
                           value={qty}
                           onChange={(e) => handleChangeQty(talla, e.target.value)}
-                          className="w-14 text-center font-black text-xs bg-[#13110F] border border-[#38332B] text-white rounded-lg py-1 px-1 focus:outline-none focus:border-[#C59A4D]"
+                          className="w-16 text-center font-black text-sm bg-black border-2 border-[#C59A4D] text-[#E6C687] rounded-xl py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-[#C59A4D] shadow-sm"
                         />
 
                         <button

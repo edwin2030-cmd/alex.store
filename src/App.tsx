@@ -95,8 +95,12 @@ export default function App() {
           setCurrentUser(perfil);
         }
       } else if (event === 'SIGNED_OUT') {
-        setCurrentUser(null);
-        setIsAdminMode(false);
+        const saved = getSavedUserProfile();
+        // Solo cerrar sesión si no hay un perfil activo guardado como Dueño
+        if (!saved || saved.rol !== 'dueno') {
+          setCurrentUser(null);
+          setIsAdminMode(false);
+        }
       }
     });
 
@@ -230,7 +234,11 @@ export default function App() {
   };
 
   const handleOpenAdmin = () => {
-    if (currentUser && currentUser.activo) {
+    const saved = getSavedUserProfile();
+    if ((currentUser && currentUser.activo) || (saved && saved.activo)) {
+      if (!currentUser && saved) {
+        setCurrentUser(saved);
+      }
       setIsAdminMode(true);
     } else {
       setIsAdminLoginOpen(true);
@@ -238,6 +246,10 @@ export default function App() {
   };
 
   const handleLoginSuccess = (userProfile: UsuarioPanel) => {
+    try {
+      localStorage.setItem('alexstore_auth_profile', JSON.stringify(userProfile));
+      localStorage.setItem('alexstore_active_role', userProfile.rol);
+    } catch {}
     setCurrentUser(userProfile);
     setIsAdminLoginOpen(false);
     setIsAdminMode(true);

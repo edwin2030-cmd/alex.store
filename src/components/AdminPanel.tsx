@@ -59,6 +59,7 @@ import {
   actualizarUsuario,
   eliminarUsuario,
   guardarRolUsuarioAuth,
+  getSavedUserProfile,
 } from '../lib/auth';
 import { ModalNuevoProducto } from './ModalNuevoProducto';
 import { ModalNuevaCategoria } from './ModalNuevaCategoria';
@@ -142,7 +143,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   currentUser,
   onLogout,
 }) => {
-  const userRole: UserRole = currentUser?.rol || 'cajero';
+  // Mantener el usuario y rol activo blindados contra cualquier refresco de sesión o cambio de pestaña
+  const [panelUser, setPanelUser] = useState<UsuarioPanel | null>(() => {
+    return currentUser || getSavedUserProfile();
+  });
+
+  useEffect(() => {
+    if (currentUser) {
+      setPanelUser(currentUser);
+      try {
+        localStorage.setItem('alexstore_auth_profile', JSON.stringify(currentUser));
+        localStorage.setItem('alexstore_active_role', currentUser.rol);
+      } catch {}
+    }
+  }, [currentUser]);
+
+  const activeUser = panelUser || currentUser || getSavedUserProfile();
+  const savedActiveRole = (typeof localStorage !== 'undefined' ? localStorage.getItem('alexstore_active_role') : null) as UserRole | null;
+  const userRole: UserRole = activeUser?.rol || savedActiveRole || 'dueno';
 
   // El cajero empieza directamente en 'pedidos', el administrador y dueño en 'dashboard'
   const [activeSection, setActiveSection] = useState<AdminSection>(() => {
@@ -187,6 +205,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [montoCierreReal, setMontoCierreReal] = useState('');
   const [notasCierreCaja, setNotasCierreCaja] = useState('');
   const [isCajaSubmitting, setIsCajaSubmitting] = useState(false);
+  const [cajaMovimientosFiltro, setCajaMovimientosFiltro] = useState<'todos' | 'efectivo' | 'yappy' | 'transferencia' | 'pedidos' | 'gastos'>('todos');
+  const [cierreModalFiltro, setCierreModalFiltro] = useState<'todos' | 'efectivo' | 'yappy' | 'transferencia' | 'pedidos' | 'gastos'>('todos');
 
   // Modal Registrar Venta Manual (con Efectivo, Yappy, Transferencia y Abono / Contra Entrega)
   const [isModalVentaManualOpen, setIsModalVentaManualOpen] = useState(false);
@@ -2840,111 +2860,288 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 {/* Resumen del turno actual si está abierto */}
                 {sesionCaja && sesionCaja.estado === 'abierta' && (() => {
                   const fechaInicio = sesionCaja.fecha_apertura ? new Date(sesionCaja.fecha_apertura).getTime() : 0;
-                  const ventasEfectivoTurno = ventas.filter(
-                    (v) =>
-                      (v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega') &&
-                      v.creado_en &&
-                      new Date(v.creado_en).getTime() >= fechaInicio
+                  
+                  // 1. Todas las ventas del turno
+                  const todasVentasTurno = ventas.filter(
+                    (v) => v.creado_en && new Date(v.creado_en).getTime() >= fechaInicio
                   );
+                  const ventasEfectivoTurno = todasVentasTurno.filter(
+                    (v) => v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega'
+                  );
+                  const ventasYappyTurno = todasVentasTurno.filter((v) => v.metodo_pago === 'yappy');
+                  const ventasTransfTurno = todasVentasTurno.filter((v) => v.metodo_pago === 'transferencia');
+
+                  // 2. Pedidos web aprobados en este turno
+                  const pedidosAprobadosTurno = pedidos.filter(
+                    (p) =>
+                      (p.estado === 'aprobado' || p.estado === 'entregado') &&
+                      ((p.revisado_en && new Date(p.revisado_en).getTime() >= fechaInicio) ||
+                        (p.creado_en && new Date(p.creado_en).getTime() >= fechaInicio))
+                  );
+
+                  // 3. Gastos del turno
+                  const gastosTurno = gastos.filter(
+                    (g) => g.creado_en && new Date(g.creado_en).getTime() >= fechaInicio
+                  );
+
+                  // Totales monetarios
+                  const fondoInicial = Number(sesionCaja.monto_inicial) || 0;
                   const totalVentasEfectivo = ventasEfectivoTurno.reduce(
                     (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
                     0
                   );
+                  const totalVentasYappy = ventasYappyTurno.reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+                  const totalVentasTransf = ventasTransfTurno.reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+                  const totalGastos = gastosTurno.reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
+                  const totalPedidosWeb = pedidosAprobadosTurno.reduce((acc, p) => acc + (Number(p.total) || 0), 0);
 
-                  const gastosEfectivoTurno = gastos.filter(
-                    (g) => g.creado_en && new Date(g.creado_en).getTime() >= fechaInicio
-                  );
-                  const totalGastosEfectivo = gastosEfectivoTurno.reduce(
-                    (acc, g) => acc + (Number(g.monto) || 0),
-                    0
-                  );
-
-                  const fondoInicial = Number(sesionCaja.monto_inicial) || 0;
-                  const esperado = fondoInicial + totalVentasEfectivo - totalGastosEfectivo;
+                  const esperadoEnGaveta = fondoInicial + totalVentasEfectivo - totalGastos;
+                  const totalFacturadoTurno = totalVentasEfectivo + totalVentasYappy + totalVentasTransf;
 
                   return (
                     <div className="space-y-4 pt-5 mt-5 border-t border-emerald-900/60 text-xs">
                       {userRole !== 'cajero' && (
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
                           <div className="bg-[#13110F] p-3 rounded-xl border border-emerald-900/60">
-                            <span className="text-[#A69F93] font-bold block text-[10px] uppercase">Fondo Inicial Base</span>
+                            <span className="text-[#A69F93] font-bold block text-[10px] uppercase">Fondo Inicial Gaveta</span>
                             <strong className="text-base text-white font-black">${fondoInicial.toFixed(2)}</strong>
                           </div>
                           <div className="bg-[#13110F] p-3 rounded-xl border border-emerald-900/60">
-                            <span className="text-[#A69F93] font-bold block text-[10px] uppercase">
-                              (+) Entradas Efectivo ({ventasEfectivoTurno.length})
+                            <span className="text-emerald-400 font-bold block text-[10px] uppercase">
+                              (+) Efectivo Gaveta ({ventasEfectivoTurno.length})
                             </span>
                             <strong className="text-base text-emerald-400 font-black">+${totalVentasEfectivo.toFixed(2)}</strong>
                           </div>
-                          <div className="bg-[#13110F] p-3 rounded-xl border border-emerald-900/60">
-                            <span className="text-[#A69F93] font-bold block text-[10px] uppercase">
-                              (-) Salidas Gastos ({gastosEfectivoTurno.length})
+                          <div className="bg-[#13110F] p-3 rounded-xl border border-sky-900/60">
+                            <span className="text-sky-400 font-bold block text-[10px] uppercase">
+                              (+) Yappy ({ventasYappyTurno.length})
                             </span>
-                            <strong className="text-base text-rose-400 font-black">-${totalGastosEfectivo.toFixed(2)}</strong>
+                            <strong className="text-base text-sky-400 font-black">+${totalVentasYappy.toFixed(2)}</strong>
                           </div>
-                          <div className="bg-[#181614] p-3 rounded-xl border border-emerald-700/60 shadow-xs">
-                            <span className="text-emerald-400 font-extrabold block text-[10px] uppercase">Esperado en Gaveta</span>
-                            <strong className="text-base text-emerald-300 font-black">${esperado.toFixed(2)} USD</strong>
+                          <div className="bg-[#13110F] p-3 rounded-xl border border-amber-900/60">
+                            <span className="text-amber-400 font-bold block text-[10px] uppercase">
+                              (+) Transferencias ({ventasTransfTurno.length})
+                            </span>
+                            <strong className="text-base text-amber-400 font-black">+${totalVentasTransf.toFixed(2)}</strong>
+                          </div>
+                          <div className="bg-[#181614] p-3 rounded-xl border border-emerald-700/80 shadow-xs col-span-2 sm:col-span-1">
+                            <span className="text-emerald-300 font-extrabold block text-[10px] uppercase">Esperado en Gaveta</span>
+                            <strong className="text-base text-emerald-300 font-black">${esperadoEnGaveta.toFixed(2)} USD</strong>
                           </div>
                         </div>
                       )}
 
-                      {/* Lista detallada de todo lo que está ingresando/saliendo en la gaveta */}
+                      {/* Control y Filtros de Registros dentro de la caja */}
                       <div className="bg-[#13110F] rounded-2xl p-4 border border-[#26221E] space-y-3">
-                        <div className="flex items-center justify-between pb-2 border-b border-[#26221E]">
-                          <span className="font-extrabold text-white text-xs flex items-center gap-2">
-                            <span>📋</span>
-                            <span>Movimientos en Efectivo del Turno Actual (Entradas y Salidas en Gaveta)</span>
-                          </span>
-                          <span className="text-[11px] text-[#E6C687] font-bold">
-                            {ventasEfectivoTurno.length + gastosEfectivoTurno.length + 1} registros
-                          </span>
-                        </div>
-
-                        <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-                          {/* Entrada Base */}
-                          <div className="p-2.5 rounded-xl bg-[#1A1816] border border-[#26221E] flex items-center justify-between gap-3 text-xs">
-                            <div className="flex items-center gap-2.5">
-                              <span className="w-7 h-7 rounded-lg bg-emerald-950/80 border border-emerald-700/60 text-emerald-400 flex items-center justify-center font-black text-xs">
-                                💼
-                              </span>
-                              <div>
-                                <span className="font-black text-white block text-[11px]">Fondo Inicial en Gaveta</span>
-                                <span className="text-[10px] text-[#A69F93]">
-                                  Abierto por: <strong className="text-white">{sesionCaja.abierto_por}</strong> • {new Date(sesionCaja.fecha_apertura).toLocaleTimeString('es-PA')}
-                                </span>
-                              </div>
-                            </div>
-                            <span className="font-black text-white text-sm">+${fondoInicial.toFixed(2)}</span>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-[#26221E]">
+                          <div>
+                            <span className="font-extrabold text-white text-xs flex items-center gap-2">
+                              <span>📋</span>
+                              <span>Todos los Registros y Movimientos de la Caja Abierta</span>
+                            </span>
+                            <p className="text-[11px] text-[#A69F93] mt-0.5">
+                              Sin límite de registros: cada venta, pedido web y gasto queda guardado aquí hasta que cierres caja
+                            </p>
                           </div>
 
-                          {/* Ventas en efectivo */}
-                          {ventasEfectivoTurno.map((v) => {
-                            const cobro = Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0;
-                            return (
-                              <div key={v.id || v.codigo} className="p-2.5 rounded-xl bg-[#1A1816] border border-[#26221E] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs hover:border-[#38332B] transition-colors">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => setCajaMovimientosFiltro('todos')}
+                              className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer ${
+                                cajaMovimientosFiltro === 'todos'
+                                  ? 'bg-[#C59A4D] text-black shadow-xs'
+                                  : 'bg-[#1A1816] text-[#A69F93] hover:text-white border border-[#38332B]'
+                              }`}
+                            >
+                              Todos ({todasVentasTurno.length + pedidosAprobadosTurno.length + gastosTurno.length + 1})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCajaMovimientosFiltro('efectivo')}
+                              className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer ${
+                                cajaMovimientosFiltro === 'efectivo'
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : 'bg-[#1A1816] text-[#A69F93] hover:text-white border border-[#38332B]'
+                              }`}
+                            >
+                              💵 Efectivo ({ventasEfectivoTurno.length})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCajaMovimientosFiltro('yappy')}
+                              className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer ${
+                                cajaMovimientosFiltro === 'yappy'
+                                  ? 'bg-sky-600 text-white shadow-xs'
+                                  : 'bg-[#1A1816] text-[#A69F93] hover:text-white border border-[#38332B]'
+                              }`}
+                            >
+                              📱 Yappy ({ventasYappyTurno.length})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCajaMovimientosFiltro('transferencia')}
+                              className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer ${
+                                cajaMovimientosFiltro === 'transferencia'
+                                  ? 'bg-amber-500 text-black shadow-xs'
+                                  : 'bg-[#1A1816] text-[#A69F93] hover:text-white border border-[#38332B]'
+                              }`}
+                            >
+                              🏦 Transf ({ventasTransfTurno.length})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCajaMovimientosFiltro('pedidos')}
+                              className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer ${
+                                cajaMovimientosFiltro === 'pedidos'
+                                  ? 'bg-indigo-600 text-white shadow-xs'
+                                  : 'bg-[#1A1816] text-[#A69F93] hover:text-white border border-[#38332B]'
+                              }`}
+                            >
+                              📦 Pedidos Web ({pedidosAprobadosTurno.length})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCajaMovimientosFiltro('gastos')}
+                              className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer ${
+                                cajaMovimientosFiltro === 'gastos'
+                                  ? 'bg-rose-600 text-white shadow-xs'
+                                  : 'bg-[#1A1816] text-[#A69F93] hover:text-white border border-[#38332B]'
+                              }`}
+                            >
+                              🔻 Gastos ({gastosTurno.length})
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Listado con scroll infinito sin límite de registros */}
+                        <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+                          {/* Entrada Base (Visible en todos o efectivo) */}
+                          {(cajaMovimientosFiltro === 'todos' || cajaMovimientosFiltro === 'efectivo') && (
+                            <div className="p-2.5 rounded-xl bg-[#1A1816] border border-[#26221E] flex items-center justify-between gap-3 text-xs">
+                              <div className="flex items-center gap-2.5">
+                                <span className="w-8 h-8 rounded-xl bg-emerald-950/80 border border-emerald-700/60 text-emerald-400 flex items-center justify-center font-black text-sm">
+                                  💼
+                                </span>
+                                <div>
+                                  <span className="font-black text-white block text-[11px]">Fondo Inicial en Gaveta</span>
+                                  <span className="text-[10px] text-[#A69F93]">
+                                    Abierto por: <strong className="text-white">{sesionCaja.abierto_por}</strong> • {new Date(sesionCaja.fecha_apertura).toLocaleTimeString('es-PA')}
+                                  </span>
+                                </div>
+                              </div>
+                              <span className="font-black text-white text-sm">+${fondoInicial.toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {/* Ventas filtradas del turno */}
+                          {todasVentasTurno
+                            .filter((v) => {
+                              if (cajaMovimientosFiltro === 'todos') return true;
+                              if (cajaMovimientosFiltro === 'efectivo') return v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega';
+                              if (cajaMovimientosFiltro === 'yappy') return v.metodo_pago === 'yappy';
+                              if (cajaMovimientosFiltro === 'transferencia') return v.metodo_pago === 'transferencia';
+                              return false;
+                            })
+                            .map((v) => {
+                              const cobro = Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0;
+                              const isEfectivo = v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega';
+                              const isYappy = v.metodo_pago === 'yappy';
+                              const icon = isEfectivo ? '💵' : isYappy ? '📱' : '🏦';
+                              const tagColor = isEfectivo
+                                ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
+                                : isYappy
+                                ? 'bg-sky-950 text-sky-400 border-sky-800'
+                                : 'bg-amber-950 text-amber-400 border-amber-800';
+
+                              return (
+                                <div key={v.id || v.codigo} className="p-2.5 rounded-xl bg-[#1A1816] border border-[#26221E] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs hover:border-[#38332B] transition-colors">
+                                  <div className="flex items-start gap-2.5 min-w-0">
+                                    <span className="w-8 h-8 rounded-xl bg-black border border-[#2D2822] flex items-center justify-center font-black text-sm shrink-0 mt-0.5">
+                                      {icon}
+                                    </span>
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="font-black text-white text-[11px]">Venta {v.codigo}</span>
+                                        <span className="text-[10px] text-[#E6C687] font-bold">({v.cliente_nombre})</span>
+                                        <span className={`px-1.5 py-0.2 rounded border text-[9px] uppercase font-mono font-bold ${tagColor}`}>
+                                          {v.metodo_pago}
+                                        </span>
+                                      </div>
+                                      <span className="text-[10px] text-[#A69F93] block mt-0.5">
+                                        Registrado por: <strong className="text-white">{v.cajero_nombre || 'Cajero'}</strong> • {v.creado_en ? new Date(v.creado_en).toLocaleTimeString('es-PA') : ''}
+                                        {v.items && v.items.length > 0 && ` • ${v.items.length} prenda(s)`}
+                                      </span>
+
+                                      {/* Thumbnails con foto y talla de productos */}
+                                      {v.items && v.items.length > 0 && (
+                                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                          {v.items.map((it, idx) => {
+                                            const prodImg = it.imagen_url || productos.find((p) => p.id === (it.producto_id || it.id))?.imagen_url;
+                                            return (
+                                              <div
+                                                key={idx}
+                                                className="flex items-center gap-1 bg-[#13110F] px-1.5 py-0.5 rounded-lg border border-[#2D2822]"
+                                              >
+                                                {prodImg && (
+                                                  <img
+                                                    src={prodImg}
+                                                    alt={it.nombre}
+                                                    onClick={() => setZoomedProductImage({ url: prodImg, title: it.nombre, subtitle: it.talla ? `Talla: ${it.talla}` : undefined })}
+                                                    className="w-5 h-6 object-cover rounded bg-black cursor-pointer hover:opacity-80"
+                                                    title="Click para ampliar foto"
+                                                  />
+                                                )}
+                                                <span className="text-[9px] text-white truncate max-w-[90px]">
+                                                  {it.nombre}
+                                                </span>
+                                                {it.talla && (
+                                                  <span className="text-[9px] text-[#E6C687] font-bold">
+                                                    T:{it.talla}
+                                                  </span>
+                                                )}
+                                                <span className="text-[9px] text-[#A69F93]">
+                                                  x{it.cantidad || 1}
+                                                </span>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <span className="font-black text-emerald-400 text-sm shrink-0 self-end sm:self-center">
+                                    +${cobro.toFixed(2)}
+                                  </span>
+                                </div>
+                              );
+                            })}
+
+                          {/* Pedidos web aprobados en este turno */}
+                          {(cajaMovimientosFiltro === 'todos' || cajaMovimientosFiltro === 'pedidos') &&
+                            pedidosAprobadosTurno.map((p) => (
+                              <div key={p.id || p.codigo} className="p-2.5 rounded-xl bg-[#15131A] border border-indigo-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs hover:border-indigo-800/60 transition-colors">
                                 <div className="flex items-start gap-2.5 min-w-0">
-                                  <span className="w-7 h-7 rounded-lg bg-emerald-950/80 border border-emerald-700/60 text-emerald-400 flex items-center justify-center font-black text-xs shrink-0 mt-0.5">
-                                    💵
+                                  <span className="w-8 h-8 rounded-xl bg-indigo-950/80 border border-indigo-700/60 text-indigo-300 flex items-center justify-center font-black text-sm shrink-0 mt-0.5">
+                                    📦
                                   </span>
                                   <div className="min-w-0">
                                     <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="font-black text-white text-[11px]">Venta {v.codigo}</span>
-                                      <span className="text-[10px] text-[#E6C687] font-bold">({v.cliente_nombre})</span>
-                                      <span className="px-1.5 py-0.2 rounded bg-black border border-[#2D2822] text-[#A69F93] text-[9px] uppercase font-mono">
-                                        {v.metodo_pago}
+                                      <span className="font-black text-white text-[11px]">Pedido Web {p.codigo}</span>
+                                      <span className="text-[10px] text-indigo-300 font-bold">({p.cliente_nombre})</span>
+                                      <span className="px-1.5 py-0.2 rounded bg-indigo-950 text-indigo-400 border border-indigo-800 text-[9px] uppercase font-mono font-bold">
+                                        {p.metodo_pago}
                                       </span>
                                     </div>
-                                    <span className="text-[10px] text-[#A69F93] block">
-                                      Registrado por: <strong className="text-white">{v.cajero_nombre || 'Cajero'}</strong> • {v.creado_en ? new Date(v.creado_en).toLocaleTimeString('es-PA') : ''}
-                                      {v.items && v.items.length > 0 && ` • ${v.items.length} prenda(s)`}
+                                    <span className="text-[10px] text-[#A69F93] block mt-0.5">
+                                      Aceptado por: <strong className="text-[#E6C687]">{p.revisado_por || 'Administrador'}</strong> • {p.revisado_en ? new Date(p.revisado_en).toLocaleTimeString('es-PA') : (p.creado_en ? new Date(p.creado_en).toLocaleTimeString('es-PA') : '')}
                                     </span>
 
-                                    {/* Thumbnails de productos vendidos en este registro */}
-                                    {v.items && v.items.length > 0 && (
+                                    {/* Thumbnails con foto y talla de productos */}
+                                    {p.items && p.items.length > 0 && (
                                       <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                                        {v.items.map((it, idx) => {
-                                          const prodImg = it.imagen_url || productos.find((p) => p.id === (it.producto_id || it.id))?.imagen_url;
+                                        {p.items.map((it, idx) => {
+                                          const prodImg = it.imagen_url || productos.find((prod) => prod.id === (it.producto_id || it.id))?.imagen_url;
                                           return (
                                             <div
                                               key={idx}
@@ -2962,6 +3159,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                               <span className="text-[9px] text-white truncate max-w-[90px]">
                                                 {it.nombre}
                                               </span>
+                                              {it.talla && (
+                                                <span className="text-[9px] text-[#E6C687] font-bold">
+                                                  T:{it.talla}
+                                                </span>
+                                              )}
+                                              <span className="text-[9px] text-[#A69F93]">
+                                                x{it.cantidad || 1}
+                                              </span>
                                             </div>
                                           );
                                         })}
@@ -2969,36 +3174,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     )}
                                   </div>
                                 </div>
-                                <span className="font-black text-emerald-400 text-sm shrink-0 self-end sm:self-center">
-                                  +${cobro.toFixed(2)}
+                                <span className="font-black text-indigo-400 text-sm shrink-0 self-end sm:self-center">
+                                  +${Number(p.total).toFixed(2)}
                                 </span>
                               </div>
-                            );
-                          })}
+                            ))}
 
                           {/* Gastos del turno */}
-                          {gastosEfectivoTurno.map((g) => (
-                            <div key={g.id || g.concepto} className="p-2.5 rounded-xl bg-[#1A1816] border border-[#26221E] flex items-center justify-between gap-3 text-xs hover:border-rose-900/50 transition-colors">
-                              <div className="flex items-center gap-2.5">
-                                <span className="w-7 h-7 rounded-lg bg-rose-950/80 border border-rose-700/60 text-rose-400 flex items-center justify-center font-black text-xs">
-                                  🔻
-                                </span>
-                                <div>
-                                  <span className="font-black text-rose-300 block text-[11px]">Gasto: {g.concepto}</span>
-                                  <span className="text-[10px] text-[#A69F93] block">
-                                    Por: <strong className="text-white">{g.creado_por || 'Admin'}</strong> • {g.fecha ? new Date(g.fecha).toLocaleTimeString('es-PA') : ''}
+                          {(cajaMovimientosFiltro === 'todos' || cajaMovimientosFiltro === 'gastos') &&
+                            gastosTurno.map((g) => (
+                              <div key={g.id || g.concepto} className="p-2.5 rounded-xl bg-[#1A1816] border border-[#26221E] flex items-center justify-between gap-3 text-xs hover:border-rose-900/50 transition-colors">
+                                <div className="flex items-center gap-2.5">
+                                  <span className="w-8 h-8 rounded-xl bg-rose-950/80 border border-rose-700/60 text-rose-400 flex items-center justify-center font-black text-sm">
+                                    🔻
                                   </span>
+                                  <div>
+                                    <span className="font-black text-rose-300 block text-[11px]">Gasto: {g.concepto}</span>
+                                    <span className="text-[10px] text-[#A69F93] block">
+                                      Por: <strong className="text-white">{g.creado_por || 'Admin'}</strong> • {g.fecha ? new Date(g.fecha).toLocaleTimeString('es-PA') : ''}
+                                    </span>
+                                  </div>
                                 </div>
+                                <span className="font-black text-rose-400 text-sm">
+                                  -${Number(g.monto).toFixed(2)}
+                                </span>
                               </div>
-                              <span className="font-black text-rose-400 text-sm">
-                                -${Number(g.monto).toFixed(2)}
-                              </span>
-                            </div>
-                          ))}
+                            ))}
 
-                          {ventasEfectivoTurno.length === 0 && gastosEfectivoTurno.length === 0 && (
-                            <p className="text-[11px] text-[#7A7368] py-2 text-center">
-                              No hay cobros en efectivo ni gastos registrados en este turno todavía.
+                          {todasVentasTurno.length === 0 && pedidosAprobadosTurno.length === 0 && gastosTurno.length === 0 && (
+                            <p className="text-[11px] text-[#7A7368] py-4 text-center">
+                              No hay registros de ventas, pedidos ni gastos en este turno todavía.
                             </p>
                           )}
                         </div>
@@ -6544,21 +6749,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* Modal Cerrar Caja / Arqueo */}
       {isModalCerrarCajaOpen && sesionCaja && (() => {
         const fechaInicio = sesionCaja.fecha_apertura ? new Date(sesionCaja.fecha_apertura).getTime() : 0;
-        const ventasEfectivoTurnoList = ventas.filter(
-          (v) =>
-            (v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega') &&
-            v.creado_en &&
-            new Date(v.creado_en).getTime() >= fechaInicio
+        const ventasTurnoList = ventas.filter(
+          (v) => v.creado_en && new Date(v.creado_en).getTime() >= fechaInicio
         );
+        const ventasEfectivoTurnoList = ventasTurnoList.filter(
+          (v) =>
+            v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega'
+        );
+        const ventasYappyTurnoList = ventasTurnoList.filter((v) => v.metodo_pago === 'yappy');
+        const ventasTransfTurnoList = ventasTurnoList.filter((v) => v.metodo_pago === 'transferencia');
+
         const totalVentasEfectivo = ventasEfectivoTurnoList.reduce(
           (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
           0
         );
+        const totalVentasYappy = ventasYappyTurnoList.reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+        const totalVentasTransf = ventasTransfTurnoList.reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+        const totalGranFacturado = totalVentasEfectivo + totalVentasYappy + totalVentasTransf;
 
-        const gastosEfectivoTurnoList = gastos.filter(
+        const gastosTurnoList = gastos.filter(
           (g) => g.creado_en && new Date(g.creado_en).getTime() >= fechaInicio
         );
-        const totalGastosEfectivo = gastosEfectivoTurnoList.reduce(
+        const totalGastosEfectivo = gastosTurnoList.reduce(
           (acc, g) => acc + (Number(g.monto) || 0),
           0
         );
@@ -6573,21 +6785,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         const pedidosAprobadosTurno = pedidos.filter(
           (p) =>
             (p.estado === 'aprobado' || p.estado === 'entregado') &&
-            p.creado_en &&
-            new Date(p.creado_en).getTime() >= fechaInicio
+            ((p.revisado_en && new Date(p.revisado_en).getTime() >= fechaInicio) ||
+              (p.creado_en && new Date(p.creado_en).getTime() >= fechaInicio))
         );
 
         return (
           <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-            <div className="bg-[#13110F] rounded-3xl w-full max-w-lg p-5 sm:p-6 space-y-4 border border-[#26221E] shadow-2xl shadow-black/80 animate-fade-in my-auto text-white max-h-[90dvh] overflow-y-auto">
+            <div className="bg-[#13110F] rounded-3xl w-full max-w-2xl p-5 sm:p-6 space-y-4 border border-[#26221E] shadow-2xl shadow-black/80 animate-fade-in my-auto text-white max-h-[92dvh] overflow-y-auto">
               <div className="flex items-center justify-between pb-3 border-b border-[#26221E]">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center font-bold">
+                  <div className="w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center font-bold">
                     <Lock className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-black text-white">Cierre de Caja & Arqueo Final</h3>
-                    <p className="text-[11px] text-[#A69F93]">Auditoría detallada de todos los movimientos del turno</p>
+                    <h3 className="text-base sm:text-lg font-black text-white">Cierre de Caja & Arqueo Final</h3>
+                    <p className="text-[11px] text-[#A69F93]">Auditoría detallada de todos los movimientos y cobros del turno</p>
                   </div>
                 </div>
                 <button
@@ -6616,116 +6828,173 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               ) : (
                 <>
                   {/* Badge de Duración y Apertura */}
-                  <div className="p-3 rounded-2xl bg-[#1A1816] border border-[#2D2822] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <div className="p-3.5 rounded-2xl bg-[#1A1816] border border-[#2D2822] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
                     <div>
-                      <span className="text-[10px] text-[#A69F93] block">Abierto por:</span>
-                      <strong className="text-white font-extrabold">{sesionCaja.abierto_por}</strong>
-                      <span className="text-[10px] text-[#A69F93] block mt-0.5">
+                      <span className="text-[10px] text-[#A69F93] block font-bold">Turno abierto por:</span>
+                      <strong className="text-white font-extrabold text-sm">{sesionCaja.abierto_por}</strong>
+                      <span className="text-[10px] text-[#A69F93] block mt-0.5 font-mono">
                         {new Date(sesionCaja.fecha_apertura).toLocaleString('es-PA')}
                       </span>
                     </div>
                     <div className="sm:text-right">
-                      <span className="px-3 py-1 rounded-full bg-emerald-950/80 border border-emerald-700/80 text-emerald-300 text-xs font-black inline-flex items-center gap-1.5">
+                      <span className="px-3.5 py-1.5 rounded-xl bg-emerald-950/80 border border-emerald-700/80 text-emerald-300 text-xs font-black inline-flex items-center gap-1.5 shadow-sm">
                         <span>⏱️</span>
-                        <span>Turno abierto: {duracionTurno}</span>
+                        <span>Duración activa: {duracionTurno}</span>
                       </span>
                     </div>
+                  </div>
+
+                  {/* Resumen de Cobros por Método en este Turno */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="p-2.5 rounded-xl bg-[#181614] border border-[#26221E]">
+                      <span className="text-[10px] text-[#A69F93] block font-bold">Fondo Inicial:</span>
+                      <strong className="text-white text-sm font-black">${fondoInicial.toFixed(2)}</strong>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-emerald-950/20 border border-emerald-900/40">
+                      <span className="text-[10px] text-emerald-400 block font-bold">💵 Efectivo Gaveta:</span>
+                      <strong className="text-emerald-300 text-sm font-black">+${totalVentasEfectivo.toFixed(2)}</strong>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-blue-950/20 border border-blue-900/40">
+                      <span className="text-[10px] text-blue-400 block font-bold">📱 Yappy:</span>
+                      <strong className="text-blue-300 text-sm font-black">+${totalVentasYappy.toFixed(2)}</strong>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-purple-950/20 border border-purple-900/40">
+                      <span className="text-[10px] text-purple-400 block font-bold">🏦 Transferencia:</span>
+                      <strong className="text-purple-300 text-sm font-black">+${totalVentasTransf.toFixed(2)}</strong>
+                    </div>
+                  </div>
+
+                  {/* Filtros de Auditoría del Turno */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] scrollbar-none">
+                    {[
+                      { id: 'todos', label: 'Todos', count: ventasTurnoList.length + gastosTurnoList.length + pedidosAprobadosTurno.length + 1 },
+                      { id: 'efectivo', label: '💵 Efectivo', count: ventasEfectivoTurnoList.length },
+                      { id: 'yappy', label: '📱 Yappy', count: ventasYappyTurnoList.length },
+                      { id: 'transferencia', label: '🏦 Transf.', count: ventasTransfTurnoList.length },
+                      { id: 'pedidos', label: '📦 Pedidos Web', count: pedidosAprobadosTurno.length },
+                      { id: 'gastos', label: '🔻 Gastos', count: gastosTurnoList.length },
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setCierreModalFiltro(tab.id as any)}
+                        className={`px-2.5 py-1 rounded-lg font-bold shrink-0 transition-colors cursor-pointer ${
+                          cierreModalFiltro === tab.id
+                            ? 'bg-[#C59A4D] text-black shadow-sm'
+                            : 'bg-[#1A1816] text-[#A69F93] hover:text-white border border-[#26221E]'
+                        }`}
+                      >
+                        {tab.label} ({tab.count})
+                      </button>
+                    ))}
                   </div>
 
                   {/* Todo lo que pasó dentro de la caja en este turno */}
-                  <div className="bg-[#181614] rounded-2xl p-3.5 border border-[#26221E] space-y-2.5">
-                    <div className="flex items-center justify-between pb-1.5 border-b border-[#26221E]">
+                  <div className="bg-[#181614] rounded-2xl p-3 sm:p-3.5 border border-[#26221E] space-y-2">
+                    <div className="flex items-center justify-between pb-1 border-b border-[#26221E]">
                       <span className="font-extrabold text-[#E6C687] text-xs flex items-center gap-1.5">
                         <span>📋</span>
-                        <span>Todo lo que ocurrió en este turno ({ventasEfectivoTurnoList.length + gastosEfectivoTurnoList.length + 1} movimientos)</span>
+                        <span>Movimientos Registrados en este Turno</span>
                       </span>
+                      <span className="text-[10px] text-[#A69F93]">Sin límite de registros</span>
                     </div>
 
-                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 text-xs">
+                    <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 text-xs">
                       {/* Fondo Inicial */}
-                      <div className="p-2 rounded-xl bg-[#13110F] border border-[#2D2822] flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs">💼</span>
-                          <div>
-                            <span className="font-bold text-white block text-[11px]">Fondo Inicial en Gaveta</span>
-                            <span className="text-[10px] text-[#A69F93]">
-                              Abierto por: <strong className="text-white">{sesionCaja.abierto_por}</strong>
-                            </span>
+                      {(cierreModalFiltro === 'todos' || cierreModalFiltro === 'efectivo') && (
+                        <div className="p-2 rounded-xl bg-[#13110F] border border-[#2D2822] flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs">💼</span>
+                            <div>
+                              <span className="font-bold text-white block text-[11px]">Fondo Inicial en Gaveta</span>
+                              <span className="text-[10px] text-[#A69F93]">
+                                Abierto por: <strong className="text-white">{sesionCaja.abierto_por}</strong>
+                              </span>
+                            </div>
                           </div>
+                          <span className="font-black text-white text-xs">+${fondoInicial.toFixed(2)}</span>
                         </div>
-                        <span className="font-black text-white text-xs">+${fondoInicial.toFixed(2)}</span>
-                      </div>
+                      )}
 
-                      {/* Ventas en Efectivo */}
-                      {ventasEfectivoTurnoList.map((v) => {
-                        const cobro = Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0;
-                        return (
-                          <div key={v.id || v.codigo} className="p-2 rounded-xl bg-[#13110F] border border-[#2D2822] flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-xs">💵</span>
-                              <div className="min-w-0">
-                                <span className="font-bold text-white block text-[11px] truncate">
-                                  Venta {v.codigo} — {v.cliente_nombre}
-                                </span>
-                                <span className="text-[10px] text-[#A69F93] block">
-                                  Registrado por: <strong className="text-[#E6C687]">{v.cajero_nombre || 'Cajero'}</strong> • {v.creado_en ? new Date(v.creado_en).toLocaleTimeString('es-PA') : ''}
-                                </span>
+                      {/* Ventas del Turno */}
+                      {ventasTurnoList
+                        .filter((v) => {
+                          if (cierreModalFiltro === 'todos') return true;
+                          if (cierreModalFiltro === 'efectivo') return v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega';
+                          if (cierreModalFiltro === 'yappy') return v.metodo_pago === 'yappy';
+                          if (cierreModalFiltro === 'transferencia') return v.metodo_pago === 'transferencia';
+                          return false;
+                        })
+                        .map((v) => {
+                          const cobro = Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0;
+                          const icon = v.metodo_pago === 'yappy' ? '📱' : v.metodo_pago === 'transferencia' ? '🏦' : '💵';
+                          return (
+                            <div key={v.id || v.codigo} className="p-2.5 rounded-xl bg-[#13110F] border border-[#2D2822] space-y-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                  <span className="text-xs shrink-0">{icon}</span>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-bold text-white text-[11px] truncate">
+                                        Venta {v.codigo} — {v.cliente_nombre}
+                                      </span>
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-[#26221E] text-[#E6C687] border border-[#38332B]">
+                                        {v.metodo_pago}
+                                      </span>
+                                    </div>
+                                    <span className="text-[10px] text-[#A69F93] block">
+                                      Registrado por: <strong className="text-[#E6C687]">{v.cajero_nombre || v.registrado_por || 'Cajero'}</strong> • {v.creado_en ? new Date(v.creado_en).toLocaleTimeString('es-PA') : ''}
+                                    </span>
+                                  </div>
+                                </div>
+                                <span className="font-black text-emerald-400 text-xs shrink-0">+${cobro.toFixed(2)}</span>
                               </div>
+
+                              {/* Prendas de la venta con foto y zoom */}
+                              {v.items && v.items.length > 0 && (
+                                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                                  {v.items.map((it, idx) => {
+                                    const prodImg = it.imagen_url || productos.find((prod) => prod.id === (it.producto_id || it.id))?.imagen_url;
+                                    return (
+                                      <div key={idx} className="flex items-center gap-1 bg-[#1A1816] px-1.5 py-0.5 rounded-lg border border-[#2D2822] text-[10px]">
+                                        {prodImg && (
+                                          <img
+                                            src={prodImg}
+                                            alt={it.nombre}
+                                            onClick={() => setZoomedProductImage({ url: prodImg, title: it.nombre, subtitle: it.talla ? `Talla: ${it.talla}` : undefined })}
+                                            className="w-5 h-6 object-cover rounded bg-black cursor-pointer hover:opacity-80"
+                                            title="Click para ampliar foto"
+                                          />
+                                        )}
+                                        <span className="text-white truncate max-w-[90px]">{it.nombre}</span>
+                                        {it.talla && <span className="text-[#E6C687] font-bold">T:{it.talla}</span>}
+                                        <span className="text-[#A69F93]">x{it.cantidad || 1}</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
-                            <span className="font-black text-emerald-400 text-xs shrink-0">+${cobro.toFixed(2)}</span>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
 
-                      {/* Gastos del Turno */}
-                      {gastosEfectivoTurnoList.map((g) => (
-                        <div key={g.id || g.concepto} className="p-2 rounded-xl bg-[#13110F] border border-[#2D2822] flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-xs">🔻</span>
-                            <div className="min-w-0">
-                              <span className="font-bold text-rose-300 block text-[11px] truncate">
-                                Gasto: {g.concepto}
-                              </span>
-                              <span className="text-[10px] text-[#A69F93] block">
-                                Por: <strong className="text-white">{g.creado_por || 'Admin'}</strong> • {g.fecha ? new Date(g.fecha).toLocaleTimeString('es-PA') : ''}
-                              </span>
-                            </div>
-                          </div>
-                          <span className="font-black text-rose-400 text-xs shrink-0">-${Number(g.monto).toFixed(2)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Pedidos procesados y aceptados durante este turno */}
-                  <div className="bg-[#181614] rounded-2xl p-3.5 border border-[#26221E] space-y-2.5">
-                    <div className="flex items-center justify-between pb-1.5 border-b border-[#26221E]">
-                      <span className="font-extrabold text-[#E6C687] text-xs flex items-center gap-1.5">
-                        <span>📦</span>
-                        <span>Pedidos Aceptados / Entregados en este Turno ({pedidosAprobadosTurno.length})</span>
-                      </span>
-                    </div>
-
-                    {pedidosAprobadosTurno.length === 0 ? (
-                      <p className="text-[11px] text-[#A69F93] italic py-1">
-                        No se aprobaron pedidos de la tienda online durante este turno.
-                      </p>
-                    ) : (
-                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1 text-xs">
-                        {pedidosAprobadosTurno.map((p) => (
+                      {/* Pedidos Web Aprobados */}
+                      {(cierreModalFiltro === 'todos' || cierreModalFiltro === 'pedidos') &&
+                        pedidosAprobadosTurno.map((p) => (
                           <div key={p.id || p.codigo} className="p-2.5 rounded-xl bg-[#13110F] border border-[#26221E] space-y-1.5">
                             <div className="flex items-center justify-between text-[11px]">
                               <div>
+                                <span className="text-xs mr-1">📦</span>
                                 <span className="font-mono font-black text-white">{p.codigo}</span>
                                 <span className="text-[#A69F93] ml-1.5 font-bold">({p.cliente_nombre})</span>
                               </div>
                               <span className="font-black text-emerald-400">${p.total} USD</span>
                             </div>
                             <div className="text-[10px] text-[#A69F93]">
-                              Aceptado por: <strong className="text-[#E6C687]">{p.revisado_por || 'Administrador'}</strong> • {p.revisado_en ? new Date(p.revisado_en).toLocaleTimeString('es-PA') : (p.creado_en ? new Date(p.creado_en).toLocaleTimeString('es-PA') : '')}
+                              Aprobado por: <strong className="text-[#E6C687]">{p.revisado_por || 'Administrador'}</strong> • {p.revisado_en ? new Date(p.revisado_en).toLocaleTimeString('es-PA') : (p.creado_en ? new Date(p.creado_en).toLocaleTimeString('es-PA') : '')}
                             </div>
                             {/* Prendas del pedido con thumbnail */}
-                            <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                            <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
                               {p.items?.map((it, idx) => {
                                 const prodImg = it.imagen_url || productos.find((prod) => prod.id === (it.producto_id || it.id))?.imagen_url;
                                 return (
@@ -6739,8 +7008,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                         title="Click para ampliar foto"
                                       />
                                     )}
-                                    <span className="text-white truncate max-w-[100px]">{it.nombre}</span>
-                                    {it.talla && <span className="text-[#E6C687]">T:{it.talla}</span>}
+                                    <span className="text-white truncate max-w-[90px]">{it.nombre}</span>
+                                    {it.talla && <span className="text-[#E6C687] font-bold">T:{it.talla}</span>}
                                     <span className="text-[#A69F93]">x{it.cantidad || 1}</span>
                                   </div>
                                 );
@@ -6748,8 +7017,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             </div>
                           </div>
                         ))}
-                      </div>
-                    )}
+
+                      {/* Gastos del Turno */}
+                      {(cierreModalFiltro === 'todos' || cierreModalFiltro === 'gastos') &&
+                        gastosTurnoList.map((g) => (
+                          <div key={g.id || g.concepto} className="p-2 rounded-xl bg-[#13110F] border border-[#2D2822] flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-xs">🔻</span>
+                              <div className="min-w-0">
+                                <span className="font-bold text-rose-300 block text-[11px] truncate">
+                                  Gasto: {g.concepto}
+                                </span>
+                                <span className="text-[10px] text-[#A69F93] block">
+                                  Por: <strong className="text-white">{g.creado_por || 'Admin'}</strong> • {g.fecha ? new Date(g.fecha).toLocaleTimeString('es-PA') : ''}
+                                </span>
+                              </div>
+                            </div>
+                            <span className="font-black text-rose-400 text-xs shrink-0">-${Number(g.monto).toFixed(2)}</span>
+                          </div>
+                        ))}
+                    </div>
                   </div>
 
                   {/* Resumen numérico esperado */}
@@ -6759,16 +7046,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <strong className="text-white">${fondoInicial.toFixed(2)}</strong>
                     </div>
                     <div className="flex justify-between text-emerald-400">
-                      <span>(+) Ventas Efectivo ({ventasEfectivoTurnoList.length}):</span>
+                      <span>(+) Ventas Efectivo Gaveta ({ventasEfectivoTurnoList.length}):</span>
                       <strong>+${totalVentasEfectivo.toFixed(2)}</strong>
                     </div>
                     <div className="flex justify-between text-rose-400">
-                      <span>(-) Gastos del Turno ({gastosEfectivoTurnoList.length}):</span>
+                      <span>(-) Gastos del Turno ({gastosTurnoList.length}):</span>
                       <strong>-${totalGastosEfectivo.toFixed(2)}</strong>
                     </div>
                     <div className="pt-2 border-t border-[#26221E] flex justify-between font-black text-white">
-                      <span>Efectivo Esperado en Gaveta:</span>
+                      <span>Efectivo Físico Esperado en Gaveta:</span>
                       <span className="text-sm font-black text-[#E6C687]">${esperado.toFixed(2)} USD</span>
+                    </div>
+                    <div className="flex justify-between text-blue-300 text-[11px] pt-1">
+                      <span>Cobros Digitales (Yappy + Transf.):</span>
+                      <span className="font-bold">+${(totalVentasYappy + totalVentasTransf).toFixed(2)} USD</span>
+                    </div>
+                    <div className="flex justify-between text-[#E6C687] text-[11px] font-bold border-t border-[#26221E]/60 pt-1">
+                      <span>Total Facturado Global en el Turno:</span>
+                      <span className="font-black text-white">${totalGranFacturado.toFixed(2)} USD</span>
                     </div>
                   </div>
 
