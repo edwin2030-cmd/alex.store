@@ -325,7 +325,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setUsuarios(usrs);
       setGastos(gsts);
       setMovimientos(movs);
-      setSesionCaja(cajaActiva);
+      setSesionCaja((prev) => {
+        if (cajaActiva) return cajaActiva;
+        if (prev?.estado === 'abierta' && prev.fecha_apertura) {
+          const age = Date.now() - new Date(prev.fecha_apertura).getTime();
+          if (age < 20000) return prev;
+        }
+        return null;
+      });
       setHistorialCaja(histCaja);
     } catch (e) {
       console.error("Error cargando panel admin:", e);
@@ -349,6 +356,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           if (prev?.id === sesionActualizada?.id && prev?.estado === sesionActualizada?.estado) {
             return prev;
           }
+          // Si el estado local se abrió hace menos de 15 segundos y la respuesta fue null por latencia, protegerlo
+          if (!sesionActualizada && prev?.estado === 'abierta' && prev.fecha_apertura) {
+            const diff = Date.now() - new Date(prev.fecha_apertura).getTime();
+            if (diff < 15000) return prev;
+          }
           return sesionActualizada;
         });
       } catch (err) {
@@ -360,7 +372,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const handleSyncOnFocus = async () => {
       try {
         const sesionActualizada = await getSesionCajaActiva();
-        setSesionCaja(sesionActualizada);
+        if (sesionActualizada) {
+          setSesionCaja(sesionActualizada);
+        } else {
+          setSesionCaja((prev) => {
+            if (prev?.estado === 'abierta' && prev.fecha_apertura) {
+              const diff = Date.now() - new Date(prev.fecha_apertura).getTime();
+              if (diff < 15000) return prev;
+            }
+            return null;
+          });
+        }
       } catch {}
     };
 
@@ -380,7 +402,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       }
     } catch {}
 
-    // 4. Suscripción Supabase Realtime a cambios en registros_caja y detalles_productos
+    // 4. Sincronización por eventos locales y de almacenamiento
+    const handleCajaCustomEvent = (e: any) => {
+      if (e.detail !== undefined) {
+        setSesionCaja(e.detail);
+      }
+    };
+    window.addEventListener('caja-status-changed', handleCajaCustomEvent);
+
+    const handleStorageEvent = (e: StorageEvent) => {
+      if (e.key === 'alexstore_local_caja_activa') {
+        if (!e.newValue) {
+          setSesionCaja(null);
+        } else {
+          try {
+            setSesionCaja(JSON.parse(e.newValue));
+          } catch {}
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorageEvent);
+
+    // 5. Suscripción Supabase Realtime a cambios en registros_caja
     let realtimeChannel: any = null;
     try {
       realtimeChannel = supabase
@@ -393,14 +436,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             setSesionCaja(sesionActualizada);
           }
         )
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'detalles_productos' },
-          async () => {
-            const sesionActualizada = await getSesionCajaActiva();
-            setSesionCaja(sesionActualizada);
-          }
-        )
         .subscribe();
     } catch {}
 
@@ -408,6 +443,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       clearInterval(cajaPollInterval);
       window.removeEventListener('visibilitychange', handleSyncOnFocus);
       window.removeEventListener('focus', handleSyncOnFocus);
+      window.removeEventListener('caja-status-changed', handleCajaCustomEvent);
+      window.removeEventListener('storage', handleStorageEvent);
       if (broadcastChannel) broadcastChannel.close();
       if (realtimeChannel) supabase.removeChannel(realtimeChannel);
     };
@@ -2850,7 +2887,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                         </span>
                                       ) : (
                                         <span className="px-2 py-0.5 rounded-full bg-amber-950/70 border border-amber-800 text-amber-300 font-extrabold text-[9px] inline-block">
-                                          ⏳ Debe: ${v.saldo_pendiente?.toFixed(2)} USD
+                                          ⏳ Debe: ${Number(v.saldo_pendiente || 0).toFixed(2)} USD
                                         </span>
                                       )
                                     ) : (
@@ -3469,23 +3506,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             {userRole !== 'cajero' && (
                               <>
                                 <td className="py-3.5 px-4 text-right font-medium text-[#A69F93]">
-                                  {reg.monto_esperado !== undefined ? `$${Number(reg.monto_esperado).toFixed(2)}` : '—'}
+                                  {reg.monto_esperado !== undefined && reg.monto_esperado !== null ? `$${Number(reg.monto_esperado).toFixed(2)}` : '—'}
                                 </td>
                                 <td className="py-3.5 px-4 text-right font-black text-white">
-                                  {reg.monto_final_real !== undefined ? `$${Number(reg.monto_final_real).toFixed(2)}` : '—'}
+                                  {reg.monto_final_real !== undefined && reg.monto_final_real !== null ? `$${Number(reg.monto_final_real).toFixed(2)}` : '—'}
                                 </td>
                                 <td className="py-3.5 px-4 text-right font-black">
-                                  {reg.diferencia !== undefined ? (
+                                  {reg.diferencia !== undefined && reg.diferencia !== null && !isNaN(Number(reg.diferencia)) ? (
                                     <span
                                       className={`px-2 py-0.5 rounded-md text-[11px] font-black ${
-                                        reg.diferencia === 0
+                                        Number(reg.diferencia) === 0
                                           ? 'text-emerald-400 bg-emerald-950/60 border border-emerald-800/60'
-                                          : reg.diferencia > 0
+                                          : Number(reg.diferencia) > 0
                                           ? 'text-blue-400 bg-blue-950/60 border border-blue-800/60'
                                           : 'text-rose-400 bg-rose-950/60 border border-rose-800/60'
                                       }`}
                                     >
-                                      {reg.diferencia > 0 ? `+${reg.diferencia.toFixed(2)}` : `${reg.diferencia.toFixed(2)}`}
+                                      {Number(reg.diferencia) > 0 ? `+${Number(reg.diferencia).toFixed(2)}` : `${Number(reg.diferencia).toFixed(2)}`}
                                     </span>
                                   ) : (
                                     '—'
@@ -4624,13 +4661,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                       <span className="text-[10px] text-[#A69F93] block">
                                         {userRole === 'cajero'
                                           ? `${it.cantidad} unidad(es)`
-                                          : `$${it.precio.toFixed(2)} c/u`}
+                                          : `$${(Number(it.precio) || 0).toFixed(2)} c/u`}
                                       </span>
                                     </div>
                                   </div>
                                   {userRole !== 'cajero' && (
                                     <span className="font-black text-white shrink-0 text-xs">
-                                      ${(it.precio * it.cantidad).toFixed(2)}
+                                      ${((Number(it.precio) || 0) * (Number(it.cantidad) || 1)).toFixed(2)}
                                     </span>
                                   )}
                                 </div>
@@ -5275,7 +5312,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           </td>
 
                           <td className="py-4 px-6 font-black text-sm text-emerald-400">
-                            ${cli.totalGastado.toFixed(2)} USD
+                            ${(Number(cli.totalGastado) || 0).toFixed(2)} USD
                           </td>
 
                           <td className="py-4 px-6 text-right">
@@ -6070,12 +6107,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           <span className="text-[10px] text-[#A69F93] block">
                             {userRole === 'cajero'
                               ? `Cantidad: ${it.cantidad}`
-                              : `Cant: ${it.cantidad} • $${it.precio.toFixed(2)} c/u`}
+                              : `Cant: ${it.cantidad || 1} • $${(Number(it.precio) || 0).toFixed(2)} c/u`}
                           </span>
                         </div>
                         {userRole !== 'cajero' && (
                           <span className="text-xs font-black text-white shrink-0">
-                            ${(it.precio * it.cantidad).toFixed(2)}
+                            ${((Number(it.precio) || 0) * (Number(it.cantidad) || 1)).toFixed(2)}
                           </span>
                         )}
                       </div>
@@ -6738,7 +6775,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               <div className="flex items-center gap-1 text-[10px] text-[#A69F93]">
                                 {it.talla && <span className="text-[#E6C687]">Talla: {it.talla}</span>}
                                 {it.color && <span>• {it.color}</span>}
-                                <span>• ${it.precio.toFixed(2)} c/u</span>
+                                <span>• ${(Number(it.precio) || 0).toFixed(2)} c/u</span>
                               </div>
                             </div>
                           </div>
@@ -6752,9 +6789,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   const updated = [...ventaManualItems];
                                   if (updated[idx].cantidad > 1) {
                                     updated[idx].cantidad -= 1;
-                                    updated[idx].subtotal = updated[idx].cantidad * updated[idx].precio;
+                                    updated[idx].subtotal = updated[idx].cantidad * (Number(updated[idx].precio) || 0);
                                     setVentaManualItems(updated);
-                                    const sumTot = updated.reduce((s, x) => s + x.subtotal, 0);
+                                    const sumTot = updated.reduce((s, x) => s + (Number(x.subtotal) || 0), 0);
                                     setVentaManualMonto(sumTot.toFixed(2));
                                   }
                                 }}
@@ -6770,9 +6807,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 onClick={() => {
                                   const updated = [...ventaManualItems];
                                   updated[idx].cantidad += 1;
-                                  updated[idx].subtotal = updated[idx].cantidad * updated[idx].precio;
+                                  updated[idx].subtotal = updated[idx].cantidad * (Number(updated[idx].precio) || 0);
                                   setVentaManualItems(updated);
-                                  const sumTot = updated.reduce((s, x) => s + x.subtotal, 0);
+                                  const sumTot = updated.reduce((s, x) => s + (Number(x.subtotal) || 0), 0);
                                   setVentaManualMonto(sumTot.toFixed(2));
                                 }}
                                 className="px-2 py-0.5 text-xs hover:bg-[#25221E] text-[#A69F93] hover:text-white cursor-pointer"
@@ -6782,7 +6819,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             </div>
 
                             <span className="font-black text-emerald-400 text-xs w-16 text-right">
-                              ${it.subtotal.toFixed(2)}
+                              ${(Number(it.subtotal) || 0).toFixed(2)}
                             </span>
 
                             <button
@@ -7507,7 +7544,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
               <div className="p-3 rounded-2xl bg-[#181614] border border-[#2D2822]">
                 <span className="text-[10px] text-[#A69F93] font-bold uppercase block">Total Comprado</span>
-                <span className="text-lg font-black text-emerald-400">${clienteSeleccionadoParaPedidos.totalGastado.toFixed(2)} USD</span>
+                <span className="text-lg font-black text-emerald-400">${(Number(clienteSeleccionadoParaPedidos.totalGastado) || 0).toFixed(2)} USD</span>
               </div>
               <div className="p-3 rounded-2xl bg-[#181614] border border-[#2D2822]">
                 <span className="text-[10px] text-[#A69F93] font-bold uppercase block">Dirección</span>
