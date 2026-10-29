@@ -608,6 +608,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     orderId: string,
     newStatus: string
   ) => {
+    if (userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta') && (newStatus === 'aprobado' || newStatus === 'entregado')) {
+      alert('⚠️ LA CAJA ESTÁ CERRADA: Como trabajador, no puedes aprobar ni entregar pedidos mientras la caja esté cerrada. Pide al Dueño o Administrador que abra el turno de caja.');
+      return;
+    }
     const targetPed = pedidos.find((p) => p.id === orderId || p.codigo === orderId);
     if (newStatus === 'aprobado' && targetPed && targetPed.estado !== 'aprobado' && targetPed.estado !== 'entregado') {
       await handleAprobarPedido(targetPed);
@@ -825,6 +829,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   const handleAprobarPedido = async (pedido: Pedido) => {
+    if (userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')) {
+      alert('⚠️ LA CAJA ESTÁ CERRADA: Como trabajador, no puedes aceptar pedidos mientras la caja esté cerrada. Pide al Dueño o Administrador que abra el turno de caja.');
+      return;
+    }
     const orderId = pedido.id || pedido.codigo;
     setOrderActionLoadingId(orderId);
     try {
@@ -1064,6 +1072,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleCrearVentaManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')) {
+      alert('⚠️ LA CAJA ESTÁ CERRADA: Como trabajador, no puedes registrar ventas manuales mientras la caja esté cerrada. Pide al Dueño o Administrador que abra el turno de caja.');
+      return;
+    }
     const montoNum = parseFloat(ventaManualMonto);
     if (!ventaManualCliente.trim() || isNaN(montoNum) || montoNum <= 0) {
       alert('Ingresa el nombre del cliente y un monto válido mayor a $0.');
@@ -1469,6 +1481,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   }`}>
                     {userRole === 'dueno' ? '👑 DUEÑO' : '💼 TRABAJADOR'}
                   </span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-wider flex items-center gap-1 border ${
+                      sesionCaja && sesionCaja.estado === 'abierta'
+                        ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60'
+                        : 'bg-rose-950/80 text-rose-300 border-rose-700/60'
+                    }`}
+                    title={sesionCaja && sesionCaja.estado === 'abierta' ? 'Caja abierta y operativa' : 'Caja actualmente cerrada'}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${sesionCaja && sesionCaja.estado === 'abierta' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+                    <span>{sesionCaja && sesionCaja.estado === 'abierta' ? '🟢 CAJA ABIERTA' : '🔴 CAJA CERRADA'}</span>
+                  </span>
                 </div>
                 <span className="text-[10px] text-[#A69F93] font-bold block truncate capitalize mt-0.5">
                   {allowedNavItems.find((i) => i.id === activeSection)?.label || activeSection}
@@ -1563,6 +1586,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   Activo
                 </span>
               </div>
+            </div>
+
+            {/* Estado de la Caja en el Drawer Móvil */}
+            <div className={`mx-3 mb-2 p-2.5 rounded-2xl border flex items-center justify-between text-xs ${
+              sesionCaja && sesionCaja.estado === 'abierta'
+                ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
+                : 'bg-rose-950/40 border-rose-800/60 text-rose-300'
+            }`}>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-sm shrink-0">{sesionCaja && sesionCaja.estado === 'abierta' ? '🟢' : '🔴'}</span>
+                <div className="min-w-0">
+                  <span className="font-black text-[11px] block leading-tight">
+                    {sesionCaja && sesionCaja.estado === 'abierta' ? 'CAJA ABIERTA' : 'CAJA CERRADA'}
+                  </span>
+                  <span className="text-[9px] text-[#A69F93] block truncate">
+                    {sesionCaja && sesionCaja.estado === 'abierta'
+                      ? `Turno por: ${sesionCaja.abierto_por || 'Activo'}`
+                      : 'Ventas y pedidos bloqueados para staff'}
+                  </span>
+                </div>
+              </div>
+              <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border shrink-0 ${
+                sesionCaja && sesionCaja.estado === 'abierta'
+                  ? 'bg-emerald-900/60 text-emerald-200 border-emerald-700/60'
+                  : 'bg-rose-900/60 text-rose-200 border-rose-700/60'
+              }`}>
+                {sesionCaja && sesionCaja.estado === 'abierta' ? 'Operativa' : 'Cerrada'}
+              </span>
             </div>
 
             {/* Lista Vertical de Opciones (Scrolleable y Cómoda) */}
@@ -1678,6 +1729,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 {userRole === 'cajero' && '💼 CAJERO / STAFF'}
               </span>
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Sesión activa" />
+            </div>
+
+            {/* Estado de la Caja en Sidebar Escritorio */}
+            <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-colors ${
+              sesionCaja && sesionCaja.estado === 'abierta'
+                ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
+                : 'bg-rose-950/40 border-rose-800/60 text-rose-300'
+            }`}>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-sm shrink-0">{sesionCaja && sesionCaja.estado === 'abierta' ? '🟢' : '🔴'}</span>
+                <div className="min-w-0">
+                  <span className="font-black text-[11px] block leading-tight">
+                    {sesionCaja && sesionCaja.estado === 'abierta' ? 'CAJA ABIERTA' : 'CAJA CERRADA'}
+                  </span>
+                  <span className="text-[9px] text-[#A69F93] block truncate">
+                    {sesionCaja && sesionCaja.estado === 'abierta'
+                      ? `Por: ${sesionCaja.abierto_por || 'Turno activo'}`
+                      : 'Ventas y pedidos bloqueados para staff'}
+                  </span>
+                </div>
+              </div>
+              <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border shrink-0 ${
+                sesionCaja && sesionCaja.estado === 'abierta'
+                  ? 'bg-emerald-900/60 text-emerald-200 border-emerald-700/60'
+                  : 'bg-rose-900/60 text-rose-200 border-rose-700/60'
+              }`}>
+                {sesionCaja && sesionCaja.estado === 'abierta' ? 'Operativo' : 'Cerrado'}
+              </span>
             </div>
           </div>
 
@@ -2393,6 +2472,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         <button
                           type="button"
                           onClick={() => {
+                            if (userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')) {
+                              alert('⚠️ LA CAJA ESTÁ CERRADA: Como trabajador, no puedes registrar ventas manuales mientras la caja esté cerrada. Pide al Dueño o Administrador que abra el turno de caja.');
+                              return;
+                            }
                             setVentaManualCliente('');
                             setVentaManualTelefono('');
                             setVentaManualMonto('');
@@ -2403,13 +2486,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             setVentaManualMetodo('efectivo');
                             setIsModalVentaManualOpen(true);
                           }}
-                          className="px-4 py-2.5 rounded-xl bg-[#C59A4D] hover:bg-[#B3873B] text-[#141312] text-xs font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all"
+                          className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all ${
+                            userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')
+                              ? 'bg-[#26221E] text-rose-300 border border-rose-800/60 hover:bg-[#2F2924]'
+                              : 'bg-[#C59A4D] hover:bg-[#B3873B] text-[#141312]'
+                          }`}
+                          title={
+                            userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')
+                              ? 'Caja cerrada: el trabajador no puede ingresar ventas hasta que se abra el turno'
+                              : 'Registrar nueva venta manual'
+                          }
                         >
                           <Plus className="w-4 h-4 stroke-[3]" />
-                          <span>+ REGISTRAR VENTA MANUAL</span>
+                          <span>
+                            {userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')
+                              ? '🔒 CAJA CERRADA'
+                              : '+ REGISTRAR VENTA MANUAL'}
+                          </span>
                         </button>
                       </div>
                     </div>
+
+                    {/* Alerta de Caja Cerrada para Cajeros en Ventas */}
+                    {userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta') && (
+                      <div className="p-4 rounded-2xl bg-rose-950/40 border border-rose-800/80 text-rose-200 text-xs flex items-start gap-3 shadow-md">
+                        <div className="p-2 rounded-xl bg-rose-900/60 text-rose-300 shrink-0">
+                          <AlertTriangle className="w-5 h-5 text-rose-400" />
+                        </div>
+                        <div className="space-y-1">
+                          <span className="font-black text-rose-300 uppercase tracking-wider text-xs block">
+                            🔴 CAJA CERRADA - VENTAS MANUALES BLOQUEADAS
+                          </span>
+                          <p className="text-[11px] text-rose-200/90 leading-relaxed">
+                            Como trabajador, <strong>no tienes permitido registrar ventas manuales</strong> mientras el turno de caja esté cerrado. Solicita al <strong>Dueño o Administrador</strong> que realice la apertura de caja para comenzar a facturar.
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Barra de Filtro de Período (Día / Mes / Año / Rango) y Botones de Eliminación Masiva */}
                     <div className="bg-[#141210] rounded-2xl p-3.5 border border-[#26221E] flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -3990,6 +4103,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               )}
 
+              {/* Alerta de Caja Cerrada para Cajeros en Pedidos */}
+              {userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta') && (
+                <div className="p-4 rounded-2xl bg-rose-950/40 border border-rose-800/80 text-rose-200 text-xs flex items-start gap-3 shadow-md">
+                  <div className="p-2 rounded-xl bg-rose-900/60 text-rose-300 shrink-0">
+                    <AlertTriangle className="w-5 h-5 text-rose-400" />
+                  </div>
+                  <div className="space-y-1">
+                    <span className="font-black text-rose-300 uppercase tracking-wider text-xs block">
+                      🔴 CAJA CERRADA - APROBACIÓN DE PEDIDOS BLOQUEADA
+                    </span>
+                    <p className="text-[11px] text-rose-200/90 leading-relaxed">
+                      Como trabajador, <strong>no tienes permitido aceptar pedidos ni descontar inventario</strong> mientras la caja esté cerrada. Pide al <strong>Dueño o Administrador</strong> que abra el turno de caja para habilitar las aprobaciones.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Order Cards List */}
               <div className="space-y-4">
                 {pedidos
@@ -4047,14 +4177,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             <button
                               type="button"
                               disabled={orderActionLoadingId === (pedido.id || pedido.codigo)}
-                              onClick={() => handleAprobarPedido(pedido)}
-                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] sm:text-xs flex items-center gap-1 shadow-sm transition-all active:scale-95 cursor-pointer disabled:opacity-50"
-                              title="Aceptar pedido: descuenta stock automáticamente de inventario y registra la venta en Ventas"
+                              onClick={() => {
+                                if (userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')) {
+                                  alert('⚠️ LA CAJA ESTÁ CERRADA: Como trabajador, no puedes aceptar pedidos mientras la caja esté cerrada. Pide al Dueño o Administrador que abra el turno de caja.');
+                                  return;
+                                }
+                                handleAprobarPedido(pedido);
+                              }}
+                              className={`px-3 py-1.5 rounded-xl font-extrabold text-[11px] sm:text-xs flex items-center gap-1 shadow-sm transition-all active:scale-95 cursor-pointer disabled:opacity-50 ${
+                                userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')
+                                  ? 'bg-[#26221E] text-rose-300 border border-rose-800/60 hover:bg-[#2F2924]'
+                                  : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                              }`}
+                              title={
+                                userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')
+                                  ? 'Caja cerrada: el trabajador no puede aceptar pedidos hasta que se abra el turno'
+                                  : 'Aceptar pedido: descuenta stock automáticamente de inventario y registra la venta en Ventas'
+                              }
                             >
                               <Check className="w-3.5 h-3.5 stroke-[3]" />
                               <span>
                                 {orderActionLoadingId === (pedido.id || pedido.codigo)
                                   ? 'Aceptando...'
+                                  : userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')
+                                  ? '🔒 CAJA CERRADA'
                                   : 'ACEPTAR'}
                               </span>
                             </button>

@@ -7,9 +7,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  PackageCheck,
   AlertTriangle,
-  XCircle,
   ShieldCheck,
   Layers,
   Sparkles,
@@ -117,8 +115,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
   // Stock según variante o producto base
   const stockDisponible = matchingVariant?.stock !== undefined ? matchingVariant.stock : (producto.stock ?? 0);
-  const isAgotado = stockDisponible <= 0;
-  const isStockBajo = stockDisponible > 0 && stockDisponible <= 3;
 
   const handleSelectOption = (attrName: string, value: string) => {
     setValidationError(null);
@@ -129,8 +125,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   };
 
   const handleAdd = () => {
-    if (isAgotado) return;
-
     // Validar que todas las opciones obligatorias estén seleccionadas
     for (const attr of atributos) {
       if (!selectedOptions[attr.nombre]) {
@@ -235,23 +229,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
             <div className="flex flex-col justify-between space-y-4 sm:space-y-5">
               <div className="space-y-3">
                 <div className="flex items-center gap-2 flex-wrap">
-                  {isAgotado ? (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 text-xs font-bold">
-                      <XCircle className="w-3.5 h-3.5" />
-                      Agotado
-                    </span>
-                  ) : isStockBajo ? (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-xs font-bold">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                      Stock Bajo ({stockDisponible} unids.)
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
-                      <PackageCheck className="w-3.5 h-3.5 text-emerald-600" />
-                      Disponible ({stockDisponible} unids.)
-                    </span>
-                  )}
-                  <span className="text-xs text-[#7A7368] font-bold">AlexStore Oficial</span>
+                  <span className="text-xs text-[#C59A4D] font-extrabold tracking-wide uppercase">AlexStore Oficial</span>
                 </div>
 
                 <h2 className="text-lg sm:text-2xl font-black text-[#1A1918] leading-snug font-heading">
@@ -270,11 +248,15 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   )}
                 </div>
 
-                {producto.descripcion && (
-                  <div className="p-3 rounded-2xl bg-[#FCFAF7] border border-[#EFEAE2] text-xs text-[#5A554D] leading-relaxed max-h-28 overflow-y-auto">
-                    {producto.descripcion}
-                  </div>
-                )}
+                {producto.descripcion && (() => {
+                  const sanitized = producto.descripcion.replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '').trim();
+                  if (!sanitized) return null;
+                  return (
+                    <div className="p-3 rounded-2xl bg-[#FCFAF7] border border-[#EFEAE2] text-xs text-[#5A554D] leading-relaxed max-h-28 overflow-y-auto">
+                      {sanitized}
+                    </div>
+                  );
+                })()}
 
                 {/* SELECTORES DE OPCIONES Y VARIANTES */}
                 <div className="space-y-3 pt-1">
@@ -340,8 +322,8 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                     </span>
                     <button
                       type="button"
-                      disabled={cantidad >= stockDisponible}
-                      onClick={() => setCantidad((c) => Math.min(stockDisponible, c + 1))}
+                      disabled={stockDisponible > 0 ? cantidad >= stockDisponible : cantidad >= 50}
+                      onClick={() => setCantidad((c) => (stockDisponible > 0 ? Math.min(stockDisponible, c + 1) : Math.min(50, c + 1)))}
                       className="w-6 h-6 flex items-center justify-center font-black text-sm text-[#7A7368] hover:text-[#1A1918] disabled:opacity-30 cursor-pointer"
                     >
                       +
@@ -368,11 +350,8 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               <div className="space-y-2.5 pt-1">
                 <button
                   onClick={handleAdd}
-                  disabled={isAgotado}
                   className={`w-full py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all active:scale-98 cursor-pointer ${
-                    isAgotado
-                      ? 'bg-[#EAE5DC] text-[#9C9488] cursor-not-allowed'
-                      : added
+                    added
                       ? 'bg-emerald-600 text-white'
                       : 'bg-[#141312] hover:bg-black text-[#F5E6BE]'
                   }`}
@@ -385,7 +364,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   ) : (
                     <>
                       <ShoppingBag className="w-4 h-4 text-[#E6C687]" />
-                      <span>{isAgotado ? 'AGOTADO' : 'AGREGAR A LA BOLSA'}</span>
+                      <span>AGREGAR A LA BOLSA</span>
                     </>
                   )}
                 </button>
