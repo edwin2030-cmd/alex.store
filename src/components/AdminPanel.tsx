@@ -50,6 +50,8 @@ import {
   eliminarTodosLosGastos,
   eliminarGastosPorIds,
   actualizarStockPorTallas,
+  supabase,
+  CAJA_SYNC_BROADCAST,
 } from '../lib/supabase';
 import {
   ROLE_PERMISSIONS,
@@ -334,6 +336,81 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   useEffect(() => {
     reloadAllData();
+  }, []);
+
+  // Sincronización continua en tiempo real del estado de caja entre múltiples navegadores y pestañas
+  useEffect(() => {
+    // 1. Polling periódico cada 3 segundos para detectar si otro navegador abrió o cerró caja
+    const cajaPollInterval = setInterval(async () => {
+      try {
+        const sesionActualizada = await getSesionCajaActiva();
+        setSesionCaja((prev) => {
+          if (!prev && !sesionActualizada) return null;
+          if (prev?.id === sesionActualizada?.id && prev?.estado === sesionActualizada?.estado) {
+            return prev;
+          }
+          return sesionActualizada;
+        });
+      } catch (err) {
+        console.warn('Aviso polling estado caja:', err);
+      }
+    }, 3000);
+
+    // 2. Al cambiar de pestaña o volver a enfocar la ventana, re-verificar de inmediato
+    const handleSyncOnFocus = async () => {
+      try {
+        const sesionActualizada = await getSesionCajaActiva();
+        setSesionCaja(sesionActualizada);
+      } catch {}
+    };
+
+    window.addEventListener('visibilitychange', handleSyncOnFocus);
+    window.addEventListener('focus', handleSyncOnFocus);
+
+    // 3. Sincronización instantánea entre pestañas abiertas
+    let broadcastChannel: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        broadcastChannel = new BroadcastChannel(CAJA_SYNC_BROADCAST);
+        broadcastChannel.onmessage = (event) => {
+          if (event.data?.type === 'CAJA_UPDATED') {
+            setSesionCaja(event.data.sesion || null);
+          }
+        };
+      }
+    } catch {}
+
+    // 4. Suscripción Supabase Realtime a cambios en registros_caja y detalles_productos
+    let realtimeChannel: any = null;
+    try {
+      realtimeChannel = supabase
+        .channel('caja_sync_realtime')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'registros_caja' },
+          async () => {
+            const sesionActualizada = await getSesionCajaActiva();
+            setSesionCaja(sesionActualizada);
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'detalles_productos' },
+          async () => {
+            const sesionActualizada = await getSesionCajaActiva();
+            setSesionCaja(sesionActualizada);
+          }
+        )
+        .subscribe();
+    } catch {}
+
+    return () => {
+      clearInterval(cajaPollInterval);
+      window.removeEventListener('visibilitychange', handleSyncOnFocus);
+      window.removeEventListener('focus', handleSyncOnFocus);
+      if (broadcastChannel) broadcastChannel.close();
+      if (realtimeChannel) supabase.removeChannel(realtimeChannel);
+    };
   }, []);
 
   // Asegurar que si el rol del usuario cambia, no permanezca en una sección restringida

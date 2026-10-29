@@ -1784,12 +1784,35 @@ export async function eliminarGastosPorIds(ids: string[]): Promise<{ success: bo
 }
 
 // ==========================================
-// CONTROL DE APERTURA Y CIERRE DE CAJA
+// CONTROL DE APERTURA Y CIERRE DE CAJA (SINCRONIZACIÓN MULTI-NAVEGADOR)
 // ==========================================
 const STORAGE_KEY_CAJA_ACTUAL = 'alexstore_local_caja_activa';
 const STORAGE_KEY_CAJA_HISTORIAL = 'alexstore_local_caja_historial';
+export const CAJA_SYNC_BROADCAST = 'alexstore_caja_channel';
+
+function generateValidUuid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function broadcastCajaChange(sesion: RegistroCaja | null) {
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel(CAJA_SYNC_BROADCAST);
+      bc.postMessage({ type: 'CAJA_UPDATED', sesion });
+      bc.close();
+    }
+  } catch {}
+}
 
 export async function getSesionCajaActiva(): Promise<RegistroCaja | null> {
+  // 1. Intentar consultar en registros_caja de Supabase
   try {
     const { data, error } = await supabase
       .from('registros_caja')
@@ -1799,21 +1822,57 @@ export async function getSesionCajaActiva(): Promise<RegistroCaja | null> {
       .limit(1)
       .maybeSingle();
 
-    if (!error && data) {
-      try {
-        localStorage.setItem(STORAGE_KEY_CAJA_ACTUAL, JSON.stringify(data));
-      } catch {}
-      return data as RegistroCaja;
+    if (!error) {
+      if (data && data.estado === 'abierta') {
+        try { localStorage.setItem(STORAGE_KEY_CAJA_ACTUAL, JSON.stringify(data)); } catch {}
+        return data as RegistroCaja;
+      }
     }
   } catch (err) {
     console.warn('Aviso consultando registros_caja en Supabase:', err);
   }
 
+  // 2. Intentar consultar en caja_sesiones (por si fue creada con este nombre)
   try {
-    const local = localStorage.getItem(STORAGE_KEY_CAJA_ACTUAL);
-    if (local) return JSON.parse(local);
-  } catch {}
+    const { data, error } = await supabase
+      .from('caja_sesiones')
+      .select('*')
+      .eq('estado', 'abierta')
+      .order('fecha_apertura', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
+    if (!error && data && data.estado === 'abierta') {
+      try { localStorage.setItem(STORAGE_KEY_CAJA_ACTUAL, JSON.stringify(data)); } catch {}
+      return data as RegistroCaja;
+    }
+  } catch (err) {}
+
+  // 3. Consultar estado global en detalles_productos (SISTEMA_ESTADO_CAJA)
+  // Esta tabla ya existe en Supabase y garantiza sincronización entre navegadores 100% libre de fallos
+  try {
+    const { data, error } = await supabase
+      .from('detalles_productos')
+      .select('*')
+      .eq('producto_id', 'SISTEMA_ESTADO_CAJA')
+      .maybeSingle();
+
+    if (!error && data?.tallas_stock) {
+      const payload = data.tallas_stock as any;
+      if (payload.estado === 'abierta' && payload.sesion) {
+        try { localStorage.setItem(STORAGE_KEY_CAJA_ACTUAL, JSON.stringify(payload.sesion)); } catch {}
+        return payload.sesion as RegistroCaja;
+      }
+      if (payload.estado === 'cerrada') {
+        try { localStorage.removeItem(STORAGE_KEY_CAJA_ACTUAL); } catch {}
+        return null;
+      }
+    }
+  } catch (err) {}
+
+  // 4. Si todas las fuentes en Supabase indican que no hay caja abierta, limpiar el local storage
+  // para que ningún navegador quede con un estado "abierto" desfasado.
+  try { localStorage.removeItem(STORAGE_KEY_CAJA_ACTUAL); } catch {}
   return null;
 }
 
@@ -1831,9 +1890,22 @@ export async function getHistorialCaja(limit = 100): Promise<RegistroCaja[]> {
       } catch {}
       return data as RegistroCaja[];
     }
-  } catch (err) {
-    console.warn('Aviso consultando historial de caja en Supabase:', err);
-  }
+  } catch (err) {}
+
+  try {
+    const { data, error } = await supabase
+      .from('caja_sesiones')
+      .select('*')
+      .order('fecha_apertura', { ascending: false })
+      .limit(limit);
+
+    if (!error && data && data.length > 0) {
+      try {
+        localStorage.setItem(STORAGE_KEY_CAJA_HISTORIAL, JSON.stringify(data));
+      } catch {}
+      return data as RegistroCaja[];
+    }
+  } catch (err) {}
 
   try {
     const local = localStorage.getItem(STORAGE_KEY_CAJA_HISTORIAL);
@@ -1851,8 +1923,9 @@ export async function abrirCaja(params: {
 }): Promise<{ success: boolean; data?: RegistroCaja; error?: string }> {
   try {
     const now = new Date().toISOString();
+    const sessionId = generateValidUuid();
     const newSession: RegistroCaja = {
-      id: `caja_${Date.now()}`,
+      id: sessionId,
       estado: 'abierta',
       monto_inicial: Number(params.monto_inicial) || 0,
       fecha_apertura: now,
@@ -1862,11 +1935,13 @@ export async function abrirCaja(params: {
       creado_en: now,
     };
 
+    // 1. Guardar en registros_caja
     try {
       const { data, error } = await supabase
         .from('registros_caja')
         .insert([
           {
+            id: newSession.id,
             estado: 'abierta',
             monto_inicial: newSession.monto_inicial,
             fecha_apertura: newSession.fecha_apertura,
@@ -1883,9 +1958,41 @@ export async function abrirCaja(params: {
         newSession.id = data.id || newSession.id;
       }
     } catch (e) {
-      console.warn('Aviso guardando apertura de caja en Supabase:', e);
+      console.warn('Aviso guardando en registros_caja:', e);
     }
 
+    // 2. Guardar también en caja_sesiones por compatibilidad
+    try {
+      await supabase.from('caja_sesiones').insert([
+        {
+          id: newSession.id,
+          estado: 'abierta',
+          monto_inicial: newSession.monto_inicial,
+          fecha_apertura: newSession.fecha_apertura,
+          abierto_por: newSession.abierto_por,
+          usuario_id: newSession.usuario_id,
+          notas: newSession.notas,
+        }
+      ]);
+    } catch (e) {}
+
+    // 3. Guardar estado sincronizado en detalles_productos (SISTEMA_ESTADO_CAJA)
+    // Garantiza que cualquier navegador o dispositivo lea inmediatamente la caja abierta
+    try {
+      await supabase.from('detalles_productos').upsert([
+        {
+          producto_id: 'SISTEMA_ESTADO_CAJA',
+          tallas_stock: {
+            estado: 'abierta',
+            sesion: newSession,
+            actualizado_en: now,
+          },
+          updated_at: now,
+        }
+      ]);
+    } catch (e) {}
+
+    // 4. Guardar en localStorage
     try {
       localStorage.setItem(STORAGE_KEY_CAJA_ACTUAL, JSON.stringify(newSession));
       const hist = await getHistorialCaja();
@@ -1893,7 +2000,10 @@ export async function abrirCaja(params: {
       localStorage.setItem(STORAGE_KEY_CAJA_HISTORIAL, JSON.stringify(updated));
     } catch {}
 
-    // Registrar en auditoría
+    // 5. Notificar a las demás pestañas abiertas en tiempo real
+    broadcastCajaChange(newSession);
+
+    // 6. Registrar en auditoría
     await registrarMovimiento({
       usuario_id: params.usuario_id,
       usuario_nombre: params.abierto_por,
@@ -1920,8 +2030,6 @@ export async function cerrarCaja(params: {
 }): Promise<{ success: boolean; data?: RegistroCaja; error?: string }> {
   try {
     const now = new Date().toISOString();
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.sesionId);
-
     const updatePayload = {
       estado: 'cerrada',
       monto_final_real: Number(params.monto_final_real) || 0,
@@ -1932,17 +2040,43 @@ export async function cerrarCaja(params: {
       notas: params.notas || null,
     };
 
+    // 1. Cerrar en registros_caja
     try {
-      if (isUuid) {
+      await supabase.from('registros_caja').update(updatePayload).eq('estado', 'abierta');
+      if (params.sesionId) {
         await supabase.from('registros_caja').update(updatePayload).eq('id', params.sesionId);
-      } else {
-        await supabase.from('registros_caja').update(updatePayload).eq('estado', 'abierta');
       }
     } catch (e) {
-      console.warn('Aviso cerrando caja en Supabase:', e);
+      console.warn('Aviso cerrando caja en registros_caja:', e);
     }
 
-    // Actualizar almacenamiento local
+    // 2. Cerrar en caja_sesiones
+    try {
+      await supabase.from('caja_sesiones').update(updatePayload).eq('estado', 'abierta');
+      if (params.sesionId) {
+        await supabase.from('caja_sesiones').update(updatePayload).eq('id', params.sesionId);
+      }
+    } catch (e) {}
+
+    // 3. Actualizar estado global en detalles_productos (SISTEMA_ESTADO_CAJA) como CERRADA
+    try {
+      await supabase.from('detalles_productos').upsert([
+        {
+          producto_id: 'SISTEMA_ESTADO_CAJA',
+          tallas_stock: {
+            estado: 'cerrada',
+            sesion: null,
+            cerrado_por: params.cerrado_por,
+            fecha_cierre: now,
+            monto_final_real: params.monto_final_real,
+            diferencia: params.diferencia,
+          },
+          updated_at: now,
+        }
+      ]);
+    } catch (e) {}
+
+    // 4. Limpiar almacenamiento local
     try {
       localStorage.removeItem(STORAGE_KEY_CAJA_ACTUAL);
       const hist = await getHistorialCaja();
@@ -1950,7 +2084,10 @@ export async function cerrarCaja(params: {
       localStorage.setItem(STORAGE_KEY_CAJA_HISTORIAL, JSON.stringify(updated));
     } catch {}
 
-    // Registrar en auditoría
+    // 5. Notificar a todas las demás pestañas y navegadores
+    broadcastCajaChange(null);
+
+    // 6. Registrar en auditoría
     await registrarMovimiento({
       usuario_nombre: params.cerrado_por,
       usuario_email: '',
