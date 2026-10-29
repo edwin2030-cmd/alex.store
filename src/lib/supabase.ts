@@ -210,6 +210,10 @@ export async function getProductos(): Promise<Producto[]> {
         });
       }
 
+      const sumTallas = Object.keys(tallas_stock).length > 0
+        ? Object.values(tallas_stock).reduce((acc, q) => acc + (Number(q) || 0), 0)
+        : undefined;
+
       return {
         ...p,
         descripcion: cleanDescripcion || null,
@@ -222,7 +226,7 @@ export async function getProductos(): Promise<Producto[]> {
         variantes: p.variantes || [],
         sku: p.sku || '',
         costo: p.costo || 0,
-        stock: stockMap[p.id]?.cantidad ?? (p.stock || 0),
+        stock: sumTallas !== undefined ? sumTallas : (stockMap[p.id]?.cantidad ?? (p.stock || 0)),
         stock_minimo: stockMap[p.id]?.stock_minimo ?? (p.stock_minimo || 5),
       };
     });
@@ -1169,6 +1173,11 @@ export async function getVentas(): Promise<Venta[]> {
  * Descuenta EXCLUSIVAMENTE de la talla vendida (ej: solo XL, dejando intactas las demás)
  * y recalcula el stock total del producto.
  */
+/**
+ * Descuenta stock de un producto de forma atómica y consistente,
+ * manejando desglose exacto por talla si está disponible,
+ * y recalcula el stock total del producto.
+ */
 export async function descontarStockProducto(
   productoId: string,
   cantidadADescontar: number,
@@ -1178,140 +1187,221 @@ export async function descontarStockProducto(
 ): Promise<{ success: boolean; nuevoStock?: number; error?: string }> {
   try {
     const cant = Math.max(1, Number(cantidadADescontar) || 1);
-    const now = new Date().toISOString();
 
-    // 1. Obtener estado actual del producto (stock, tallas_stock, variantes y descripcion)
+    // 1. Obtener estado actual del producto desde Supabase con select('*') para no fallar si columnas no existen
     let prodData: any = null;
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('productos')
-        .select('id, stock, variantes, tiene_variantes, tallas, tallas_stock, descripcion')
+        .select('*')
         .eq('id', productoId)
         .maybeSingle();
-      prodData = data;
+      if (!error && data) {
+        prodData = data;
+      }
     } catch (e) {
       console.warn('Aviso leyendo producto para descuento:', e);
     }
 
-    let nuevoStockProd = 0;
-    let nuevasTallasStock: Record<string, number> | undefined = undefined;
-    let nuevasVariantes: any[] | undefined = undefined;
-
-    if (prodData) {
-      const currentStock = Number(prodData.stock) || 0;
-
-      // Extraer mapa de tallas desde columna nativa, metadatos de descripción o caché
-      let tallasMap: Record<string, number> = {};
-      if (prodData.tallas_stock && typeof prodData.tallas_stock === 'object' && Object.keys(prodData.tallas_stock).length > 0) {
-        tallasMap = { ...prodData.tallas_stock };
-      } else if (prodData.descripcion && typeof prodData.descripcion === 'string') {
-        const metaMatch = prodData.descripcion.match(/<!--ALEX_TALLAS_STOCK:([\s\S]*?)-->/);
-        if (metaMatch && metaMatch[1]) {
-          try {
-            tallasMap = JSON.parse(metaMatch[1]);
-          } catch {}
-        }
-      }
-
-      if (Object.keys(tallasMap).length === 0) {
-        try {
-          const cached = localStorage.getItem('alexstore_tallas_stock_' + productoId);
-          if (cached) tallasMap = JSON.parse(cached);
-        } catch {}
-      }
-
-      // Descuento específico por TALLA si el producto maneja tallas_stock
-      if (Object.keys(tallasMap).length > 0) {
-        // Buscar coincidencia exacta o insensible a mayúsculas/minúsculas de la talla
-        const searchTalla = (talla || varianteTitulo || '').trim().toLowerCase();
-        let targetKey: string | null = null;
-
-        if (searchTalla) {
-          targetKey = Object.keys(tallasMap).find(
-            (k) => k.toLowerCase() === searchTalla || searchTalla.includes(k.toLowerCase())
-          ) || null;
-        }
-
-        // Si encontramos la talla exacta (ej: XL)
-        if (targetKey) {
-          const actualTallaStock = Number(tallasMap[targetKey]) || 0;
-          tallasMap[targetKey] = Math.max(0, actualTallaStock - cant);
-        } else {
-          // Si no vino talla especificada pero el producto tiene tallas, descontar del primer registro disponible
-          const firstKey = Object.keys(tallasMap)[0];
-          if (firstKey) {
-            const actual = Number(tallasMap[firstKey]) || 0;
-            tallasMap[firstKey] = Math.max(0, actual - cant);
-          }
-        }
-
-        nuevasTallasStock = tallasMap;
-
-        // El stock total del producto es la SUMA exacta de las tallas actualizadas
-        nuevoStockProd = Object.values(tallasMap).reduce(
-          (sum, q) => sum + (Number(q) || 0),
-          0
-        );
-      } else {
-        // Descuento estándar si no tiene desglose de tallas
-        nuevoStockProd = Math.max(0, currentStock - cant);
-      }
-
-      // Descontar también en el array de variantes si existen
-      if (Array.isArray(prodData.variantes) && prodData.variantes.length > 0) {
-        const searchVar = (talla || varianteTitulo || varianteId || '').trim().toLowerCase();
-        nuevasVariantes = prodData.variantes.map((v: any) => {
-          const matches =
-            (varianteId && (v.id === varianteId || v.titulo === varianteId)) ||
-            (varianteTitulo && (v.titulo === varianteTitulo || v.id === varianteTitulo)) ||
-            (searchVar && (
-              (v.opciones?.Talla && v.opciones.Talla.toLowerCase() === searchVar) ||
-              (v.titulo && v.titulo.toLowerCase().includes(searchVar))
-            ));
-          if (matches) {
-            const varStock = Number(v.stock) || 0;
-            return { ...v, stock: Math.max(0, varStock - cant) };
-          }
-          return v;
-        });
-      }
-
-      // Actualizar tabla productos en Supabase
-      // Actualizar tabla productos en Supabase de forma ultra-resiliente
-      const updateProdPayload: any = {
-        stock: nuevoStockProd,
-      };
-      if (nuevasTallasStock) {
-        updateProdPayload.tallas_stock = nuevasTallasStock;
-        try {
-          localStorage.setItem('alexstore_tallas_stock_' + productoId, JSON.stringify(nuevasTallasStock));
-        } catch {}
-        const rawDesc = prodData.descripcion || '';
-        const cleanDesc = rawDesc.replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '').trim();
-        updateProdPayload.descripcion = cleanDesc ? `${cleanDesc}\n<!--ALEX_TALLAS_STOCK:${JSON.stringify(nuevasTallasStock)}-->` : `<!--ALEX_TALLAS_STOCK:${JSON.stringify(nuevasTallasStock)}-->`;
-      }
-      if (nuevasVariantes) {
-        updateProdPayload.variantes = nuevasVariantes;
-      }
-
-      await safeUpdateProducto(productoId, updateProdPayload);
-    }
-
-    // 2. Sincronizar en la tabla 'inventario'
+    // Obtener detalles adicionales si existen (detalles_productos)
+    let detData: any = null;
     try {
-      const { data: invData } = await supabase
+      const { data } = await supabase
+        .from('detalles_productos')
+        .select('*')
+        .eq('producto_id', productoId)
+        .maybeSingle();
+      detData = data;
+    } catch {}
+
+    // Obtener registro de inventario actual si existe
+    let invData: any = null;
+    try {
+      const { data } = await supabase
         .from('inventario')
         .select('id, cantidad, stock_minimo')
         .eq('producto_id', productoId)
         .maybeSingle();
+      invData = data;
+    } catch {}
 
+    // Extraer mapa de tallas desde:
+    // a) columna nativa en productos
+    // b) metadatos <!--ALEX_TALLAS_STOCK:...--> en descripcion
+    // c) columna en detalles_productos
+    // d) variantes
+    // e) cache localStorage
+    let tallasMap: Record<string, number> = {};
+
+    if (prodData?.tallas_stock && typeof prodData.tallas_stock === 'object' && Object.keys(prodData.tallas_stock).length > 0) {
+      tallasMap = { ...prodData.tallas_stock };
+    } else if (prodData?.descripcion && typeof prodData.descripcion === 'string') {
+      const metaMatch = prodData.descripcion.match(/<!--ALEX_TALLAS_STOCK:([\s\S]*?)-->/);
+      if (metaMatch && metaMatch[1]) {
+        try {
+          const parsed = JSON.parse(metaMatch[1]);
+          if (parsed && typeof parsed === 'object') {
+            tallasMap = { ...parsed };
+          }
+        } catch {}
+      }
+    }
+
+    if (Object.keys(tallasMap).length === 0 && detData?.tallas_stock && typeof detData.tallas_stock === 'object' && Object.keys(detData.tallas_stock).length > 0) {
+      tallasMap = { ...detData.tallas_stock };
+    }
+
+    if (Object.keys(tallasMap).length === 0 && Array.isArray(prodData?.variantes) && prodData.variantes.length > 0) {
+      prodData.variantes.forEach((v: any) => {
+        const tName = v.opciones?.Talla || v.opciones?.talla || (v.titulo ? v.titulo.replace(/^Talla:\s*/i, '').trim() : '');
+        if (tName) {
+          tallasMap[tName] = Number(v.stock) || 0;
+        }
+      });
+    }
+
+    if (Object.keys(tallasMap).length === 0) {
+      try {
+        const cached = localStorage.getItem('alexstore_tallas_stock_' + productoId);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && typeof parsed === 'object') {
+            tallasMap = { ...parsed };
+          }
+        }
+      } catch {}
+    }
+
+    const rawTallasList: string[] =
+      (Array.isArray(prodData?.tallas) && prodData.tallas.length > 0)
+        ? prodData.tallas
+        : (Array.isArray(detData?.tallas) && detData.tallas.length > 0)
+        ? detData.tallas
+        : [];
+
+    const currentBaseStock = Number(prodData?.stock ?? invData?.cantidad ?? 0);
+
+    if (Object.keys(tallasMap).length === 0 && rawTallasList.length > 0) {
+      const perTalla = Math.max(0, Math.floor(currentBaseStock / rawTallasList.length));
+      rawTallasList.forEach((t) => {
+        tallasMap[t] = perTalla;
+      });
+    }
+
+    // Helper de normalización de talla
+    const normalizeSize = (str?: string) =>
+      (str || '')
+        .toString()
+        .toLowerCase()
+        .replace(/^(talla|talle|size)\s*[:\-]?\s*/i, '')
+        .trim();
+
+    const targetSizeNorm = normalizeSize(talla) || normalizeSize(varianteTitulo);
+
+    let nuevoStockProd = currentBaseStock;
+    let nuevasTallasStock: Record<string, number> | undefined = undefined;
+
+    if (Object.keys(tallasMap).length > 0) {
+      // 1. Buscar coincidencia exacta normalizada (ej: 's' === 's', 'm' === 'm', '32' === '32')
+      let matchedKey = Object.keys(tallasMap).find((k) => normalizeSize(k) === targetSizeNorm);
+
+      // 2. Si no se encontró exacta, buscar con límites de palabra para no mezclar letras individuales
+      if (!matchedKey && targetSizeNorm) {
+        matchedKey = Object.keys(tallasMap).find((k) => {
+          const nk = normalizeSize(k);
+          if (!nk) return false;
+          const re1 = new RegExp(`(^|[^a-z0-9])${nk}([^a-z0-9]|$)`, 'i');
+          const re2 = new RegExp(`(^|[^a-z0-9])${targetSizeNorm}([^a-z0-9]|$)`, 'i');
+          return re1.test(targetSizeNorm) || re2.test(nk);
+        });
+      }
+
+      // 3. Aplicar descuento ÚNICAMENTE a la talla seleccionada
+      if (matchedKey) {
+        const actualQty = Number(tallasMap[matchedKey]) || 0;
+        tallasMap[matchedKey] = Math.max(0, actualQty - cant);
+      } else if (!targetSizeNorm) {
+        // Si no se especificó talla en la venta, descontar de la primera que tenga existencias disponibles
+        const firstAvailable = Object.keys(tallasMap).find((k) => (Number(tallasMap[k]) || 0) >= cant) || Object.keys(tallasMap)[0];
+        if (firstAvailable) {
+          const actual = Number(tallasMap[firstAvailable]) || 0;
+          tallasMap[firstAvailable] = Math.max(0, actual - cant);
+        }
+      }
+
+      nuevasTallasStock = tallasMap;
+      // El nuevo stock del producto es la SUMA EXACTA de las tallas actualizadas
+      nuevoStockProd = Object.values(tallasMap).reduce((sum, q) => sum + (Number(q) || 0), 0);
+    } else {
+      // Descuento estándar si no tiene desglose de tallas
+      nuevoStockProd = Math.max(0, currentBaseStock - cant);
+    }
+
+    // Descontar en variantes si existen
+    let nuevasVariantes: any[] | undefined = undefined;
+    if (Array.isArray(prodData?.variantes) && prodData.variantes.length > 0) {
+      nuevasVariantes = prodData.variantes.map((v: any) => {
+        const vTallaNorm = normalizeSize(v.opciones?.Talla || v.opciones?.talla || v.titulo);
+        const matches =
+          (varianteId && (v.id === varianteId || v.titulo === varianteId)) ||
+          (targetSizeNorm && vTallaNorm === targetSizeNorm);
+        if (matches) {
+          const varStock = Number(v.stock) || 0;
+          return { ...v, stock: Math.max(0, varStock - cant) };
+        }
+        return v;
+      });
+    }
+
+    // Actualizar tabla productos de forma ultra-segura
+    const updateProdPayload: any = {
+      stock: nuevoStockProd,
+    };
+    if (nuevasTallasStock) {
+      updateProdPayload.tallas_stock = nuevasTallasStock;
+      try {
+        localStorage.setItem('alexstore_tallas_stock_' + productoId, JSON.stringify(nuevasTallasStock));
+      } catch {}
+      const rawDesc = prodData?.descripcion || '';
+      const cleanDesc = rawDesc.replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '').trim();
+      updateProdPayload.descripcion = cleanDesc
+        ? `${cleanDesc}\n<!--ALEX_TALLAS_STOCK:${JSON.stringify(nuevasTallasStock)}-->`
+        : `<!--ALEX_TALLAS_STOCK:${JSON.stringify(nuevasTallasStock)}-->`;
+    }
+    if (nuevasVariantes) {
+      updateProdPayload.variantes = nuevasVariantes;
+    }
+
+    await safeUpdateProducto(productoId, updateProdPayload);
+
+    // Sincronizar en la tabla detalles_productos
+    if (nuevasTallasStock) {
+      try {
+        if (detData) {
+          await supabase
+            .from('detalles_productos')
+            .update({ tallas_stock: nuevasTallasStock })
+            .eq('producto_id', productoId);
+        } else {
+          await supabase
+            .from('detalles_productos')
+            .insert([
+              {
+                producto_id: productoId,
+                tallas_stock: nuevasTallasStock,
+                tallas: Object.keys(nuevasTallasStock),
+              }
+            ]);
+        }
+      } catch {}
+    }
+
+    // Sincronizar en la tabla 'inventario'
+    try {
       if (invData) {
         await supabase
           .from('inventario')
-          .update({
-            cantidad: nuevoStockProd,
-            actualizado_en: now,
-          })
+          .update({ cantidad: nuevoStockProd })
           .eq('producto_id', productoId);
       } else {
         await supabase

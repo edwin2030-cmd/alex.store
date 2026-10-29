@@ -1298,13 +1298,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               const totalCantVendida = matchedItems.reduce((acc, it) => acc + (it.cantidad || 1), 0);
 
               let nextTallasStock = prod.tallas_stock ? { ...prod.tallas_stock } : undefined;
+              const normSize = (s?: string) =>
+                (s || '')
+                  .toString()
+                  .toLowerCase()
+                  .replace(/^(talla|talle|size)\s*[:\-]?\s*/i, '')
+                  .trim();
+
               if (nextTallasStock) {
                 matchedItems.forEach((it) => {
-                  if (it.talla) {
-                    const search = it.talla.trim().toLowerCase();
-                    const targetKey = Object.keys(nextTallasStock!).find(
-                      (k) => k.toLowerCase() === search || search.includes(k.toLowerCase())
+                  const itemTallaNorm = normSize(it.talla || it.variante_titulo);
+                  if (itemTallaNorm) {
+                    let targetKey = Object.keys(nextTallasStock!).find(
+                      (k) => normSize(k) === itemTallaNorm
                     );
+                    if (!targetKey) {
+                      targetKey = Object.keys(nextTallasStock!).find((k) => {
+                        const nk = normSize(k);
+                        if (!nk) return false;
+                        const re1 = new RegExp(`(^|[^a-z0-9])${nk}([^a-z0-9]|$)`, 'i');
+                        const re2 = new RegExp(`(^|[^a-z0-9])${itemTallaNorm}([^a-z0-9]|$)`, 'i');
+                        return re1.test(itemTallaNorm) || re2.test(nk);
+                      });
+                    }
                     if (targetKey) {
                       const curr = Number(nextTallasStock![targetKey]) || 0;
                       nextTallasStock![targetKey] = Math.max(0, curr - (it.cantidad || 1));
@@ -1321,15 +1337,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               let nextVars = prod.variantes;
               if (Array.isArray(nextVars)) {
                 nextVars = nextVars.map((v: any) => {
-                  const varMatch = matchedItems.find(
-                    (it) =>
+                  const vTallaNorm = normSize(v.opciones?.Talla || v.opciones?.talla || v.titulo);
+                  const varMatch = matchedItems.find((it) => {
+                    const itTallaNorm = normSize(it.talla || it.variante_titulo);
+                    return (
                       (it.variante_id && v.id === it.variante_id) ||
                       (it.variante_titulo && v.titulo === it.variante_titulo) ||
-                      (it.talla && (
-                        (v.opciones?.Talla && v.opciones.Talla.toLowerCase() === it.talla.toLowerCase()) ||
-                        (v.titulo && v.titulo.toLowerCase().includes(it.talla.toLowerCase()))
-                      ))
-                  );
+                      (itTallaNorm && vTallaNorm && itTallaNorm === vTallaNorm)
+                    );
+                  });
                   if (varMatch) {
                     return { ...v, stock: Math.max(0, (v.stock ?? 0) - (varMatch.cantidad || 1)) };
                   }
