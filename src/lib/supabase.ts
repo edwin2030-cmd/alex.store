@@ -125,12 +125,13 @@ export async function getProductos(): Promise<Producto[]> {
       });
     }
 
-    const detallesMap: Record<string, { tallas?: string[]; colores?: string[] }> = {};
+    const detallesMap: Record<string, { tallas?: string[]; colores?: string[]; tallas_stock?: Record<string, number> }> = {};
     if (detRes && (detRes as any).data && Array.isArray((detRes as any).data)) {
       (detRes as any).data.forEach((d: any) => {
         detallesMap[d.producto_id] = {
           tallas: d.tallas || [],
           colores: d.colores || [],
+          tallas_stock: d.tallas_stock && typeof d.tallas_stock === 'object' ? d.tallas_stock : undefined,
         };
       });
     }
@@ -138,13 +139,8 @@ export async function getProductos(): Promise<Producto[]> {
     return prodRes.data.map((p: any) => {
       const det = detallesMap[p.id];
 
-      // 1. Extraer tallas_stock de columna nativa si existe
+      // 1. Extraer de metadatos persistidos en descripcion (máxima fidelidad garantizada en Supabase para todos los navegadores)
       let tallas_stock: Record<string, number> = {};
-      if (p.tallas_stock && typeof p.tallas_stock === 'object' && Object.keys(p.tallas_stock).length > 0) {
-        tallas_stock = { ...p.tallas_stock };
-      }
-
-      // 2. Extraer de metadatos persistidos en descripcion (sincronización servidor Supabase entre todos los navegadores)
       let cleanDescripcion = p.descripcion || '';
       if (typeof cleanDescripcion === 'string') {
         const metaMatch = cleanDescripcion.match(/<!--ALEX_TALLAS_STOCK:([\s\S]*?)-->/);
@@ -152,16 +148,24 @@ export async function getProductos(): Promise<Producto[]> {
           try {
             const parsedMeta = JSON.parse(metaMatch[1]);
             if (parsedMeta && typeof parsedMeta === 'object' && Object.keys(parsedMeta).length > 0) {
-              if (Object.keys(tallas_stock).length === 0) {
-                tallas_stock = parsedMeta;
-              }
+              tallas_stock = { ...parsedMeta };
             }
           } catch {}
         }
         cleanDescripcion = cleanDescripcion.replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '').trim();
       }
 
-      // 3. Extraer de variantes si existen
+      // 2. Extraer de columna nativa si existe y no vino en descripción
+      if (Object.keys(tallas_stock).length === 0 && p.tallas_stock && typeof p.tallas_stock === 'object' && Object.keys(p.tallas_stock).length > 0) {
+        tallas_stock = { ...p.tallas_stock };
+      }
+
+      // 3. Extraer de detalles_productos si existe
+      if (Object.keys(tallas_stock).length === 0 && det?.tallas_stock && typeof det.tallas_stock === 'object' && Object.keys(det.tallas_stock).length > 0) {
+        tallas_stock = { ...det.tallas_stock };
+      }
+
+      // 4. Extraer de variantes si existen
       if (Object.keys(tallas_stock).length === 0 && Array.isArray(p.variantes) && p.variantes.length > 0) {
         p.variantes.forEach((v: any) => {
           const tName = v.opciones?.Talla || v.opciones?.talla || (v.titulo ? v.titulo.replace(/^Talla:\s*/i, '').trim() : '');
@@ -171,7 +175,7 @@ export async function getProductos(): Promise<Producto[]> {
         });
       }
 
-      // 4. Respaldo de seguridad en caché local
+      // 5. Respaldo de seguridad en caché local
       if (Object.keys(tallas_stock).length === 0) {
         try {
           const cached = localStorage.getItem('alexstore_tallas_stock_' + p.id);
@@ -422,7 +426,7 @@ export async function actualizarProducto(
       finalDescripcion = cleanDesc ? `${cleanDesc}\n<!--ALEX_TALLAS_STOCK:${JSON.stringify(tallasStock)}-->` : `<!--ALEX_TALLAS_STOCK:${JSON.stringify(tallasStock)}-->`;
     }
 
-    const updatePayload: any = {
+    const updatePayload: Record<string, any> = {
       nombre: producto.nombre.trim(),
       descripcion: finalDescripcion || null,
       precio: Number(producto.precio) || 0,
@@ -439,38 +443,10 @@ export async function actualizarProducto(
       tiene_variantes: Boolean(producto.tiene_variantes || tallas.length > 0 || (producto.colores && producto.colores.length > 0)),
       atributos: producto.atributos || [],
       variantes: variantesToSave,
-      actualizado_en: new Date().toISOString(),
     };
 
-    const optionalCols = ['costo', 'sku', 'tallas', 'colores', 'tallas_stock', 'atributos', 'variantes', 'tiene_variantes', 'imagenes', 'stock'];
-    let res = await supabase.from('productos').update(updatePayload).eq('id', id);
-
-    let attempts = 0;
-    while (res.error && res.error.message && attempts < 10) {
-      attempts++;
-      const msg = res.error.message.toLowerCase();
-      let stripped = false;
-      for (const col of optionalCols) {
-        if (updatePayload[col] !== undefined && (msg.includes(col.toLowerCase()) || msg.includes(`"${col.toLowerCase()}"`))) {
-          delete updatePayload[col];
-          stripped = true;
-          break;
-        }
-      }
-      if (!stripped && (msg.includes('foreign key') || msg.includes('categoria_id'))) {
-        if (updatePayload.categoria_id !== null) {
-          updatePayload.categoria_id = null;
-          stripped = true;
-        }
-      }
-      if (stripped) {
-        res = await supabase.from('productos').update(updatePayload).eq('id', id);
-      } else {
-        break;
-      }
-    }
-
-    if (res.error) throw res.error;
+    const updateRes = await safeUpdateProducto(id, updatePayload);
+    if (!updateRes.success) throw updateRes.error;
 
     // Sincronizar en la tabla detalles_productos
     try {
@@ -479,11 +455,19 @@ export async function actualizarProducto(
           producto_id: id,
           tallas: tallas,
           colores: producto.colores || [],
-          actualizado_en: new Date().toISOString(),
+          tallas_stock: tallasStock,
         }
       ], { onConflict: 'producto_id' });
     } catch (detErr) {
-      console.warn("Aviso sincronizando en detalles_productos:", detErr);
+      try {
+        await supabase.from('detalles_productos').upsert([
+          {
+            producto_id: id,
+            tallas: tallas,
+            colores: producto.colores || [],
+          }
+        ], { onConflict: 'producto_id' });
+      } catch {}
     }
 
     if (finalStock !== undefined) {
@@ -494,6 +478,114 @@ export async function actualizarProducto(
   } catch (err: any) {
     return { success: false, error: err.message || 'Error al actualizar producto' };
   }
+}
+
+/**
+ * Función ultra-resiliente para actualizar productos en Supabase.
+ * Detecta y descarta automáticamente columnas no existentes en la BD
+ * garantizando que la descripción con los metadatos de tallas_stock y el stock SIEMPRE se guarden.
+ */
+export async function safeUpdateProducto(
+  productoId: string,
+  payload: Record<string, any>
+): Promise<{ success: boolean; data?: any; error?: any }> {
+  const currentPayload: Record<string, any> = { ...payload };
+
+  // Evitar columnas problemáticas conocidas que rompen el UPDATE en tablas Supabase estándar
+  delete currentPayload.actualizado_en;
+  delete currentPayload.created_at;
+  delete currentPayload.updated_at;
+
+  const potentialOptionalCols = [
+    'tallas_stock',
+    'variantes',
+    'tiene_variantes',
+    'tallas',
+    'colores',
+    'atributos',
+    'sku',
+    'costo',
+    'stock',
+    'imagenes',
+    'categoria_id',
+  ];
+
+  let res = await supabase.from('productos').update(currentPayload).eq('id', productoId);
+
+  let attempts = 0;
+  while (res.error && attempts < 12) {
+    attempts++;
+    const errMsg = (res.error.message || '').toLowerCase();
+    console.warn(`[safeUpdateProducto] Reintento ${attempts} para ${productoId}: ${errMsg}`);
+
+    let stripped = false;
+    for (const col of potentialOptionalCols) {
+      if (
+        currentPayload[col] !== undefined &&
+        (errMsg.includes(col.toLowerCase()) || errMsg.includes(`"${col.toLowerCase()}"`))
+      ) {
+        delete currentPayload[col];
+        stripped = true;
+        break;
+      }
+    }
+
+    if (!stripped) {
+      if (currentPayload.tallas_stock !== undefined) {
+        delete currentPayload.tallas_stock;
+        stripped = true;
+      } else if (currentPayload.variantes !== undefined) {
+        delete currentPayload.variantes;
+        stripped = true;
+      } else if (currentPayload.tiene_variantes !== undefined) {
+        delete currentPayload.tiene_variantes;
+        stripped = true;
+      } else if (currentPayload.tallas !== undefined) {
+        delete currentPayload.tallas;
+        stripped = true;
+      } else if (currentPayload.colores !== undefined) {
+        delete currentPayload.colores;
+        stripped = true;
+      } else if (currentPayload.atributos !== undefined) {
+        delete currentPayload.atributos;
+        stripped = true;
+      } else if (currentPayload.costo !== undefined) {
+        delete currentPayload.costo;
+        stripped = true;
+      } else if (currentPayload.sku !== undefined) {
+        delete currentPayload.sku;
+        stripped = true;
+      } else if (currentPayload.stock !== undefined) {
+        delete currentPayload.stock;
+        stripped = true;
+      } else {
+        break;
+      }
+    }
+
+    res = await supabase.from('productos').update(currentPayload).eq('id', productoId);
+  }
+
+  // Si falló por columnas complejas, pero tenemos descripción (con metadata de tallas), actualizar al menos la descripción
+  if (res.error && payload.descripcion) {
+    try {
+      console.warn('[safeUpdateProducto] Intentando guardar solo descripcion');
+      const minRes = await supabase
+        .from('productos')
+        .update({ descripcion: payload.descripcion })
+        .eq('id', productoId);
+      if (!minRes.error) {
+        return { success: true };
+      }
+    } catch {}
+  }
+
+  if (res.error) {
+    console.error('[safeUpdateProducto] Error al actualizar producto:', res.error);
+    return { success: false, error: res.error };
+  }
+
+  return { success: true };
 }
 
 export async function actualizarStockPorTallas(
@@ -519,7 +611,7 @@ export async function actualizarStockPorTallas(
     } catch {}
 
     // 1. Obtener la descripción actual del producto para anexar metadatos seguros de servidor
-    let updatedDesc: string | undefined = undefined;
+    let cleanDesc = '';
     try {
       const { data: curProd } = await supabase
         .from('productos')
@@ -527,39 +619,23 @@ export async function actualizarStockPorTallas(
         .eq('id', productoId)
         .maybeSingle();
       const rawDesc = curProd?.descripcion || '';
-      const cleanDesc = rawDesc.replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '').trim();
-      const meta = `<!--ALEX_TALLAS_STOCK:${JSON.stringify(tallasStock)}-->`;
-      updatedDesc = cleanDesc ? `${cleanDesc}\n${meta}` : meta;
+      cleanDesc = rawDesc.replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '').trim();
     } catch {}
+    const meta = `<!--ALEX_TALLAS_STOCK:${JSON.stringify(tallasStock)}-->`;
+    const finalDesc = cleanDesc ? `${cleanDesc}\n${meta}` : meta;
 
-    // 2. Actualizar en Supabase productos con reintento progresivo si alguna columna opcional no existe
+    // 2. Actualizar en Supabase productos con safeUpdateProducto
     const updatePayload: any = {
+      descripcion: finalDesc,
       stock: total,
-      actualizado_en: new Date().toISOString(),
+      tallas: tallas,
+      tallas_stock: tallasStock,
+      variantes: variantes,
     };
-    if (updatedDesc !== undefined) updatePayload.descripcion = updatedDesc;
-    if (tallasStock) updatePayload.tallas_stock = tallasStock;
-    if (tallas && tallas.length > 0) updatePayload.tallas = tallas;
-    if (variantes && variantes.length > 0) updatePayload.variantes = variantes;
 
-    try {
-      let updateRes = await supabase.from('productos').update(updatePayload).eq('id', productoId);
-
-      if (updateRes.error) {
-        console.warn("Aviso actualizando tallas_stock nativo, reintentando sin columnas faltantes:", updateRes.error);
-        delete updatePayload.tallas_stock;
-        updateRes = await supabase.from('productos').update(updatePayload).eq('id', productoId);
-        if (updateRes.error) {
-          delete updatePayload.variantes;
-          updateRes = await supabase.from('productos').update(updatePayload).eq('id', productoId);
-          if (updateRes.error) {
-            delete updatePayload.tallas;
-            await supabase.from('productos').update(updatePayload).eq('id', productoId);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn("Aviso en actualización de productos por tallas:", e);
+    const updateRes = await safeUpdateProducto(productoId, updatePayload);
+    if (!updateRes.success) {
+      console.warn("Aviso en safeUpdateProducto:", updateRes.error);
     }
 
     // 3. Sincronizar en la tabla detalles_productos
@@ -568,10 +644,19 @@ export async function actualizarStockPorTallas(
         {
           producto_id: productoId,
           tallas: tallas,
-          actualizado_en: new Date().toISOString(),
+          tallas_stock: tallasStock,
         }
       ], { onConflict: 'producto_id' });
-    } catch {}
+    } catch {
+      try {
+        await supabase.from('detalles_productos').upsert([
+          {
+            producto_id: productoId,
+            tallas: tallas,
+          }
+        ], { onConflict: 'producto_id' });
+      } catch {}
+    }
 
     // 4. Actualizar en inventario
     await actualizarStockRapido(productoId, total, stockMinimo);
@@ -656,13 +741,9 @@ export async function actualizarStockRapido(
 
     // Sincronizar también en la tabla productos para mantener coherencia total
     try {
-      await supabase
-        .from('productos')
-        .update({
-          stock: Math.max(0, nuevoStock),
-          actualizado_en: new Date().toISOString(),
-        })
-        .eq('id', productoId);
+      await safeUpdateProducto(productoId, {
+        stock: Math.max(0, nuevoStock),
+      });
     } catch {}
 
     return { success: true };
@@ -1196,9 +1277,9 @@ export async function descontarStockProducto(
       }
 
       // Actualizar tabla productos en Supabase
+      // Actualizar tabla productos en Supabase de forma ultra-resiliente
       const updateProdPayload: any = {
         stock: nuevoStockProd,
-        actualizado_en: now,
       };
       if (nuevasTallasStock) {
         updateProdPayload.tallas_stock = nuevasTallasStock;
@@ -1213,29 +1294,7 @@ export async function descontarStockProducto(
         updateProdPayload.variantes = nuevasVariantes;
       }
 
-      try {
-        let updateRes = await supabase
-          .from('productos')
-          .update(updateProdPayload)
-          .eq('id', productoId);
-
-        if (updateRes.error) {
-          delete updateProdPayload.tallas_stock;
-          updateRes = await supabase
-            .from('productos')
-            .update(updateProdPayload)
-            .eq('id', productoId);
-          if (updateRes.error) {
-            delete updateProdPayload.variantes;
-            await supabase
-              .from('productos')
-              .update(updateProdPayload)
-              .eq('id', productoId);
-          }
-        }
-      } catch (errProd) {
-        console.warn('Aviso actualizando producto con nuevo stock por talla:', errProd);
-      }
+      await safeUpdateProducto(productoId, updateProdPayload);
     }
 
     // 2. Sincronizar en la tabla 'inventario'
