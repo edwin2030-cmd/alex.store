@@ -304,8 +304,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Modal para ajuste rápido de stock por tallas directamente en Inventario
   const [productoAjustarTallas, setProductoAjustarTallas] = useState<Producto | null>(null);
 
-  const reloadAllData = async () => {
-    setLoading(true);
+  const reloadAllData = async (silent?: boolean | any) => {
+    const isSilent = silent === true;
+    if (!isSilent) setLoading(true);
     try {
       const [prods, cats, peds, vnts, usrs, gsts, movs, cajaActiva, histCaja] = await Promise.all([
         getProductos(),
@@ -337,7 +338,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     } catch (e) {
       console.error("Error cargando panel admin:", e);
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   };
 
@@ -345,58 +346,73 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     reloadAllData();
   }, []);
 
-  // Sincronización continua en tiempo real del estado de caja entre múltiples navegadores y pestañas
+  // Sincronización continua en tiempo real de Ventas, Caja y Pedidos entre múltiples navegadores y pestañas
   useEffect(() => {
-    // 1. Polling periódico cada 3 segundos para detectar si otro navegador abrió o cerró caja
-    const cajaPollInterval = setInterval(async () => {
+    // 1. Polling periódico silencioso cada 4 segundos para detectar ventas, caja y pedidos en otros navegadores
+    const syncPollInterval = setInterval(async () => {
       try {
+        // Sincronizar estado de caja
         const sesionActualizada = await getSesionCajaActiva();
         setSesionCaja((prev) => {
           if (!prev && !sesionActualizada) return null;
           if (prev?.id === sesionActualizada?.id && prev?.estado === sesionActualizada?.estado) {
             return prev;
           }
-          // Si el estado local se abrió hace menos de 15 segundos y la respuesta fue null por latencia, protegerlo
           if (!sesionActualizada && prev?.estado === 'abierta' && prev.fecha_apertura) {
             const diff = Date.now() - new Date(prev.fecha_apertura).getTime();
             if (diff < 15000) return prev;
           }
           return sesionActualizada;
         });
-      } catch (err) {
-        console.warn('Aviso polling estado caja:', err);
-      }
-    }, 3000);
 
-    // 2. Al cambiar de pestaña o volver a enfocar la ventana, re-verificar de inmediato
+        // Sincronizar silenciosamente ventas y pedidos para que las ventas de otros se reflejen al instante
+        const [updatedVentas, updatedPedidos] = await Promise.all([getVentas(), getPedidos()]);
+        setVentas((prev) => {
+          if (updatedVentas.length !== prev.length || updatedVentas[0]?.codigo !== prev[0]?.codigo) {
+            return updatedVentas;
+          }
+          return prev;
+        });
+        setPedidos((prev) => {
+          if (updatedPedidos.length !== prev.length || updatedPedidos[0]?.codigo !== prev[0]?.codigo) {
+            return updatedPedidos;
+          }
+          return prev;
+        });
+      } catch (err) {
+        console.warn('Aviso polling sincronización:', err);
+      }
+    }, 4000);
+
+    // 2. Al cambiar de pestaña o volver a enfocar la ventana, re-verificar todo de inmediato
     const handleSyncOnFocus = async () => {
       try {
-        const sesionActualizada = await getSesionCajaActiva();
-        if (sesionActualizada) {
-          setSesionCaja(sesionActualizada);
-        } else {
-          setSesionCaja((prev) => {
-            if (prev?.estado === 'abierta' && prev.fecha_apertura) {
-              const diff = Date.now() - new Date(prev.fecha_apertura).getTime();
-              if (diff < 15000) return prev;
-            }
-            return null;
-          });
-        }
+        reloadAllData(true);
       } catch {}
     };
 
     window.addEventListener('visibilitychange', handleSyncOnFocus);
     window.addEventListener('focus', handleSyncOnFocus);
 
-    // 3. Sincronización instantánea entre pestañas abiertas
-    let broadcastChannel: BroadcastChannel | null = null;
+    // 3. Sincronización instantánea entre pestañas abiertas vía BroadcastChannel
+    let cajaBroadcast: BroadcastChannel | null = null;
+    let salesBroadcast: BroadcastChannel | null = null;
     try {
       if (typeof BroadcastChannel !== 'undefined') {
-        broadcastChannel = new BroadcastChannel(CAJA_SYNC_BROADCAST);
-        broadcastChannel.onmessage = (event) => {
+        cajaBroadcast = new BroadcastChannel(CAJA_SYNC_BROADCAST);
+        cajaBroadcast.onmessage = (event) => {
           if (event.data?.type === 'CAJA_UPDATED') {
             setSesionCaja(event.data.sesion || null);
+          }
+        };
+
+        salesBroadcast = new BroadcastChannel('alexstore_cross_sync');
+        salesBroadcast.onmessage = async (event) => {
+          if (event.data?.type?.startsWith('VENTA_')) {
+            const [vnts, peds, prods] = await Promise.all([getVentas(), getPedidos(), getProductos()]);
+            setVentas(vnts);
+            setPedidos(peds);
+            setProductos(prods);
           }
         };
       }
@@ -420,14 +436,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           } catch {}
         }
       }
+      if (e.key === 'alexstore_local_ventas') {
+        if (e.newValue) {
+          try {
+            setVentas(JSON.parse(e.newValue));
+          } catch {}
+        }
+      }
     };
     window.addEventListener('storage', handleStorageEvent);
 
-    // 5. Suscripción Supabase Realtime a cambios en registros_caja
+    // 5. Suscripción Supabase Realtime a cambios en ventas, pedidos y registros_caja
     let realtimeChannel: any = null;
     try {
       realtimeChannel = supabase
-        .channel('caja_sync_realtime')
+        .channel('admin_global_cross_sync')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'registros_caja' },
@@ -436,16 +459,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             setSesionCaja(sesionActualizada);
           }
         )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'ventas' },
+          async () => {
+            const vnts = await getVentas();
+            setVentas(vnts);
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'pedidos' },
+          async () => {
+            const [peds, vnts] = await Promise.all([getPedidos(), getVentas()]);
+            setPedidos(peds);
+            setVentas(vnts);
+          }
+        )
         .subscribe();
     } catch {}
 
     return () => {
-      clearInterval(cajaPollInterval);
+      clearInterval(syncPollInterval);
       window.removeEventListener('visibilitychange', handleSyncOnFocus);
       window.removeEventListener('focus', handleSyncOnFocus);
       window.removeEventListener('caja-status-changed', handleCajaCustomEvent);
       window.removeEventListener('storage', handleStorageEvent);
-      if (broadcastChannel) broadcastChannel.close();
+      if (cajaBroadcast) cajaBroadcast.close();
+      if (salesBroadcast) salesBroadcast.close();
       if (realtimeChannel) supabase.removeChannel(realtimeChannel);
     };
   }, []);

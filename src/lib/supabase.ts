@@ -1085,79 +1085,135 @@ export async function eliminarTodosLosPedidos(): Promise<{ success: boolean; err
 const STORAGE_KEY_VENTAS = 'alexstore_local_ventas';
 
 export async function getVentas(): Promise<Venta[]> {
-  let remoteList: Venta[] = [];
+  const remoteMap = new Map<string, Venta>();
+
+  // 1. Obtener desde la tabla 'ventas' en Supabase si existe
   try {
     const { data, error } = await supabase
       .from('ventas')
       .select('*')
       .order('creado_en', { ascending: false });
 
-    if (!error && data) {
-      remoteList = data as Venta[];
+    if (!error && Array.isArray(data)) {
+      data.forEach((v: any) => {
+        const cleanV: Venta = {
+          id: v.id,
+          codigo: v.codigo,
+          pedido_id: v.pedido_id || undefined,
+          cliente_nombre: v.cliente_nombre || 'Cliente',
+          cliente_telefono: v.cliente_telefono || null,
+          metodo_pago: v.metodo_pago || 'efectivo',
+          total: Number(v.total) || 0,
+          monto_abonado: v.monto_abonado !== undefined ? Number(v.monto_abonado) : Number(v.total) || 0,
+          saldo_pendiente: v.saldo_pendiente !== undefined ? Number(v.saldo_pendiente) : 0,
+          estado_pago: v.estado_pago || 'completo',
+          cajero_nombre: v.cajero_nombre || v.registrado_por || 'Cajero',
+          registrado_por: v.registrado_por || v.cajero_nombre || 'Cajero',
+          items: Array.isArray(v.items) ? v.items : [],
+          tipo: v.tipo || (v.pedido_id ? 'web' : 'manual'),
+          notas: v.notas || null,
+          creado_en: v.creado_en || new Date().toISOString(),
+        };
+        const key = cleanV.codigo || cleanV.id;
+        if (key) remoteMap.set(key, cleanV);
+      });
     }
   } catch (err) {
     console.warn('Aviso cargando ventas de Supabase:', err);
   }
 
-  // Sincronizar SIEMPRE con TODOS los pedidos aprobados o entregados en Supabase
-  // para que si un pedido fue aceptado en un dispositivo, aparezca inmediatamente en todos los demás
+  // 2. Sincronizar SIEMPRE con TODOS los pedidos aprobados, entregados, aceptados o con código VNT- en Supabase
+  // Esto garantiza que si una venta manual se guardó en pedidos (o un pedido se aprobó), aparezca en TODOS los navegadores
   try {
-    const { data: pedsAprobados } = await supabase
+    const { data: peds } = await supabase
       .from('pedidos')
       .select('*')
-      .in('estado', ['aprobado', 'entregado', 'aceptado'])
+      .or('estado.in.(aprobado,entregado,aceptado),codigo.ilike.VNT-%')
       .order('creado_en', { ascending: false });
 
-    if (pedsAprobados && Array.isArray(pedsAprobados)) {
-      pedsAprobados.forEach((p) => {
-        const cleanCode = (p.codigo || '').replace(/[^0-9]/g, '') || Math.floor(1000 + Math.random() * 9000);
-        const codVenta = `VNT-${cleanCode}`;
-        const alreadyInRemote = remoteList.some(
-          (v) =>
-            (v.pedido_id && v.pedido_id === p.id) ||
-            v.codigo === codVenta ||
-            (v.codigo && p.codigo && v.codigo.includes(cleanCode))
-        );
-        if (!alreadyInRemote) {
+    if (peds && Array.isArray(peds)) {
+      peds.forEach((p: any) => {
+        const rawCode = p.codigo || '';
+        const cleanDigits = rawCode.replace(/[^0-9]/g, '') || Math.floor(1000 + Math.random() * 9000);
+        const codVenta = rawCode.startsWith('VNT-') ? rawCode : `VNT-${cleanDigits}`;
+
+        // Extraer metadatos si vienen incrustados en p.notas
+        let metaParsed: any = null;
+        let cleanNotas = p.notas || '';
+        if (typeof cleanNotas === 'string') {
+          const match = cleanNotas.match(/<!--ALEX_VENTA_META:([\s\S]*?)-->/);
+          if (match && match[1]) {
+            try {
+              metaParsed = JSON.parse(match[1]);
+            } catch {}
+            cleanNotas = cleanNotas.replace(/<!--ALEX_VENTA_META:[\s\S]*?-->/g, '').trim();
+          }
+        }
+        if (cleanNotas.startsWith('[VENTA_MANUAL]')) {
+          cleanNotas = cleanNotas.replace(/^\[VENTA_MANUAL\]\s*/, '').trim();
+        }
+
+        const isManual = rawCode.startsWith('VNT-') || metaParsed?.tipo === 'manual' || p.cliente_direccion === 'Venta Mostrador';
+        const totalNum = Number(p.total) || 0;
+        const montoAbonado = metaParsed?.monto_abonado !== undefined ? Number(metaParsed.monto_abonado) : totalNum;
+        const saldoPendiente = metaParsed?.saldo_pendiente !== undefined ? Number(metaParsed.saldo_pendiente) : 0;
+        const estadoPago = metaParsed?.estado_pago || (p.estado_pago === 'verificado' ? 'completo' : 'abono_pendiente');
+        const cajero = metaParsed?.cajero_nombre || metaParsed?.cajero || p.revisado_por || 'Cajero';
+
+        // Si ya existe en remoteMap (de la tabla ventas), solo enriquecer si faltan datos
+        const existing = remoteMap.get(codVenta) || (p.id ? remoteMap.get(p.id) : undefined);
+        if (!existing) {
           const synthVenta: Venta = {
-            id: p.id || `vnt_${cleanCode}`,
+            id: p.id || `vnt_${cleanDigits}`,
             codigo: codVenta,
-            pedido_id: p.id,
-            cliente_nombre: p.cliente_nombre,
+            pedido_id: isManual ? undefined : p.id,
+            cliente_nombre: p.cliente_nombre || 'Cliente',
             cliente_telefono: p.cliente_telefono || null,
-            metodo_pago: p.metodo_pago,
-            total: Number(p.total) || 0,
-            monto_abonado: Number(p.total) || 0,
-            saldo_pendiente: 0,
-            estado_pago: 'completo',
-            items: p.items || [],
-            tipo: 'web',
-            notas: `Venta generada del pedido ${p.codigo}.`,
-            creado_en: p.actualizado_en || p.creado_en || new Date().toISOString(),
+            metodo_pago: p.metodo_pago || 'efectivo',
+            total: totalNum,
+            monto_abonado: montoAbonado,
+            saldo_pendiente: saldoPendiente,
+            estado_pago: estadoPago,
+            cajero_nombre: cajero,
+            registrado_por: cajero,
+            items: metaParsed?.items || p.items || [],
+            tipo: isManual ? 'manual' : 'web',
+            notas: cleanNotas || (isManual ? null : `Venta generada del pedido ${p.codigo}.`),
+            creado_en: p.creado_en || p.actualizado_en || new Date().toISOString(),
           };
-          remoteList.push(synthVenta);
+          remoteMap.set(codVenta, synthVenta);
+        } else {
+          if (existing.saldo_pendiente === 0 && saldoPendiente > 0) {
+            existing.saldo_pendiente = saldoPendiente;
+            existing.monto_abonado = montoAbonado;
+            existing.estado_pago = estadoPago;
+          }
+          if (cajero && cajero !== 'Cajero' && (!existing.cajero_nombre || existing.cajero_nombre === 'Cajero')) {
+            existing.cajero_nombre = cajero;
+            existing.registrado_por = cajero;
+          }
         }
       });
     }
   } catch (pedErr) {
-    console.warn('Aviso sincronizando pedidos aprobados a ventas:', pedErr);
+    console.warn('Aviso sincronizando pedidos a ventas:', pedErr);
   }
 
-  // Respaldo en localStorage para disponibilidad ininterrumpida
+  // 3. Mergear con localStorage local para respaldo offline
   let localList: Venta[] = [];
   try {
     const local = localStorage.getItem(STORAGE_KEY_VENTAS);
     if (local) localList = JSON.parse(local);
   } catch {}
 
-  const map = new Map<string, Venta>();
-  remoteList.forEach((v) => map.set(v.id || v.codigo, v));
   localList.forEach((v) => {
-    const key = v.id || v.codigo;
-    if (!map.has(key)) map.set(key, v);
+    const key = v.codigo || v.id;
+    if (key && !remoteMap.has(key)) {
+      remoteMap.set(key, v);
+    }
   });
 
-  const merged = Array.from(map.values()).sort(
+  const merged = Array.from(remoteMap.values()).sort(
     (a, b) => new Date(b.creado_en || 0).getTime() - new Date(a.creado_en || 0).getTime()
   );
 
@@ -1478,38 +1534,100 @@ export async function crearVentaManual(venta: {
       creado_en: now,
     };
 
-    // 1. Insertar en Supabase si la tabla ventas existe
+    // 1. Guardar en Supabase en la tabla 'ventas' (con adaptación progresiva si faltan columnas)
     try {
-      const { data, error } = await supabase
-        .from('ventas')
-        .insert([
-          {
-            codigo: newVentaRecord.codigo,
-            cliente_nombre: newVentaRecord.cliente_nombre,
-            cliente_telefono: newVentaRecord.cliente_telefono,
-            metodo_pago: newVentaRecord.metodo_pago,
-            total: newVentaRecord.total,
-            monto_abonado: newVentaRecord.monto_abonado,
-            saldo_pendiente: newVentaRecord.saldo_pendiente,
-            estado_pago: newVentaRecord.estado_pago,
-            cajero_nombre: newVentaRecord.cajero_nombre,
-            items: newVentaRecord.items,
-            tipo: newVentaRecord.tipo,
-            notas: newVentaRecord.notas,
-            creado_en: newVentaRecord.creado_en,
-          }
-        ])
-        .select()
-        .maybeSingle();
+      const payloadVentas: any = {
+        codigo: newVentaRecord.codigo,
+        cliente_nombre: newVentaRecord.cliente_nombre,
+        cliente_telefono: newVentaRecord.cliente_telefono,
+        metodo_pago: newVentaRecord.metodo_pago,
+        total: newVentaRecord.total,
+        monto_abonado: newVentaRecord.monto_abonado,
+        saldo_pendiente: newVentaRecord.saldo_pendiente,
+        estado_pago: newVentaRecord.estado_pago,
+        cajero_nombre: newVentaRecord.cajero_nombre,
+        registrado_por: newVentaRecord.registrado_por,
+        items: newVentaRecord.items,
+        tipo: newVentaRecord.tipo,
+        notas: newVentaRecord.notas,
+        creado_en: newVentaRecord.creado_en,
+      };
 
-      if (!error && data) {
-        newVentaRecord.id = data.id || newVentaRecord.id;
+      let vRes = await supabase.from('ventas').insert([payloadVentas]).select().maybeSingle();
+
+      // Si falla por columnas que aún no existen en la tabla ventas, reintentar eliminando columnas opcionales
+      if (vRes.error) {
+        const errStr = (vRes.error.message || '').toLowerCase();
+        console.warn('Aviso insertando en tabla ventas, adaptando columnas:', errStr);
+        const stripCandidates = ['registrado_por', 'cajero_nombre', 'monto_abonado', 'saldo_pendiente', 'estado_pago', 'tipo', 'notas', 'items'];
+        for (const col of stripCandidates) {
+          if (errStr.includes(col)) {
+            delete payloadVentas[col];
+          }
+        }
+        vRes = await supabase.from('ventas').insert([payloadVentas]).select().maybeSingle();
       }
-    } catch (err) {
-      console.warn('Aviso insertando venta manual en Supabase, guardando en local:', err);
+
+      if (!vRes.error && vRes.data) {
+        newVentaRecord.id = vRes.data.id || newVentaRecord.id;
+      }
+    } catch (vErr) {
+      console.warn('Aviso insertando venta en tabla ventas:', vErr);
     }
 
-    // 2. Persistir localmente de inmediato para que nunca se pierda
+    // 2. DUAL-WRITE DE ALTA DISPONIBILIDAD EN TABLA 'pedidos':
+    // Como 'pedidos' siempre existe en Supabase y sincroniza con todos los clientes,
+    // insertamos la venta aquí con estado 'entregado' para garantizar que CUALQUIER
+    // otro navegador (administrador, dueño, trabajador) la reciba al instante.
+    try {
+      const metaTag = `<!--ALEX_VENTA_META:${JSON.stringify({
+        tipo: newVentaRecord.tipo || 'manual',
+        cajero_nombre: author,
+        monto_abonado: abonadoNum,
+        saldo_pendiente: saldoPendiente,
+        estado_pago: estadoPago,
+        items: newVentaRecord.items,
+      })}-->`;
+
+      const fallbackPedidoPayload: any = {
+        codigo: newVentaRecord.codigo,
+        cliente_nombre: newVentaRecord.cliente_nombre,
+        cliente_telefono: newVentaRecord.cliente_telefono || null,
+        cliente_direccion: 'Venta Mostrador',
+        metodo_pago: newVentaRecord.metodo_pago,
+        total: totalNum,
+        estado: 'entregado',
+        estado_pago: estadoPago === 'completo' ? 'verificado' : 'pendiente_revision',
+        items: newVentaRecord.items,
+        notas: `[VENTA_MANUAL] ${newVentaRecord.notas ? newVentaRecord.notas + '\n' : ''}${metaTag}`,
+        revisado_por: author,
+        revisado_en: now,
+        actualizado_en: now,
+        creado_en: now,
+      };
+
+      const { data: pedData, error: pedErr } = await supabase.from('pedidos').insert([fallbackPedidoPayload]).select().maybeSingle();
+      if (pedErr) {
+        const minPedPayload = {
+          codigo: fallbackPedidoPayload.codigo,
+          cliente_nombre: fallbackPedidoPayload.cliente_nombre,
+          cliente_telefono: fallbackPedidoPayload.cliente_telefono,
+          cliente_direccion: fallbackPedidoPayload.cliente_direccion,
+          metodo_pago: fallbackPedidoPayload.metodo_pago,
+          total: fallbackPedidoPayload.total,
+          estado: 'entregado',
+          items: fallbackPedidoPayload.items,
+          notas: fallbackPedidoPayload.notas,
+        };
+        await supabase.from('pedidos').insert([minPedPayload]);
+      } else if (pedData && typeof newVentaRecord.id === 'string' && newVentaRecord.id.startsWith('vnt_')) {
+        newVentaRecord.id = pedData.id || newVentaRecord.id;
+      }
+    } catch (pedErr) {
+      console.warn('Aviso duplicando venta en tabla pedidos:', pedErr);
+    }
+
+    // 3. Persistir en localStorage
     try {
       const local = localStorage.getItem(STORAGE_KEY_VENTAS);
       const list: Venta[] = local ? JSON.parse(local) : [];
@@ -1517,7 +1635,16 @@ export async function crearVentaManual(venta: {
       localStorage.setItem(STORAGE_KEY_VENTAS, JSON.stringify(updated));
     } catch {}
 
-    // 3. Descontar automáticamente el stock del inventario y producto por cada artículo vendido
+    // 4. Emitir evento BroadcastChannel para sincronización instantánea entre pestañas abiertas
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('alexstore_cross_sync');
+        bc.postMessage({ type: 'VENTA_NUEVA', venta: newVentaRecord });
+        bc.close();
+      }
+    } catch {}
+
+    // 5. Descontar automáticamente el stock del inventario y producto por cada artículo vendido
     if (venta.items && Array.isArray(venta.items) && venta.items.length > 0) {
       for (const item of venta.items) {
         const prodId = item.producto_id || item.id;
@@ -1555,7 +1682,7 @@ export async function liquidarSaldoVenta(
       notas: (venta.notas ? venta.notas + ' • ' : '') + `Cobro completado / Liquidado por: ${liquidadoPor || 'Caja'}. (${new Date().toLocaleString('es-PA')})`,
     };
 
-    // Actualizar en Supabase
+    // 1. Actualizar en Supabase tabla 'ventas'
     try {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCodigo);
       const q = supabase.from('ventas').update(updatePayload);
@@ -1565,10 +1692,39 @@ export async function liquidarSaldoVenta(
         await q.eq('codigo', idOrCodigo);
       }
     } catch (e) {
-      console.warn('Aviso liquidando saldo en Supabase:', e);
+      console.warn('Aviso liquidando saldo en tabla ventas:', e);
     }
 
-    // Actualizar localmente
+    // 2. Actualizar también en tabla 'pedidos' si existe registro allí
+    try {
+      const { data: pedRow } = await supabase
+        .from('pedidos')
+        .select('id, notas')
+        .or(`id.eq.${idOrCodigo},codigo.eq.${venta.codigo}`)
+        .maybeSingle();
+
+      if (pedRow) {
+        let cleanNotas = (pedRow.notas || '').replace(/<!--ALEX_VENTA_META:[\s\S]*?-->/g, '').trim();
+        const updatedMeta = `<!--ALEX_VENTA_META:${JSON.stringify({
+          tipo: 'manual',
+          cajero_nombre: venta.cajero_nombre || 'Cajero',
+          monto_abonado: total,
+          saldo_pendiente: 0,
+          estado_pago: 'completo',
+          items: venta.items,
+        })}-->`;
+        const finalNotas = `${cleanNotas ? cleanNotas + '\n' : ''}${updatedMeta}`;
+        await supabase.from('pedidos').update({
+          estado_pago: 'verificado',
+          notas: finalNotas,
+          actualizado_en: now,
+        }).eq('id', pedRow.id);
+      }
+    } catch (pedUpErr) {
+      console.warn('Aviso actualizando saldo liquidado en pedidos:', pedUpErr);
+    }
+
+    // 3. Actualizar localmente
     const updatedVenta: Venta = {
       ...venta,
       ...updatePayload,
@@ -1580,6 +1736,15 @@ export async function liquidarSaldoVenta(
       const list: Venta[] = local ? JSON.parse(local) : [];
       const updatedList = list.map((v) => (v.id === idOrCodigo || v.codigo === idOrCodigo ? updatedVenta : v));
       localStorage.setItem(STORAGE_KEY_VENTAS, JSON.stringify(updatedList));
+    } catch {}
+
+    // 4. Emitir broadcast
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('alexstore_cross_sync');
+        bc.postMessage({ type: 'VENTA_LIQUIDADA', venta: updatedVenta });
+        bc.close();
+      }
     } catch {}
 
     return { success: true, data: updatedVenta };
@@ -1601,12 +1766,31 @@ export async function eliminarVenta(idOrCodigo: string): Promise<{ success: bool
     console.warn('Aviso eliminando venta de Supabase:', err);
   }
 
+  // Eliminar también de pedidos si fue almacenada allí
+  try {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCodigo);
+    const query = supabase.from('pedidos').delete();
+    if (isUuid) {
+      await query.eq('id', idOrCodigo);
+    } else {
+      await query.eq('codigo', idOrCodigo);
+    }
+  } catch (err) {}
+
   try {
     const local = localStorage.getItem(STORAGE_KEY_VENTAS);
     if (local) {
       const list: Venta[] = JSON.parse(local);
       const filtered = list.filter((v) => v.id !== idOrCodigo && v.codigo !== idOrCodigo);
       localStorage.setItem(STORAGE_KEY_VENTAS, JSON.stringify(filtered));
+    }
+  } catch {}
+
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel('alexstore_cross_sync');
+      bc.postMessage({ type: 'VENTA_ELIMINADA', id: idOrCodigo });
+      bc.close();
     }
   } catch {}
 
@@ -1620,7 +1804,17 @@ export async function eliminarTodasLasVentas(): Promise<{ success: boolean; erro
     console.warn('Aviso eliminando todas las ventas en Supabase:', err);
   }
   try {
+    await supabase.from('pedidos').delete().ilike('codigo', 'VNT-%');
+  } catch {}
+  try {
     localStorage.removeItem(STORAGE_KEY_VENTAS);
+  } catch {}
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel('alexstore_cross_sync');
+      bc.postMessage({ type: 'VENTAS_RESET' });
+      bc.close();
+    }
   } catch {}
   return { success: true };
 }
@@ -1634,11 +1828,22 @@ export async function eliminarVentasPorIds(ids: string[]): Promise<{ success: bo
     console.warn('Aviso eliminando ventas filtradas en Supabase:', err);
   }
   try {
+    await supabase.from('pedidos').delete().in('id', ids);
+    await supabase.from('pedidos').delete().in('codigo', ids);
+  } catch {}
+  try {
     const local = localStorage.getItem(STORAGE_KEY_VENTAS);
     if (local) {
       const list: Venta[] = JSON.parse(local);
       const filtered = list.filter((v) => !ids.includes(v.id || '') && !ids.includes(v.codigo));
       localStorage.setItem(STORAGE_KEY_VENTAS, JSON.stringify(filtered));
+    }
+  } catch {}
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel('alexstore_cross_sync');
+      bc.postMessage({ type: 'VENTAS_UPDATED' });
+      bc.close();
     }
   } catch {}
   return { success: true };
