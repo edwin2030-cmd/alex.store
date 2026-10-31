@@ -1128,7 +1128,7 @@ export async function getVentas(): Promise<Venta[]> {
     const { data: peds } = await supabase
       .from('pedidos')
       .select('*')
-      .or('estado.in.(aprobado,entregado,aceptado),codigo.ilike.VNT-%')
+      .or('estado.in.(aprobado,entregado,aceptado),estado_pago.eq.verificado,codigo.ilike.VNT-%')
       .order('creado_en', { ascending: false });
 
     if (peds && Array.isArray(peds)) {
@@ -1888,20 +1888,56 @@ export async function aprobarPedidoYDescontarStock(
   pedidoId: string,
   pedido: Pedido,
   aprobadoPor?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; data?: Venta; error?: string }> {
   try {
     const now = new Date().toISOString();
+    const reviewer = aprobadoPor || 'Administrador';
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pedidoId);
 
-    // 1. Actualizar estado del pedido a 'aprobado' y estado_pago a 'verificado'
-    const updateOrderPayload = {
-      estado: 'aprobado',
-      estado_pago: 'verificado',
-      revisado_por: aprobadoPor || 'Administrador',
-      revisado_en: now,
-      actualizado_en: now,
+    const cleanCode = (pedido.codigo || '').replace(/[^0-9]/g, '') || Math.floor(1000 + Math.random() * 9000);
+    const codigoVenta = `VNT-${cleanCode}`;
+
+    const ventaRecord: Venta = {
+      id: `vnt_${cleanCode}`,
+      codigo: codigoVenta,
+      pedido_id: pedido.id || pedidoId,
+      cliente_nombre: pedido.cliente_nombre || 'Cliente',
+      cliente_telefono: pedido.cliente_telefono || null,
+      metodo_pago: pedido.metodo_pago || 'transferencia',
+      total: Number(pedido.total) || 0,
+      monto_abonado: Number(pedido.total) || 0,
+      saldo_pendiente: 0,
+      estado_pago: 'completo',
+      cajero_nombre: reviewer,
+      registrado_por: reviewer,
+      items: pedido.items || [],
+      tipo: 'web',
+      notas: `Venta generada automáticamente al aprobar el pedido ${pedido.codigo}. Comprobante verificado por: ${reviewer}`,
+      creado_en: now,
     };
 
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pedidoId);
+    // 1. Dual-write en tabla 'pedidos': actualizar estado a 'aprobado' e incrustar metadatos seguros de venta
+    const rawNotas = pedido.notas || '';
+    const cleanNotas = rawNotas.replace(/<!--ALEX_VENTA_META:[\s\S]*?-->/g, '').trim();
+    const metaTag = `<!--ALEX_VENTA_META:${JSON.stringify({
+      tipo: 'web',
+      cajero_nombre: reviewer,
+      monto_abonado: Number(pedido.total) || 0,
+      saldo_pendiente: 0,
+      estado_pago: 'completo',
+      items: pedido.items || [],
+    })}-->`;
+    const finalNotas = cleanNotas ? `${cleanNotas}\n${metaTag}` : metaTag;
+
+    const updateOrderPayload: any = {
+      estado: 'aprobado',
+      estado_pago: 'verificado',
+      revisado_por: reviewer,
+      revisado_en: now,
+      actualizado_en: now,
+      notas: finalNotas,
+    };
+
     if (isUuid) {
       await supabase.from('pedidos').update(updateOrderPayload).eq('id', pedidoId);
     }
@@ -1920,29 +1956,9 @@ export async function aprobarPedidoYDescontarStock(
       }
     }
 
-    // 3. Registrar automáticamente la venta en el módulo de ventas
-    const cleanCode = (pedido.codigo || '').replace(/[^0-9]/g, '') || Math.floor(1000 + Math.random() * 9000);
-    const codigoVenta = `VNT-${cleanCode}`;
-
-    const ventaRecord: Venta = {
-      id: `vnt_${cleanCode}`,
-      codigo: codigoVenta,
-      pedido_id: pedido.id || pedidoId,
-      cliente_nombre: pedido.cliente_nombre,
-      cliente_telefono: pedido.cliente_telefono || null,
-      metodo_pago: pedido.metodo_pago,
-      total: Number(pedido.total) || 0,
-      monto_abonado: Number(pedido.total) || 0,
-      saldo_pendiente: 0,
-      estado_pago: 'completo',
-      items: pedido.items,
-      tipo: 'web',
-      notas: `Venta generada automáticamente al aprobar el pedido ${pedido.codigo}. Aprobado por: ${aprobadoPor || 'Admin'}`,
-      creado_en: now,
-    };
-
+    // 3. Registrar en tabla 'ventas' de Supabase con adaptación de columnas
     try {
-      const insertPayload: any = {
+      const payloadVentas: any = {
         codigo: ventaRecord.codigo,
         pedido_id: isUuid ? pedidoId : (pedido.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pedido.id) ? pedido.id : null),
         cliente_nombre: ventaRecord.cliente_nombre,
@@ -1952,27 +1968,36 @@ export async function aprobarPedidoYDescontarStock(
         monto_abonado: ventaRecord.total,
         saldo_pendiente: 0,
         estado_pago: 'completo',
+        cajero_nombre: ventaRecord.cajero_nombre,
+        registrado_por: ventaRecord.registrado_por,
         items: ventaRecord.items,
         tipo: ventaRecord.tipo,
         notas: ventaRecord.notas,
         creado_en: ventaRecord.creado_en,
       };
 
-      const { data, error } = await supabase.from('ventas').insert([insertPayload]).select().maybeSingle();
-      if (error && (error.message.includes('monto_abonado') || error.message.includes('saldo_pendiente') || error.message.includes('estado_pago'))) {
-        delete insertPayload.monto_abonado;
-        delete insertPayload.saldo_pendiente;
-        delete insertPayload.estado_pago;
-        await supabase.from('ventas').insert([insertPayload]);
+      let vRes = await supabase.from('ventas').insert([payloadVentas]).select().maybeSingle();
+
+      if (vRes.error) {
+        const errStr = (vRes.error.message || '').toLowerCase();
+        console.warn('Aviso insertando venta en Supabase, adaptando columnas:', errStr);
+        const stripCandidates = ['registrado_por', 'cajero_nombre', 'monto_abonado', 'saldo_pendiente', 'estado_pago', 'tipo', 'notas', 'items'];
+        for (const col of stripCandidates) {
+          if (errStr.includes(col)) {
+            delete payloadVentas[col];
+          }
+        }
+        vRes = await supabase.from('ventas').insert([payloadVentas]).select().maybeSingle();
       }
-      if (data?.id) {
-        ventaRecord.id = data.id;
+
+      if (!vRes.error && vRes.data?.id) {
+        ventaRecord.id = vRes.data.id;
       }
     } catch (vErr) {
-      console.warn('Aviso insertando venta en Supabase:', vErr);
+      console.warn('Aviso guardando venta aprobada en tabla ventas:', vErr);
     }
 
-    // Guardar también en localStorage para consistencia inmediata
+    // 4. Guardar también en localStorage para consistencia inmediata
     try {
       const local = localStorage.getItem(STORAGE_KEY_VENTAS);
       const list: Venta[] = local ? JSON.parse(local) : [];
@@ -1980,7 +2005,16 @@ export async function aprobarPedidoYDescontarStock(
       localStorage.setItem(STORAGE_KEY_VENTAS, JSON.stringify(updated));
     } catch {}
 
-    return { success: true };
+    // 5. Emitir evento cross-browser a todas las pestañas y navegadores abiertos
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('alexstore_cross_sync');
+        bc.postMessage({ type: 'VENTA_NUEVA', venta: ventaRecord, pedidoId: pedido.id || pedidoId });
+        bc.close();
+      }
+    } catch {}
+
+    return { success: true, data: ventaRecord };
   } catch (err: any) {
     console.error('Error en aprobarPedidoYDescontarStock:', err);
     return { success: false, error: err?.message || 'Error al aprobar pedido y descontar stock' };
@@ -2300,7 +2334,7 @@ export async function getHistorialCaja(limit = 100): Promise<RegistroCaja[]> {
 }
 
 export async function abrirCaja(params: {
-  monto_inicial: number;
+  monto_inicial?: number;
   abierto_por: string;
   usuario_id?: string | null;
   notas?: string;
@@ -2398,7 +2432,7 @@ export async function abrirCaja(params: {
       rol: 'cajero',
       accion: 'Apertura de Caja',
       modulo: 'caja',
-      detalles: `Abrió turno de caja con fondo inicial de $${Number(params.monto_inicial).toFixed(2)}.`,
+      detalles: 'Abrió turno de caja.',
     });
 
     return { success: true, data: newSession };

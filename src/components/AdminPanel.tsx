@@ -202,7 +202,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [historialCaja, setHistorialCaja] = useState<RegistroCaja[]>([]);
   const [isModalAbrirCajaOpen, setIsModalAbrirCajaOpen] = useState(false);
   const [isModalCerrarCajaOpen, setIsModalCerrarCajaOpen] = useState(false);
-  const [montoAperturaCaja, setMontoAperturaCaja] = useState('50.00');
   const [notasAperturaCaja, setNotasAperturaCaja] = useState('');
   const [montoCierreReal, setMontoCierreReal] = useState('');
   const [notasCierreCaja, setNotasCierreCaja] = useState('');
@@ -365,20 +364,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           return sesionActualizada;
         });
 
-        // Sincronizar silenciosamente ventas y pedidos para que las ventas de otros se reflejen al instante
-        const [updatedVentas, updatedPedidos] = await Promise.all([getVentas(), getPedidos()]);
-        setVentas((prev) => {
-          if (updatedVentas.length !== prev.length || updatedVentas[0]?.codigo !== prev[0]?.codigo) {
-            return updatedVentas;
-          }
-          return prev;
-        });
-        setPedidos((prev) => {
-          if (updatedPedidos.length !== prev.length || updatedPedidos[0]?.codigo !== prev[0]?.codigo) {
-            return updatedPedidos;
-          }
-          return prev;
-        });
+        // Sincronizar silenciosamente ventas, pedidos y productos para que cualquier acción en otro dispositivo se refleje al instante
+        const [updatedVentas, updatedPedidos, updatedProds] = await Promise.all([
+          getVentas(),
+          getPedidos(),
+          getProductos(),
+        ]);
+        setVentas(updatedVentas);
+        setPedidos(updatedPedidos);
+        setProductos(updatedProds);
       } catch (err) {
         console.warn('Aviso polling sincronización:', err);
       }
@@ -446,7 +440,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     };
     window.addEventListener('storage', handleStorageEvent);
 
-    // 5. Suscripción Supabase Realtime a cambios en ventas, pedidos y registros_caja
+    // 5. Suscripción Supabase Realtime a cambios en ventas, pedidos, productos y registros_caja entre dispositivos
     let realtimeChannel: any = null;
     try {
       realtimeChannel = supabase
@@ -455,25 +449,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           'postgres_changes',
           { event: '*', schema: 'public', table: 'registros_caja' },
           async () => {
-            const sesionActualizada = await getSesionCajaActiva();
+            const [sesionActualizada, hist] = await Promise.all([getSesionCajaActiva(), getHistorialCaja()]);
             setSesionCaja(sesionActualizada);
+            setHistorialCaja(hist);
           }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'ventas' },
           async () => {
-            const vnts = await getVentas();
+            const [vnts, prods] = await Promise.all([getVentas(), getProductos()]);
             setVentas(vnts);
+            setProductos(prods);
           }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'pedidos' },
           async () => {
-            const [peds, vnts] = await Promise.all([getPedidos(), getVentas()]);
+            const [peds, vnts, prods] = await Promise.all([getPedidos(), getVentas(), getProductos()]);
             setPedidos(peds);
             setVentas(vnts);
+            setProductos(prods);
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'productos' },
+          async () => {
+            const prods = await getProductos();
+            setProductos(prods);
           }
         )
         .subscribe();
@@ -759,6 +764,191 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }).then(() => getMovimientosTrabajadores().then(setMovimientos));
   };
 
+  const handleAprobarPedido = async (pedido: Pedido) => {
+    if (userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')) {
+      alert('⚠️ LA CAJA ESTÁ CERRADA: Como trabajador, no puedes aceptar comprobantes ni aprobar pedidos mientras la caja esté cerrada. Pide al Dueño o Administrador que abra el turno de caja.');
+      return;
+    }
+    const orderId = pedido.id || pedido.codigo;
+    setOrderActionLoadingId(orderId);
+    try {
+      const reviewer = currentUser?.nombre || currentUser?.email || 'Administrador';
+      const res = await aprobarPedidoYDescontarStock(orderId, pedido, reviewer);
+      if (res.success) {
+        // Descontar inventario localmente en tiempo real para respuesta inmediata en la UI
+        if (pedido.items && pedido.items.length > 0) {
+          setProductos((prev) =>
+            prev.map((prod) => {
+              const itemMatch = pedido.items.find(
+                (it) => it.producto_id === prod.id || it.id === prod.id
+              );
+              if (!itemMatch) return prod;
+
+              // Descontar talla específica de tallas_stock con coincidencia exacta primero
+              let nextTallasStock = prod.tallas_stock ? { ...prod.tallas_stock } : undefined;
+              if (nextTallasStock && itemMatch.talla) {
+                const normTarget = itemMatch.talla.trim().toLowerCase();
+                let targetKey = Object.keys(nextTallasStock).find(
+                  (k) => k.trim().toLowerCase() === normTarget
+                );
+                if (!targetKey) {
+                  targetKey = Object.keys(nextTallasStock).find(
+                    (k) => k.trim().toLowerCase().includes(normTarget) || normTarget.includes(k.trim().toLowerCase())
+                  );
+                }
+                if (targetKey) {
+                  const curr = Number(nextTallasStock[targetKey]) || 0;
+                  nextTallasStock[targetKey] = Math.max(0, curr - itemMatch.cantidad);
+                }
+              }
+
+              const nextStock =
+                nextTallasStock && Object.keys(nextTallasStock).length > 0
+                  ? Object.values(nextTallasStock).reduce((sum, q) => sum + (Number(q) || 0), 0)
+                  : Math.max(0, (prod.stock ?? 0) - itemMatch.cantidad);
+
+              let nextVars = prod.variantes;
+              if (Array.isArray(nextVars)) {
+                nextVars = nextVars.map((v) => {
+                  const isMatch =
+                    (itemMatch.variante_id && v.id === itemMatch.variante_id) ||
+                    (itemMatch.variante_titulo && v.titulo === itemMatch.variante_titulo) ||
+                    (itemMatch.talla && (
+                      (v.opciones?.Talla && v.opciones.Talla.toLowerCase() === itemMatch.talla.toLowerCase()) ||
+                      (v.titulo && v.titulo.toLowerCase().includes(itemMatch.talla.toLowerCase()))
+                    ));
+                  if (isMatch) {
+                    return { ...v, stock: Math.max(0, (v.stock ?? 0) - itemMatch.cantidad) };
+                  }
+                  return v;
+                });
+              }
+              return { ...prod, stock: nextStock, tallas_stock: nextTallasStock, variantes: nextVars };
+            })
+          );
+        }
+
+        // Marcar pedido como aprobado y verificado
+        const now = new Date().toISOString();
+        setPedidos((prev) =>
+          prev.map((p) =>
+            p.id === pedido.id || p.codigo === pedido.codigo
+              ? {
+                  ...p,
+                  estado: 'aprobado',
+                  estado_pago: 'verificado',
+                  revisado_por: reviewer,
+                  revisado_en: now,
+                }
+              : p
+          )
+        );
+
+        if (selectedOrderForProof && (selectedOrderForProof.id === pedido.id || selectedOrderForProof.codigo === pedido.codigo)) {
+          setSelectedOrderForProof((prev) =>
+            prev ? { ...prev, estado: 'aprobado', estado_pago: 'verificado', revisado_por: reviewer, revisado_en: now } : null
+          );
+        }
+
+        // Registrar venta en tiempo real en la lista de ventas local
+        const ventaFromRes = (res as any).data;
+        const codigoVenta = ventaFromRes?.codigo || `VNT-${(pedido.codigo || '').replace(/[^0-9]/g, '') || Math.floor(1000 + Math.random() * 9000)}`;
+        const nuevaVenta: Venta = ventaFromRes || {
+          codigo: codigoVenta,
+          pedido_id: pedido.id || null,
+          cliente_nombre: pedido.cliente_nombre,
+          cliente_telefono: pedido.cliente_telefono || null,
+          metodo_pago: pedido.metodo_pago,
+          total: pedido.total,
+          items: pedido.items,
+          tipo: 'web',
+          notas: `Venta generada automáticamente al aprobar comprobante/pedido ${pedido.codigo}.`,
+          creado_en: now,
+        };
+        setVentas((prev) => {
+          if (prev.some((v) => (v.id && nuevaVenta.id && v.id === nuevaVenta.id) || v.codigo === nuevaVenta.codigo)) {
+            return prev;
+          }
+          return [nuevaVenta, ...prev];
+        });
+
+        setComprobanteToast({
+          msg: `✅ ¡Comprobante aceptado y Pedido ${pedido.codigo} aprobado! Se descontó del inventario y se registró la venta en todos los navegadores.`,
+          type: 'success',
+        });
+        setTimeout(() => setComprobanteToast(null), 5000);
+
+        // Recargar datos en segundo plano para sincronizar con Supabase
+        reloadAllData(true);
+
+        registrarMovimiento({
+          usuario_id: currentUser?.id,
+          usuario_nombre: reviewer,
+          usuario_email: currentUser?.email || '',
+          rol: currentUser?.rol || 'cajero',
+          accion: 'Aprobó Pedido y Comprobante',
+          modulo: 'pedidos',
+          detalles: `Aceptó comprobante y aprobó pedido ${pedido.codigo} (Cliente: ${pedido.cliente_nombre}) por $${(pedido.total ?? 0).toFixed(2)}, descontó inventario y registró en Ventas.`,
+        }).then(() => getMovimientosTrabajadores().then(setMovimientos));
+      } else {
+        alert(res.error || 'Error al aprobar pedido.');
+      }
+    } catch (err: any) {
+      alert('Error: ' + err?.message);
+    } finally {
+      setOrderActionLoadingId(null);
+    }
+  };
+
+  const handleRechazarPedido = async (pedido: Pedido) => {
+    if (!confirm(`¿Estás seguro de rechazar el pedido y comprobante de la orden ${pedido.codigo}?`)) return;
+    const orderId = pedido.id || pedido.codigo;
+    setOrderActionLoadingId(orderId);
+    try {
+      const reviewer = currentUser?.nombre || currentUser?.email || 'Administrador';
+      await actualizarEstadoPedido(orderId, 'rechazado');
+      await actualizarEstadoPagoPedido(orderId, 'rechazado', reviewer);
+      const now = new Date().toISOString();
+      setPedidos((prev) =>
+        prev.map((p) =>
+          p.id === pedido.id || p.codigo === pedido.codigo
+            ? {
+                ...p,
+                estado: 'rechazado',
+                estado_pago: 'rechazado',
+                revisado_por: reviewer,
+                revisado_en: now,
+              }
+            : p
+        )
+      );
+      if (selectedOrderForProof && (selectedOrderForProof.id === pedido.id || selectedOrderForProof.codigo === pedido.codigo)) {
+        setSelectedOrderForProof((prev) =>
+          prev ? { ...prev, estado: 'rechazado', estado_pago: 'rechazado', revisado_por: reviewer, revisado_en: now } : null
+        );
+      }
+      setComprobanteToast({
+        msg: `Pedido ${pedido.codigo} y comprobante marcados como RECHAZADOS.`,
+        type: 'error',
+      });
+      setTimeout(() => setComprobanteToast(null), 4000);
+
+      reloadAllData(true);
+
+      registrarMovimiento({
+        usuario_id: currentUser?.id,
+        usuario_nombre: reviewer,
+        usuario_email: currentUser?.email || '',
+        rol: currentUser?.rol || 'cajero',
+        accion: 'Rechazó Pedido y Comprobante',
+        modulo: 'pedidos',
+        detalles: `Rechazó pedido y comprobante ${pedido.codigo} (Cliente: ${pedido.cliente_nombre}).`,
+      }).then(() => getMovimientosTrabajadores().then(setMovimientos));
+    } finally {
+      setOrderActionLoadingId(null);
+    }
+  };
+
   const handleUpdateOrderStatus = async (
     orderId: string,
     newStatus: string
@@ -792,6 +982,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     orderCode: string,
     newProofStatus: 'pendiente_revision' | 'verificado' | 'rechazado'
   ) => {
+    const targetPed = pedidos.find((p) => p.id === orderId || p.codigo === orderCode || p.codigo === orderId);
+
+    // Si se aprueba/verifica el comprobante, ejecutar aprobación completa con descuento de stock y venta
+    if (newProofStatus === 'verificado') {
+      if (userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')) {
+        alert('⚠️ LA CAJA ESTÁ CERRADA: Como trabajador, no puedes aceptar comprobantes ni aprobar pedidos mientras la caja esté cerrada. Pide al Dueño o Administrador que abra el turno de caja.');
+        return;
+      }
+      if (targetPed) {
+        await handleAprobarPedido(targetPed);
+        return;
+      }
+    }
+
+    if (newProofStatus === 'rechazado' && targetPed) {
+      await handleRechazarPedido(targetPed);
+      return;
+    }
+
     const res = await actualizarEstadoPagoPedido(
       orderId,
       newProofStatus,
@@ -815,6 +1024,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         type: 'success',
       });
       setTimeout(() => setComprobanteToast(null), 3500);
+
+      reloadAllData(true);
 
       registrarMovimiento({
         usuario_id: currentUser?.id,
@@ -980,167 +1191,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setTimeout(() => setUserFeedback(null), 3500);
     } else {
       alert(res.error || 'Error al cambiar rol.');
-    }
-  };
-
-  const handleAprobarPedido = async (pedido: Pedido) => {
-    if (userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')) {
-      alert('⚠️ LA CAJA ESTÁ CERRADA: Como trabajador, no puedes aceptar pedidos mientras la caja esté cerrada. Pide al Dueño o Administrador que abra el turno de caja.');
-      return;
-    }
-    const orderId = pedido.id || pedido.codigo;
-    setOrderActionLoadingId(orderId);
-    try {
-      const reviewer = currentUser?.nombre || currentUser?.email || 'Administrador';
-      const res = await aprobarPedidoYDescontarStock(orderId, pedido, reviewer);
-      if (res.success) {
-        // Descontar inventario localmente en tiempo real para respuesta inmediata en la UI
-        if (pedido.items && pedido.items.length > 0) {
-          setProductos((prev) =>
-            prev.map((prod) => {
-              const itemMatch = pedido.items.find(
-                (it) => it.producto_id === prod.id || it.id === prod.id
-              );
-              if (!itemMatch) return prod;
-
-              // Descontar talla específica de tallas_stock
-              let nextTallasStock = prod.tallas_stock ? { ...prod.tallas_stock } : undefined;
-              if (nextTallasStock && itemMatch.talla) {
-                const search = itemMatch.talla.trim().toLowerCase();
-                const targetKey = Object.keys(nextTallasStock).find(
-                  (k) => k.toLowerCase() === search || search.includes(k.toLowerCase())
-                );
-                if (targetKey) {
-                  const curr = Number(nextTallasStock[targetKey]) || 0;
-                  nextTallasStock[targetKey] = Math.max(0, curr - itemMatch.cantidad);
-                }
-              }
-
-              const nextStock =
-                nextTallasStock && Object.keys(nextTallasStock).length > 0
-                  ? Object.values(nextTallasStock).reduce((sum, q) => sum + (Number(q) || 0), 0)
-                  : Math.max(0, (prod.stock ?? 0) - itemMatch.cantidad);
-
-              let nextVars = prod.variantes;
-              if (Array.isArray(nextVars)) {
-                nextVars = nextVars.map((v) => {
-                  const isMatch =
-                    (itemMatch.variante_id && v.id === itemMatch.variante_id) ||
-                    (itemMatch.variante_titulo && v.titulo === itemMatch.variante_titulo) ||
-                    (itemMatch.talla && (
-                      (v.opciones?.Talla && v.opciones.Talla.toLowerCase() === itemMatch.talla.toLowerCase()) ||
-                      (v.titulo && v.titulo.toLowerCase().includes(itemMatch.talla.toLowerCase()))
-                    ));
-                  if (isMatch) {
-                    return { ...v, stock: Math.max(0, (v.stock ?? 0) - itemMatch.cantidad) };
-                  }
-                  return v;
-                });
-              }
-              return { ...prod, stock: nextStock, tallas_stock: nextTallasStock, variantes: nextVars };
-            })
-          );
-        }
-
-        // Marcar pedido como aprobado y verificado
-        const now = new Date().toISOString();
-        setPedidos((prev) =>
-          prev.map((p) =>
-            p.id === pedido.id || p.codigo === pedido.codigo
-              ? {
-                  ...p,
-                  estado: 'aprobado',
-                  estado_pago: 'verificado',
-                  revisado_por: reviewer,
-                  revisado_en: now,
-                }
-              : p
-          )
-        );
-
-        // Registrar venta en tiempo real en la lista de ventas
-        const codigoVenta = `VNT-${(pedido.codigo || '').replace(/[^0-9]/g, '') || Math.floor(1000 + Math.random() * 9000)}`;
-        const nuevaVenta: Venta = {
-          codigo: codigoVenta,
-          pedido_id: pedido.id || null,
-          cliente_nombre: pedido.cliente_nombre,
-          cliente_telefono: pedido.cliente_telefono || null,
-          metodo_pago: pedido.metodo_pago,
-          total: pedido.total,
-          items: pedido.items,
-          tipo: 'web',
-          notas: `Venta generada automáticamente al aprobar pedido ${pedido.codigo}.`,
-          creado_en: now,
-        };
-        setVentas((prev) => [nuevaVenta, ...prev]);
-
-        setComprobanteToast({
-          msg: `✅ ¡Pedido ${pedido.codigo} aceptado con éxito! Se descontó del inventario y se registró automáticamente en Ventas.`,
-          type: 'success',
-        });
-        setTimeout(() => setComprobanteToast(null), 5000);
-
-        // Recargar datos para garantizar sincronización exacta con las tablas de Supabase
-        reloadAllData();
-
-        registrarMovimiento({
-          usuario_id: currentUser?.id,
-          usuario_nombre: reviewer,
-          usuario_email: currentUser?.email || '',
-          rol: currentUser?.rol || 'cajero',
-          accion: 'Aprobó Pedido',
-          modulo: 'pedidos',
-          detalles: `Aprobó pedido ${pedido.codigo} (Cliente: ${pedido.cliente_nombre}) por $${pedido.total.toFixed(2)}, descontó inventario y registró en Ventas.`,
-        }).then(() => getMovimientosTrabajadores().then(setMovimientos));
-      } else {
-        alert(res.error || 'Error al aprobar pedido.');
-      }
-    } catch (err: any) {
-      alert('Error: ' + err?.message);
-    } finally {
-      setOrderActionLoadingId(null);
-    }
-  };
-
-  const handleRechazarPedido = async (pedido: Pedido) => {
-    if (!confirm(`¿Estás seguro de rechazar el pedido ${pedido.codigo}?`)) return;
-    const orderId = pedido.id || pedido.codigo;
-    setOrderActionLoadingId(orderId);
-    try {
-      const reviewer = currentUser?.nombre || currentUser?.email || 'Administrador';
-      await actualizarEstadoPedido(orderId, 'rechazado');
-      await actualizarEstadoPagoPedido(orderId, 'rechazado', reviewer);
-      const now = new Date().toISOString();
-      setPedidos((prev) =>
-        prev.map((p) =>
-          p.id === pedido.id || p.codigo === pedido.codigo
-            ? {
-                ...p,
-                estado: 'rechazado',
-                estado_pago: 'rechazado',
-                revisado_por: reviewer,
-                revisado_en: now,
-              }
-            : p
-        )
-      );
-      setComprobanteToast({
-        msg: `Pedido ${pedido.codigo} marcado como RECHAZADO.`,
-        type: 'error',
-      });
-      setTimeout(() => setComprobanteToast(null), 4000);
-
-      registrarMovimiento({
-        usuario_id: currentUser?.id,
-        usuario_nombre: reviewer,
-        usuario_email: currentUser?.email || '',
-        rol: currentUser?.rol || 'cajero',
-        accion: 'Rechazó Pedido',
-        modulo: 'pedidos',
-        detalles: `Rechazó pedido ${pedido.codigo} (Cliente: ${pedido.cliente_nombre}).`,
-      }).then(() => getMovimientosTrabajadores().then(setMovimientos));
-    } finally {
-      setOrderActionLoadingId(null);
     }
   };
 
@@ -1468,16 +1518,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleAbrirCajaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const inicial = parseFloat(montoAperturaCaja);
-    if (isNaN(inicial) || inicial < 0) {
-      alert('Por favor ingresa un monto inicial válido.');
-      return;
-    }
     setIsCajaSubmitting(true);
     try {
       const res = await abrirCaja({
-        monto_inicial: inicial,
-        abierto_por: currentUser?.nombre || currentUser?.email || 'Cajero',
+        monto_inicial: 0,
+        abierto_por: currentUser?.nombre || currentUser?.email || 'Administrador',
         usuario_id: currentUser?.id,
         notas: notasAperturaCaja.trim() || undefined,
       });
@@ -1487,7 +1532,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         setNotasAperturaCaja('');
         setUserFeedback({
           type: 'success',
-          msg: `¡Turno de caja abierto correctamente con fondo inicial de $${inicial.toFixed(2)}!`,
+          msg: '¡Turno de caja abierto correctamente!',
         });
         setTimeout(() => setUserFeedback(null), 4500);
         reloadAllData();
@@ -1504,11 +1549,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleCerrarCajaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!sesionCaja) return;
-    const real = parseFloat(montoCierreReal);
-    if (isNaN(real) || real < 0) {
-      alert('Por favor ingresa el dinero en efectivo contado en gaveta.');
-      return;
-    }
     setIsCajaSubmitting(true);
     try {
       const fechaInicio = sesionCaja.fecha_apertura ? new Date(sesionCaja.fecha_apertura).getTime() : 0;
@@ -1525,8 +1565,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         .filter((g) => g.creado_en && new Date(g.creado_en).getTime() >= fechaInicio)
         .reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
 
-      const inicial = Number(sesionCaja.monto_inicial) || 0;
-      const esperado = inicial + ventasEfectivoTurno - gastosEfectivoTurno;
+      const esperado = Math.max(0, ventasEfectivoTurno - gastosEfectivoTurno);
+      const real = montoCierreReal.trim() ? parseFloat(montoCierreReal) : esperado;
+      if (isNaN(real) || real < 0) {
+        alert('Por favor ingresa un monto válido.');
+        return;
+      }
       const diferencia = real - esperado;
 
       const res = await cerrarCaja({
@@ -1534,7 +1578,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         monto_final_real: real,
         monto_esperado: esperado,
         diferencia,
-        cerrado_por: currentUser?.nombre || currentUser?.email || 'Cajero',
+        cerrado_por: currentUser?.nombre || currentUser?.email || 'Administrador',
         notas: notasCierreCaja.trim() || undefined,
       });
 
@@ -1545,7 +1589,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         setNotasCierreCaja('');
         setUserFeedback({
           type: 'success',
-          msg: `¡Turno de caja cerrado y guardado! Contado: $${real.toFixed(2)}, Esperado: $${esperado.toFixed(2)}, Diferencia: $${diferencia.toFixed(2)}.`,
+          msg: `¡Turno de caja cerrado y guardado! Efectivo: $${real.toFixed(2)}, Esperado: $${esperado.toFixed(2)}${Math.abs(diferencia) >= 0.01 ? `, Diferencia: $${diferencia.toFixed(2)}` : ''}.`,
         });
         setTimeout(() => setUserFeedback(null), 5000);
         reloadAllData();
@@ -3092,8 +3136,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </h2>
                       <p className="text-xs text-[#A69F93] mt-0.5">
                         {sesionCaja && sesionCaja.estado === 'abierta'
-                          ? `Iniciado el ${new Date(sesionCaja.fecha_apertura).toLocaleString('es-PA')}. Fondo inicial: $${Number(sesionCaja.monto_inicial).toFixed(2)} USD.`
-                          : 'Inicia el turno de caja indicando el fondo inicial en gaveta para registrar cobros y cuadres.'}
+                          ? `Iniciado el ${new Date(sesionCaja.fecha_apertura).toLocaleString('es-PA')}. Turno activo para registrar ventas y pedidos.`
+                          : 'Inicia el turno de caja para habilitar las ventas, pedidos y arqueo de turnos.'}
                       </p>
                     </div>
                   </div>
@@ -3128,7 +3172,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     ) : (
                       <button
                         onClick={() => {
-                          setMontoAperturaCaja('50.00');
                           setNotasAperturaCaja('');
                           setIsModalAbrirCajaOpen(true);
                         }}
@@ -3169,7 +3212,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   );
 
                   // Totales monetarios
-                  const fondoInicial = Number(sesionCaja.monto_inicial) || 0;
                   const totalVentasEfectivo = ventasEfectivoTurno.reduce(
                     (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
                     0
@@ -3179,17 +3221,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   const totalGastos = gastosTurno.reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
                   const totalPedidosWeb = pedidosAprobadosTurno.reduce((acc, p) => acc + (Number(p.total) || 0), 0);
 
-                  const esperadoEnGaveta = fondoInicial + totalVentasEfectivo - totalGastos;
+                  const esperadoEnGaveta = Math.max(0, totalVentasEfectivo - totalGastos);
                   const totalFacturadoTurno = totalVentasEfectivo + totalVentasYappy + totalVentasTransf;
 
                   return (
                     <div className="space-y-4 pt-5 mt-5 border-t border-emerald-900/60 text-xs">
                       {userRole !== 'cajero' && (
                         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
-                          <div className="bg-[#13110F] p-3 rounded-xl border border-emerald-900/60">
-                            <span className="text-[#A69F93] font-bold block text-[10px] uppercase">Fondo Inicial Gaveta</span>
-                            <strong className="text-base text-white font-black">${fondoInicial.toFixed(2)}</strong>
-                          </div>
                           <div className="bg-[#13110F] p-3 rounded-xl border border-emerald-900/60">
                             <span className="text-emerald-400 font-bold block text-[10px] uppercase">
                               (+) Efectivo Gaveta ({ventasEfectivoTurno.length})
@@ -3207,6 +3245,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               (+) Transferencias ({ventasTransfTurno.length})
                             </span>
                             <strong className="text-base text-amber-400 font-black">+${totalVentasTransf.toFixed(2)}</strong>
+                          </div>
+                          <div className="bg-[#13110F] p-3 rounded-xl border border-rose-900/60">
+                            <span className="text-rose-400 font-bold block text-[10px] uppercase">
+                              (-) Gastos ({gastosTurno.length})
+                            </span>
+                            <strong className="text-base text-rose-400 font-black">-${totalGastos.toFixed(2)}</strong>
                           </div>
                           <div className="bg-[#181614] p-3 rounded-xl border border-emerald-700/80 shadow-xs col-span-2 sm:col-span-1">
                             <span className="text-emerald-300 font-extrabold block text-[10px] uppercase">Esperado en Gaveta</span>
@@ -3300,24 +3344,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                         {/* Listado con scroll infinito sin límite de registros */}
                         <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
-                          {/* Entrada Base (Visible en todos o efectivo) */}
-                          {(cajaMovimientosFiltro === 'todos' || cajaMovimientosFiltro === 'efectivo') && (
-                            <div className="p-2.5 rounded-xl bg-[#1A1816] border border-[#26221E] flex items-center justify-between gap-3 text-xs">
-                              <div className="flex items-center gap-2.5">
-                                <span className="w-8 h-8 rounded-xl bg-emerald-950/80 border border-emerald-700/60 text-emerald-400 flex items-center justify-center font-black text-sm">
-                                  💼
-                                </span>
-                                <div>
-                                  <span className="font-black text-white block text-[11px]">Fondo Inicial en Gaveta</span>
-                                  <span className="text-[10px] text-[#A69F93]">
-                                    Abierto por: <strong className="text-white">{sesionCaja.abierto_por}</strong> • {new Date(sesionCaja.fecha_apertura).toLocaleTimeString('es-PA')}
-                                  </span>
-                                </div>
-                              </div>
-                              <span className="font-black text-white text-sm">+${fondoInicial.toFixed(2)}</span>
-                            </div>
-                          )}
-
                           {/* Ventas filtradas del turno */}
                           {todasVentasTurno
                             .filter((v) => {
@@ -3520,7 +3546,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           <th className="py-3 px-4">Apertura</th>
                           <th className="py-3 px-4">Duración</th>
                           <th className="py-3 px-4">Abierto por</th>
-                          <th className="py-3 px-4 text-right">Fondo Inicial</th>
                           {userRole !== 'cajero' && (
                             <>
                               <th className="py-3 px-4 text-right">Esperado</th>
@@ -3556,9 +3581,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             </td>
                             <td className="py-3.5 px-4 font-bold text-white">
                               {reg.abierto_por}
-                            </td>
-                            <td className="py-3.5 px-4 text-right font-black text-slate-200">
-                              ${Number(reg.monto_inicial || 0).toFixed(2)}
                             </td>
                             {userRole !== 'cajero' && (
                               <>
@@ -4588,9 +4610,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                         ? 'bg-emerald-600 text-white shadow-xs'
                                         : 'bg-emerald-950/60 text-emerald-400 hover:bg-emerald-950 border border-emerald-800'
                                     }`}
-                                    title="Marcar comprobante como verificado"
+                                    title="Aceptar comprobante, descontar inventario y registrar en Ventas en todos los navegadores"
                                   >
-                                    Verificar
+                                    Aceptar
                                   </button>
                                   <button
                                     type="button"
@@ -6200,7 +6222,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     }`}
                   >
                     <Check className="w-3.5 h-3.5" />
-                    <span>Verificar</span>
+                    <span>Aceptar Comprobante y Registrar Venta</span>
                   </button>
 
                   <button
@@ -6967,7 +6989,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-black text-white">Apertura de Turno de Caja</h3>
-                  <p className="text-[11px] text-[#A69F93]">Inicia el turno indicando el fondo en gaveta</p>
+                  <p className="text-[11px] text-[#A69F93]">Inicia el turno de trabajo en todos los navegadores</p>
                 </div>
               </div>
               <button
@@ -6983,7 +7005,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <span className="text-2xl">🔒</span>
                 <h4 className="font-black text-rose-300 text-sm">Acceso Restringido para Cajeros</h4>
                 <p className="text-xs text-[#A69F93]">
-                  Por políticas de seguridad, solo el <strong>Dueño o Administrador</strong> tiene autorización para abrir la caja e ingresar el fondo de gaveta.
+                  Por políticas de seguridad, solo el <strong>Dueño o Administrador</strong> tiene autorización para abrir la caja.
                 </p>
                 <button
                   type="button"
@@ -6995,36 +7017,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
             ) : (
               <form onSubmit={handleAbrirCajaSubmit} className="space-y-4 text-xs">
-                <div>
-                  <label className="font-extrabold text-[#E6C687] block mb-1.5 uppercase tracking-wider text-[11px]">
-                    Fondo Inicial en Gaveta (Efectivo Base) *
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-black text-[#A69F93] text-sm">$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      placeholder="50.00"
-                      value={montoAperturaCaja}
-                      onChange={(e) => setMontoAperturaCaja(e.target.value)}
-                      className="w-full bg-[#1A1816] pl-8 pr-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-emerald-500 font-black text-base text-white placeholder-[#787168]"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2 mt-2">
-                    <span className="text-[10px] text-[#A69F93] font-bold">Rápido:</span>
-                    {['20.00', '50.00', '100.00'].map((val) => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() => setMontoAperturaCaja(val)}
-                        className="px-2.5 py-1 rounded-lg bg-[#1A1816] border border-[#26221E] hover:border-[#E6C687] text-[#E6C687] hover:text-white font-bold text-[10px] transition-colors cursor-pointer"
-                      >
-                        ${val}
-                      </button>
-                    ))}
-                  </div>
+                <div className="p-4 rounded-2xl bg-[#1A1816] border border-[#26221E] text-center space-y-1.5">
+                  <span className="text-2xl">🟢</span>
+                  <h4 className="font-black text-white text-sm">¿Deseas iniciar un nuevo turno de caja?</h4>
+                  <p className="text-[11px] text-[#A69F93]">
+                    Al abrir la caja se habilitará el registro de ventas, cobros y pedidos para todos los navegadores y trabajadores.
+                  </p>
                 </div>
 
                 <div>
@@ -7033,7 +7031,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </label>
                   <textarea
                     rows={2}
-                    placeholder="Ej: Turno de la mañana, billetes de $5 y $1..."
+                    placeholder="Ej: Turno de la mañana..."
                     value={notasAperturaCaja}
                     onChange={(e) => setNotasAperturaCaja(e.target.value)}
                     className="w-full bg-[#1A1816] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-emerald-500 resize-none text-white placeholder-[#787168]"
@@ -7054,7 +7052,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black flex items-center gap-1.5 shadow-lg shadow-emerald-950/40 disabled:opacity-50 cursor-pointer transition-all active:scale-95"
                   >
                     <Wallet className="w-3.5 h-3.5" />
-                    <span>{isCajaSubmitting ? 'Abriendo...' : 'INICIAR TURNO DE CAJA'}</span>
+                    <span>{isCajaSubmitting ? 'Abriendo...' : 'ABRIR TURNO DE CAJA'}</span>
                   </button>
                 </div>
               </form>
@@ -7092,9 +7090,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           0
         );
 
-        const fondoInicial = Number(sesionCaja.monto_inicial) || 0;
-        const esperado = fondoInicial + totalVentasEfectivo - totalGastosEfectivo;
-        const real = parseFloat(montoCierreReal);
+        const esperado = Math.max(0, totalVentasEfectivo - totalGastosEfectivo);
+        const real = montoCierreReal.trim() ? parseFloat(montoCierreReal) : esperado;
         const hasReal = !isNaN(real);
         const diferencia = hasReal ? real - esperado : 0;
         const duracionTurno = getDuracionCaja(sesionCaja.fecha_apertura);
@@ -7163,10 +7160,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                   {/* Resumen de Cobros por Método en este Turno */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <div className="p-2.5 rounded-xl bg-[#181614] border border-[#26221E]">
-                      <span className="text-[10px] text-[#A69F93] block font-bold">Fondo Inicial:</span>
-                      <strong className="text-white text-sm font-black">${fondoInicial.toFixed(2)}</strong>
-                    </div>
                     <div className="p-2.5 rounded-xl bg-emerald-950/20 border border-emerald-900/40">
                       <span className="text-[10px] text-emerald-400 block font-bold">💵 Efectivo Gaveta:</span>
                       <strong className="text-emerald-300 text-sm font-black">+${totalVentasEfectivo.toFixed(2)}</strong>
@@ -7179,12 +7172,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <span className="text-[10px] text-purple-400 block font-bold">🏦 Transferencia:</span>
                       <strong className="text-purple-300 text-sm font-black">+${totalVentasTransf.toFixed(2)}</strong>
                     </div>
+                    <div className="p-2.5 rounded-xl bg-rose-950/20 border border-rose-900/40">
+                      <span className="text-[10px] text-rose-400 block font-bold">🔻 Gastos Turno:</span>
+                      <strong className="text-rose-300 text-sm font-black">-${totalGastosEfectivo.toFixed(2)}</strong>
+                    </div>
                   </div>
 
                   {/* Filtros de Auditoría del Turno */}
                   <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] scrollbar-none">
                     {[
-                      { id: 'todos', label: 'Todos', count: ventasTurnoList.length + gastosTurnoList.length + pedidosAprobadosTurno.length + 1 },
+                      { id: 'todos', label: 'Todos', count: ventasTurnoList.length + gastosTurnoList.length + pedidosAprobadosTurno.length },
                       { id: 'efectivo', label: '💵 Efectivo', count: ventasEfectivoTurnoList.length },
                       { id: 'yappy', label: '📱 Yappy', count: ventasYappyTurnoList.length },
                       { id: 'transferencia', label: '🏦 Transf.', count: ventasTransfTurnoList.length },
@@ -7217,22 +7214,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </div>
 
                     <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 text-xs">
-                      {/* Fondo Inicial */}
-                      {(cierreModalFiltro === 'todos' || cierreModalFiltro === 'efectivo') && (
-                        <div className="p-2 rounded-xl bg-[#13110F] border border-[#2D2822] flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs">💼</span>
-                            <div>
-                              <span className="font-bold text-white block text-[11px]">Fondo Inicial en Gaveta</span>
-                              <span className="text-[10px] text-[#A69F93]">
-                                Abierto por: <strong className="text-white">{sesionCaja.abierto_por}</strong>
-                              </span>
-                            </div>
-                          </div>
-                          <span className="font-black text-white text-xs">+${fondoInicial.toFixed(2)}</span>
-                        </div>
-                      )}
-
                       {/* Ventas del Turno */}
                       {ventasTurnoList
                         .filter((v) => {
@@ -7358,10 +7339,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                   {/* Resumen numérico esperado */}
                   <div className="bg-[#1A1816] p-3.5 rounded-2xl border border-[#26221E] space-y-2 text-xs">
-                    <div className="flex justify-between text-[#A69F93]">
-                      <span>Fondo Inicial:</span>
-                      <strong className="text-white">${fondoInicial.toFixed(2)}</strong>
-                    </div>
                     <div className="flex justify-between text-emerald-400">
                       <span>(+) Ventas Efectivo Gaveta ({ventasEfectivoTurnoList.length}):</span>
                       <strong>+${totalVentasEfectivo.toFixed(2)}</strong>
@@ -7386,17 +7363,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                   <form onSubmit={handleCerrarCajaSubmit} className="space-y-4 text-xs">
                     <div>
-                      <label className="font-extrabold text-[#E6C687] block mb-1.5 uppercase tracking-wider text-[11px]">
-                        Dinero Real Contado en Gaveta (Efectivo) *
-                      </label>
+                      <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                        <label className="font-extrabold text-[#E6C687] block uppercase tracking-wider text-[11px]">
+                          Dinero Real Contado en Gaveta (Efectivo)
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setMontoCierreReal(esperado.toFixed(2))}
+                          className="px-2 py-0.5 rounded-lg bg-[#26221E] hover:bg-[#38332B] text-[#E6C687] font-bold text-[10px] border border-[#3A332B] transition-colors cursor-pointer"
+                        >
+                          Usar Esperado (${esperado.toFixed(2)})
+                        </button>
+                      </div>
                       <div className="relative">
                         <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-black text-[#A69F93] text-sm">$</span>
                         <input
                           type="number"
                           step="0.01"
                           min="0"
-                          required
-                          placeholder="0.00"
+                          placeholder={esperado.toFixed(2)}
                           value={montoCierreReal}
                           onChange={(e) => setMontoCierreReal(e.target.value)}
                           className="w-full bg-[#1A1816] pl-8 pr-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-rose-500 font-black text-base text-white placeholder-[#787168]"
