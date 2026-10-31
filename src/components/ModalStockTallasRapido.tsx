@@ -24,29 +24,34 @@ export const ModalStockTallasRapido: React.FC<ModalStockTallasRapidoProps> = ({
   const [guardando, setGuardando] = useState(false);
   const [mensajeExito, setMensajeExito] = useState(false);
 
+  const prodId = producto?.id;
+  const lastLoadedIdRef = React.useRef<string | null>(null);
+
   useEffect(() => {
-    if (producto) {
-      let initial: Record<string, number> = {};
-      if (producto.tallas_stock && Object.keys(producto.tallas_stock).length > 0) {
-        initial = { ...producto.tallas_stock };
-      } else if (producto.variantes && producto.variantes.length > 0) {
-        producto.variantes.forEach((v) => {
-          const t = v.opciones?.Talla || v.titulo;
-          if (t) initial[t] = Number(v.stock) || 0;
-        });
-      } else if (producto.tallas && producto.tallas.length > 0) {
-        const perTalla = Math.max(1, Math.floor((producto.stock ?? 10) / producto.tallas.length));
-        producto.tallas.forEach((t) => {
-          initial[t] = perTalla;
-        });
-      } else {
-        // Tallas por defecto si el producto no tenía
-        initial = { S: 3, M: 5, L: 4, XL: 2 };
-      }
-      setTallasStock(initial);
-      setMensajeExito(false);
+    if (!producto) return;
+    if (lastLoadedIdRef.current === prodId) return;
+    lastLoadedIdRef.current = prodId || null;
+
+    let initial: Record<string, number> = {};
+    if (producto.tallas_stock && Object.keys(producto.tallas_stock).length > 0) {
+      initial = { ...producto.tallas_stock };
+    } else if (producto.variantes && producto.variantes.length > 0) {
+      producto.variantes.forEach((v) => {
+        const t = v.opciones?.Talla || v.titulo;
+        if (t) initial[t] = Number(v.stock) || 0;
+      });
+    } else if (producto.tallas && producto.tallas.length > 0) {
+      const perTalla = Math.max(1, Math.floor((producto.stock ?? 10) / producto.tallas.length));
+      producto.tallas.forEach((t) => {
+        initial[t] = perTalla;
+      });
+    } else {
+      // Tallas por defecto si el producto no tenía
+      initial = { S: 3, M: 5, L: 4, XL: 2 };
     }
-  }, [producto]);
+    setTallasStock(initial);
+    setMensajeExito(false);
+  }, [prodId, producto]);
 
   const tallasKeys = Object.keys(tallasStock);
 

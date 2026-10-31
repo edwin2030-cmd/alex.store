@@ -27,23 +27,41 @@ export const ModalNuevaCategoria: React.FC<ModalNuevaCategoriaProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
 
+  const currentEditingId = categoriaToEdit?.id ?? '__nueva__';
+  const lastLoadedIdRef = React.useRef<string | null>(null);
+
   useEffect(() => {
+    if (lastLoadedIdRef.current === currentEditingId) return;
+    lastLoadedIdRef.current = currentEditingId;
+
     if (categoriaToEdit) {
-      setNombre(categoriaToEdit.nombre);
+      setNombre(categoriaToEdit.nombre || '');
       setDescripcion(categoriaToEdit.descripcion || '');
       setImagenUrl(categoriaToEdit.imagen_url || '');
-      setActiva(categoriaToEdit.activa);
+      setActiva(categoriaToEdit.activa ?? true);
+    } else {
+      setNombre('');
+      setDescripcion('');
+      setImagenUrl('');
+      setActiva(true);
     }
-  }, [categoriaToEdit]);
+  }, [currentEditingId]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
+    const input = e.target;
+    if (input.files && input.files[0]) {
       setUploadingImage(true);
-      const res = await subirFotoStorage(e.target.files[0], 'productos');
-      if (res.url) {
-        setImagenUrl(res.url);
+      try {
+        const res = await subirFotoStorage(input.files[0], 'productos');
+        if (res.url) {
+          setImagenUrl(res.url);
+        }
+      } catch (err) {
+        console.error('Error al subir imagen de categoría:', err);
+      } finally {
+        setUploadingImage(false);
+        input.value = '';
       }
-      setUploadingImage(false);
     }
   };
 

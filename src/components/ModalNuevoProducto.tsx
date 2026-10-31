@@ -70,14 +70,24 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
   // Input temporal para agregar valor a un atributo
   const [newValInputs, setNewValInputs] = useState<Record<number, string>>({});
 
+  const currentEditingId = productoToEdit?.id ?? '__nuevo__';
+  const lastLoadedIdRef = React.useRef<string | null>(null);
+
   useEffect(() => {
+    // Solo re-sincronizar el formulario si cambió el producto a editar (o al abrir nuevo)
+    // Esto evita que el polling en segundo plano de AdminPanel borre las fotos o datos mientras se edita
+    if (lastLoadedIdRef.current === currentEditingId) {
+      return;
+    }
+    lastLoadedIdRef.current = currentEditingId;
+
     if (productoToEdit) {
-      setNombre(productoToEdit.nombre);
+      setNombre(productoToEdit.nombre || '');
       setCategoriaId(productoToEdit.categoria_id || (categorias[0]?.id || ''));
-      setPrecio(String(productoToEdit.precio));
+      setPrecio(String(productoToEdit.precio ?? 50));
       setCosto(String(productoToEdit.costo || 0));
       setSkuGeneral(productoToEdit.sku || '');
-      setActivo(productoToEdit.activo);
+      setActivo(productoToEdit.activo ?? true);
       setCantidad(String(productoToEdit.stock ?? 10));
       setStockMinimo(String(productoToEdit.stock_minimo ?? 3));
       setDescripcion(productoToEdit.descripcion || '');
@@ -106,7 +116,14 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
       setAtributos([]);
       setVariantes([]);
     }
-  }, [productoToEdit, categorias]);
+  }, [currentEditingId]);
+
+  // Si no había categoría asignada y llegan las categorías, asignar la primera por defecto
+  useEffect(() => {
+    if (!categoriaId && categorias.length > 0) {
+      setCategoriaId(categorias[0].id);
+    }
+  }, [categorias, categoriaId]);
 
   // Stock total de tallas sumado dinámicamente
   const stockTotalTallas = useMemo(() => {
@@ -153,22 +170,37 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
 
   // Subida de imágenes a Supabase Storage
   const handleFilesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files) return;
-    const files = Array.from(e.target.files).slice(0, 4 - imagenes.length);
-    if (files.length === 0) return;
+    const input = e.target;
+    if (!input.files || input.files.length === 0) return;
 
-    setUploadingImage(true);
-    const uploadedUrls: string[] = [];
-
-    for (const file of files) {
-      const res = await subirFotoStorage(file, 'productos');
-      if (res.url) {
-        uploadedUrls.push(res.url);
-      }
+    const remainingSlots = Math.max(0, 4 - imagenes.length);
+    if (remainingSlots <= 0) {
+      alert('Ya alcanzaste el máximo de 4 fotos por producto.');
+      input.value = '';
+      return;
     }
 
-    setImagenes((prev) => [...prev, ...uploadedUrls].slice(0, 4));
-    setUploadingImage(false);
+    const files = Array.from(input.files).slice(0, remainingSlots);
+    setUploadingImage(true);
+
+    try {
+      const uploadedUrls: string[] = [];
+      for (const file of files) {
+        const res = await subirFotoStorage(file, 'productos');
+        if (res.url) {
+          uploadedUrls.push(res.url);
+        }
+      }
+
+      if (uploadedUrls.length > 0) {
+        setImagenes((prev) => [...prev, ...uploadedUrls].slice(0, 4));
+      }
+    } catch (err) {
+      console.error('Error al subir imágenes:', err);
+    } finally {
+      setUploadingImage(false);
+      input.value = '';
+    }
   };
 
   const handleAddDirectUrl = () => {
