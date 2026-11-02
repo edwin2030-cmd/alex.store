@@ -119,6 +119,8 @@ import {
   ClipboardList,
   Menu,
   ChevronRight,
+  FileText,
+  Award,
 } from 'lucide-react';
 
 interface AdminPanelProps {
@@ -209,6 +211,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [cajaMovimientosFiltro, setCajaMovimientosFiltro] = useState<'todos' | 'efectivo' | 'yappy' | 'transferencia' | 'pedidos' | 'gastos'>('todos');
   const [cierreModalFiltro, setCierreModalFiltro] = useState<'todos' | 'efectivo' | 'yappy' | 'transferencia' | 'pedidos' | 'gastos'>('todos');
 
+  // Subpestañas y filtros para reporte de ventas y dinero por día o semana dentro de Caja
+  const [cajaSubTab, setCajaSubTab] = useState<'turno' | 'reportes'>('turno');
+  const [cajaReportePeriodo, setCajaReportePeriodo] = useState<'dia' | 'semana'>('dia');
+  const [cajaReporteFecha, setCajaReporteFecha] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [cajaReporteSemanaRef, setCajaReporteSemanaRef] = useState<string>(() => new Date().toISOString().split('T')[0]);
+
   // Modal Registrar Venta Manual (con Efectivo, Yappy, Transferencia y Abono / Contra Entrega)
   const [isModalVentaManualOpen, setIsModalVentaManualOpen] = useState(false);
   const [ventaManualCliente, setVentaManualCliente] = useState('');
@@ -287,8 +295,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [clienteSeleccionadoParaPedidos, setClienteSeleccionadoParaPedidos] = useState<ClienteResumen | null>(null);
 
   // Filtros de fecha y período para Ventas
-  const [ventasFiltroPeriodo, setVentasFiltroPeriodo] = useState<'todos' | 'hoy' | 'mes' | 'ano' | 'rango'>('todos');
+  const [ventasFiltroPeriodo, setVentasFiltroPeriodo] = useState<'todos' | 'hoy' | 'semana' | 'mes' | 'ano' | 'rango'>('todos');
   const [ventasFechaExacta, setVentasFechaExacta] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [ventasSemanaRef, setVentasSemanaRef] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [ventasMesExacto, setVentasMesExacto] = useState<string>(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -580,6 +589,126 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const mins = diffMins % 60;
     if (hours === 0) return `${mins} min`;
     return `${hours}h ${mins}m`;
+  };
+
+  // Helper para calcular rango semanal exacto (Lunes a Domingo)
+  const getRangoSemana = (refDateStr: string) => {
+    const d = new Date(refDateStr + 'T12:00:00');
+    const day = d.getDay();
+    const diffToMonday = (day === 0 ? -6 : 1) - day;
+    const lunes = new Date(d);
+    lunes.setDate(d.getDate() + diffToMonday);
+    lunes.setHours(0, 0, 0, 0);
+
+    const domingo = new Date(lunes);
+    domingo.setDate(lunes.getDate() + 6);
+    domingo.setHours(23, 59, 59, 999);
+
+    const fmt = (dt: Date) =>
+      dt.toLocaleDateString('es-PA', { day: 'numeric', month: 'short' });
+    return {
+      inicio: lunes.getTime(),
+      fin: domingo.getTime(),
+      etiqueta: `${fmt(lunes)} al ${fmt(domingo)}, ${domingo.getFullYear()}`,
+      lunesStr: lunes.toISOString().split('T')[0],
+      domingoStr: domingo.toISOString().split('T')[0],
+    };
+  };
+
+  // Helper para calcular el ranking de productos más vendidos en un período
+  const calcularTopProductosVendidos = (ventasList: Venta[], pedidosList: Pedido[] = []) => {
+    const map: Record<
+      string,
+      {
+        id: string;
+        nombre: string;
+        cantidadTotal: number;
+        montoTotal: number;
+        imagen_url?: string;
+        categoria?: string;
+        desgloseTallas: Record<string, number>;
+      }
+    > = {};
+
+    // 1. Sumar items de ventas
+    ventasList.forEach((v) => {
+      if (Array.isArray(v.items)) {
+        v.items.forEach((it) => {
+          const prodId = it.producto_id || it.id || it.nombre;
+          const cant = Math.max(1, Number(it.cantidad) || 1);
+          const precio = Number(it.precio) || 0;
+          const sub = Number(it.subtotal) || cant * precio;
+
+          const prodRef = productos.find((p) => p.id === prodId || p.nombre === it.nombre);
+          const img = it.imagen_url || prodRef?.imagen_url || prodRef?.imagenes?.[0] || '';
+          const cat = prodRef ? (categorias.find((c) => c.id === prodRef.categoria_id)?.nombre || 'General') : undefined;
+
+          if (!map[prodId]) {
+            map[prodId] = {
+              id: prodId,
+              nombre: it.nombre || prodRef?.nombre || 'Producto',
+              cantidadTotal: 0,
+              montoTotal: 0,
+              imagen_url: img,
+              categoria: cat,
+              desgloseTallas: {},
+            };
+          }
+          map[prodId].cantidadTotal += cant;
+          map[prodId].montoTotal += sub;
+          if (!map[prodId].imagen_url && img) map[prodId].imagen_url = img;
+          if (!map[prodId].categoria && cat) map[prodId].categoria = cat;
+
+          const talla = it.talla || it.variante_titulo || (it.opciones?.Talla);
+          if (talla) {
+            map[prodId].desgloseTallas[talla] = (map[prodId].desgloseTallas[talla] || 0) + cant;
+          }
+        });
+      }
+    });
+
+    // 2. Sumar items de pedidos web aprobados si no están en ventas
+    pedidosList.forEach((p) => {
+      if (Array.isArray(p.items)) {
+        const codigoVenta = p.codigo.startsWith('VNT-') ? p.codigo : `VNT-${p.codigo.replace(/[^0-9]/g, '')}`;
+        const yaEnVentas = ventasList.some((v) => v.codigo === codigoVenta || v.pedido_id === p.id);
+        if (!yaEnVentas) {
+          p.items.forEach((it) => {
+            const prodId = it.producto_id || it.id || it.nombre;
+            const cant = Math.max(1, Number(it.cantidad) || 1);
+            const precio = Number(it.precio) || 0;
+            const sub = Number(it.subtotal) || cant * precio;
+
+            const prodRef = productos.find((pr) => pr.id === prodId || pr.nombre === it.nombre);
+            const img = it.imagen_url || prodRef?.imagen_url || prodRef?.imagenes?.[0] || '';
+            const cat = prodRef ? (categorias.find((c) => c.id === prodRef.categoria_id)?.nombre || 'General') : undefined;
+
+            if (!map[prodId]) {
+              map[prodId] = {
+                id: prodId,
+                nombre: it.nombre || prodRef?.nombre || 'Producto',
+                cantidadTotal: 0,
+                montoTotal: 0,
+                imagen_url: img,
+                categoria: cat,
+                desgloseTallas: {},
+              };
+            }
+            map[prodId].cantidadTotal += cant;
+            map[prodId].montoTotal += sub;
+            if (!map[prodId].imagen_url && img) map[prodId].imagen_url = img;
+            if (!map[prodId].categoria && cat) map[prodId].categoria = cat;
+
+            const talla = it.talla || it.variante_titulo || (it.opciones?.Talla);
+            if (talla) {
+              map[prodId].desgloseTallas[talla] = (map[prodId].desgloseTallas[talla] || 0) + cant;
+            }
+          });
+        }
+      }
+    });
+
+    return Object.values(map).sort((a, b) => b.cantidadTotal - a.cantidadTotal || b.montoTotal - a.montoTotal);
   };
 
   // Extracción consolidada de clientes basada prioritariamente en el NÚMERO DE TELÉFONO
@@ -1370,6 +1499,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         registrado_por: cajeroActual,
         items: itemsToSave,
         tipo: 'manual',
+        descripcion: ventaManualNotas.trim() || undefined,
         notas:
           ventaManualNotas.trim() ||
           (itemsToSave.length > 0
@@ -2642,6 +2772,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   if (ventasFiltroPeriodo === 'hoy') {
                     return yyyyMmDd === ventasFechaExacta;
                   }
+                  if (ventasFiltroPeriodo === 'semana') {
+                    const rangoSem = getRangoSemana(ventasSemanaRef);
+                    const vTime = dateObj.getTime();
+                    return vTime >= rangoSem.inicio && vTime <= rangoSem.fin;
+                  }
                   if (ventasFiltroPeriodo === 'mes') {
                     return yyyyMm === ventasMesExacto;
                   }
@@ -2739,7 +2874,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </div>
                     )}
 
-                    {/* Barra de Filtro de Período (Día / Mes / Año / Rango) y Botones de Eliminación Masiva */}
+                    {/* Barra de Filtro de Período (Día / Semana / Mes / Año / Rango) */}
                     <div className="bg-[#141210] rounded-2xl p-3.5 border border-[#26221E] flex flex-wrap items-center justify-between gap-3 text-xs">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[10px] font-black uppercase text-[#E6C687] tracking-wider">
@@ -2751,6 +2886,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             [
                               { id: 'todos', label: 'Todas' },
                               { id: 'hoy', label: 'Por Día' },
+                              { id: 'semana', label: 'Por Semana' },
                               { id: 'mes', label: 'Por Mes' },
                               { id: 'ano', label: 'Por Año' },
                               { id: 'rango', label: 'Rango Fechas' },
@@ -2762,7 +2898,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               onClick={() => setVentasFiltroPeriodo(tab.id)}
                               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                                 ventasFiltroPeriodo === tab.id
-                                  ? 'bg-[#C59A4D] text-[#141312] font-black shadow-xs'
+                                   ? 'bg-[#C59A4D] text-[#141312] font-black shadow-xs'
                                   : 'text-[#A69F93] hover:text-white'
                               }`}
                             >
@@ -2783,6 +2919,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             />
                           </div>
                         )}
+
+                        {ventasFiltroPeriodo === 'semana' && (() => {
+                          const rSem = getRangoSemana(ventasSemanaRef);
+                          return (
+                            <div className="flex items-center gap-1.5 bg-[#1A1816] px-3 py-1.5 rounded-xl border border-[#2D2822] flex-wrap">
+                              <span className="text-[10px] text-[#A69F93] font-bold">Semana:</span>
+                              <input
+                                type="date"
+                                value={ventasSemanaRef}
+                                onChange={(e) => setVentasSemanaRef(e.target.value)}
+                                className="bg-transparent text-xs text-white focus:outline-none cursor-pointer font-mono"
+                              />
+                              <span className="text-[10px] text-[#E6C687] font-bold">({rSem.etiqueta})</span>
+                            </div>
+                          );
+                        })()}
 
                         {ventasFiltroPeriodo === 'mes' && (
                           <div className="flex items-center gap-1.5 bg-[#1A1816] px-3 py-1.5 rounded-xl border border-[#2D2822]">
@@ -2863,6 +3015,106 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         </div>
                       )}
                     </div>
+
+                    {/* Widget Lo Más Vendido en este Período */}
+                    {(() => {
+                      const topPeriodo = calcularTopProductosVendidos(ventasFiltradasPorPeriodo);
+                      if (topPeriodo.length === 0) return null;
+                      const best = topPeriodo[0];
+                      return (
+                        <div className="bg-[#141210] rounded-2xl p-3.5 sm:p-4 border border-amber-900/50 shadow-md space-y-3">
+                          <div className="flex items-center justify-between pb-2 border-b border-[#26221E]">
+                            <span className="text-xs font-black uppercase text-[#E6C687] flex items-center gap-1.5 tracking-wider">
+                              <span>🏆</span>
+                              <span>LO QUE MÁS SE VENDIÓ EN ESTE PERÍODO</span>
+                            </span>
+                            <span className="text-[11px] text-[#A69F93] font-bold">
+                              {topPeriodo.length} producto(s) vendidos
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            {/* Producto #1 Estrella */}
+                            <div className="sm:col-span-2 p-3 rounded-xl bg-[#1A1816] border border-amber-500/50 flex items-center gap-3">
+                              {best.imagen_url ? (
+                                <img
+                                  src={best.imagen_url}
+                                  alt={best.nombre}
+                                  onClick={() => setZoomedProductImage({ url: best.imagen_url!, title: best.nombre })}
+                                  className="w-14 h-16 object-cover rounded-xl bg-black border border-amber-500/50 cursor-pointer hover:opacity-80 shrink-0"
+                                  title="Click para ampliar"
+                                />
+                              ) : (
+                                <div className="w-14 h-16 rounded-xl bg-black border border-amber-500/50 flex items-center justify-center text-xs font-bold text-[#E6C687] shrink-0">
+                                  👑 #1
+                                </div>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="px-2 py-0.5 rounded-full bg-amber-500 text-black text-[10px] font-black uppercase">
+                                    🥇 Más Vendido
+                                  </span>
+                                  {best.categoria && (
+                                    <span className="text-[10px] text-[#A69F93] font-bold">({best.categoria})</span>
+                                  )}
+                                </div>
+                                <strong className="text-sm font-extrabold text-white block truncate mt-1">
+                                  {best.nombre}
+                                </strong>
+                                <div className="flex items-center gap-2 mt-1 text-xs flex-wrap">
+                                  <span className="font-black text-[#E6C687]">
+                                    {best.cantidadTotal} prendas vendidas
+                                  </span>
+                                  {userRole !== 'cajero' && (
+                                    <>
+                                      <span className="text-[#A69F93]">•</span>
+                                      <span className="font-black text-emerald-400">
+                                        ${best.montoTotal.toFixed(2)} recaudado
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
+                                {Object.keys(best.desgloseTallas).length > 0 && (
+                                  <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                                    <span className="text-[9px] text-[#A69F93] font-bold uppercase">Tallas:</span>
+                                    {Object.entries(best.desgloseTallas).map(([t, q]) => (
+                                      <span key={t} className="px-1.5 py-0.2 rounded bg-[#13110F] border border-[#2D2822] text-[9px] text-[#E6C687] font-bold font-mono">
+                                        {t}: {q}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Otros productos del Top 2 y 3 */}
+                            <div className="space-y-1.5">
+                              {topPeriodo.slice(1, 4).map((p, idx) => (
+                                <div key={p.id} className="p-2 rounded-xl bg-[#1A1816] border border-[#26221E] flex items-center justify-between gap-2 text-xs">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="w-5 h-5 rounded-full bg-[#141210] border border-[#2D2822] flex items-center justify-center font-bold text-[10px] text-[#E6C687] shrink-0">
+                                      #{idx + 2}
+                                    </span>
+                                    <span className="font-bold text-white truncate text-[11px]">{p.nombre}</span>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <span className="font-extrabold text-[#E6C687] block text-[11px]">{p.cantidadTotal} un.</span>
+                                    {userRole !== 'cajero' && (
+                                      <span className="text-[10px] text-emerald-400">${p.montoTotal.toFixed(2)}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                              {topPeriodo.length <= 1 && (
+                                <div className="p-3 text-center text-[11px] text-[#7A7368] italic">
+                                  No hay más productos vendidos en este período.
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Ventas Table or Empty state */}
                     {ventasFiltradasPorPeriodo.length === 0 ? (
@@ -2970,6 +3222,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   <span className="text-[#A69F93] font-mono text-[11px] block mt-0.5">
                                     📞 {v.cliente_telefono || '—'}
                                   </span>
+                                  {(v.descripcion || v.notas) && (
+                                    <div className="mt-2 p-2 rounded-xl bg-[#181614] border border-[#332E27] text-[10px] text-amber-200/90 leading-snug">
+                                      <span className="font-black text-[#E6C687] block text-[9px] uppercase tracking-wider mb-0.5">📝 Descripción:</span>
+                                      <span className="text-white/95">{v.descripcion || v.notas}</span>
+                                    </div>
+                                  )}
                                 </td>
 
                                 <td className="py-3.5 px-4 align-top">
@@ -3184,8 +3442,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
                 </div>
 
-                {/* Resumen del turno actual si está abierto */}
-                {sesionCaja && sesionCaja.estado === 'abierta' && (() => {
+                {/* Subpestañas dentro de Caja: Turno Activo vs Ventas & Dinero por Día / Semana */}
+                <div className="flex items-center gap-2 pt-4 border-t border-[#26221E] flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setCajaSubTab('turno')}
+                    className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
+                      cajaSubTab === 'turno'
+                        ? 'bg-[#C59A4D] text-[#141312] shadow-md font-black'
+                        : 'bg-[#181614] text-[#A69F93] hover:text-white border border-[#2D2822]'
+                    }`}
+                  >
+                    <Wallet className="w-4 h-4" />
+                    <span>Turno Activo & Gaveta</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCajaSubTab('reportes')}
+                    className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
+                      cajaSubTab === 'reportes'
+                        ? 'bg-[#C59A4D] text-[#141312] shadow-md font-black'
+                        : 'bg-[#181614] text-[#A69F93] hover:text-white border border-[#2D2822]'
+                    }`}
+                  >
+                    <TrendingUp className="w-4 h-4" />
+                    <span>📊 Ventas & Dinero por Día / Semana</span>
+                  </button>
+                </div>
+
+                {/* Resumen del turno actual si la subpestaña es 'turno' y la caja está abierta */}
+                {cajaSubTab === 'turno' && sesionCaja && sesionCaja.estado === 'abierta' && (() => {
                   const fechaInicio = sesionCaja.fecha_apertura ? new Date(sesionCaja.fecha_apertura).getTime() : 0;
                   
                   // 1. Todas las ventas del turno
@@ -3383,6 +3669,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                         {v.items && v.items.length > 0 && ` • ${v.items.length} prenda(s)`}
                                       </span>
 
+                                      {/* Descripción de la venta ingresada */}
+                                      {(v.descripcion || v.notas) && (
+                                        <div className="mt-1.5 p-1.5 rounded-lg bg-[#141210] border border-[#26221E] text-[10px] text-amber-200/90 flex items-start gap-1.5">
+                                          <span className="shrink-0">📝</span>
+                                          <span className="text-white/95">
+                                            <strong className="text-[#E6C687] mr-1">Descripción:</strong>
+                                            {v.descripcion || v.notas}
+                                          </span>
+                                        </div>
+                                      )}
+
                                       {/* Thumbnails con foto y talla de productos */}
                                       {v.items && v.items.length > 0 && (
                                         <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
@@ -3521,116 +3818,737 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </div>
                   );
                 })()}
-              </div>
 
-              {/* Historial de Turnos de Caja */}
-              <div className="bg-[#13110F] rounded-3xl border border-[#26221E] overflow-hidden shadow-xl space-y-4 p-5 sm:p-6 text-white">
-                <div className="flex items-center justify-between pb-3 border-b border-[#26221E]">
-                  <div>
-                    <h3 className="font-black text-sm text-white">Historial de Turnos & Arqueos de Caja</h3>
-                    <p className="text-[11px] text-[#A69F93]">Registro persistente de aperturas, cierres, duraciones y diferencias de efectivo</p>
-                  </div>
-                  <span className="text-xs font-bold text-[#A69F93]">{historialCaja.length} registros</span>
-                </div>
-
-                {historialCaja.length === 0 ? (
-                  <div className="py-10 text-center text-xs text-[#7A7368]">
-                    No hay turnos de caja registrados aún. Abre la caja para comenzar el primer turno.
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[850px] text-left text-xs">
-                      <thead className="bg-[#1A1816] border-b border-[#26221E] text-[10px] font-black uppercase text-[#A69F93] tracking-wider">
-                        <tr>
-                          <th className="py-3 px-4">Estado</th>
-                          <th className="py-3 px-4">Apertura</th>
-                          <th className="py-3 px-4">Duración</th>
-                          <th className="py-3 px-4">Abierto por</th>
-                          {userRole !== 'cajero' && (
-                            <>
-                              <th className="py-3 px-4 text-right">Esperado</th>
-                              <th className="py-3 px-4 text-right">Contado (Real)</th>
-                              <th className="py-3 px-4 text-right">Diferencia</th>
-                            </>
-                          )}
-                          <th className="py-3 px-4">Cierre</th>
-                          <th className="py-3 px-4">Notas</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#221F1C]">
-                        {historialCaja.map((reg) => (
-                          <tr key={reg.id} className="hover:bg-[#1A1816] transition-colors">
-                            <td className="py-3.5 px-4">
-                              <span
-                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                                  reg.estado === 'abierta'
-                                    ? 'bg-emerald-950/70 text-emerald-400 border border-emerald-800'
-                                    : 'bg-[#25221F] text-slate-300 border border-[#332E27]'
-                                }`}
-                              >
-                                {reg.estado === 'abierta' ? '🟢 Abierta' : 'Cerrada'}
-                              </span>
-                            </td>
-                            <td className="py-3.5 px-4 font-mono text-[11px] text-[#A69F93]">
-                              {reg.fecha_apertura ? new Date(reg.fecha_apertura).toLocaleString('es-PA') : '—'}
-                            </td>
-                            <td className="py-3.5 px-4 font-mono text-[11px] font-bold text-[#E6C687]">
-                              {reg.estado === 'abierta'
-                                ? `⏱️ ${getDuracionCaja(reg.fecha_apertura)}`
-                                : getDuracionCaja(reg.fecha_apertura, reg.fecha_cierre || undefined)}
-                            </td>
-                            <td className="py-3.5 px-4 font-bold text-white">
-                              {reg.abierto_por}
-                            </td>
-                            {userRole !== 'cajero' && (
-                              <>
-                                <td className="py-3.5 px-4 text-right font-medium text-[#A69F93]">
-                                  {reg.monto_esperado !== undefined && reg.monto_esperado !== null ? `$${Number(reg.monto_esperado).toFixed(2)}` : '—'}
-                                </td>
-                                <td className="py-3.5 px-4 text-right font-black text-white">
-                                  {reg.monto_final_real !== undefined && reg.monto_final_real !== null ? `$${Number(reg.monto_final_real).toFixed(2)}` : '—'}
-                                </td>
-                                <td className="py-3.5 px-4 text-right font-black">
-                                  {reg.diferencia !== undefined && reg.diferencia !== null && !isNaN(Number(reg.diferencia)) ? (
-                                    <span
-                                      className={`px-2 py-0.5 rounded-md text-[11px] font-black ${
-                                        Number(reg.diferencia) === 0
-                                          ? 'text-emerald-400 bg-emerald-950/60 border border-emerald-800/60'
-                                          : Number(reg.diferencia) > 0
-                                          ? 'text-blue-400 bg-blue-950/60 border border-blue-800/60'
-                                          : 'text-rose-400 bg-rose-950/60 border border-rose-800/60'
-                                      }`}
-                                    >
-                                      {Number(reg.diferencia) > 0 ? `+${Number(reg.diferencia).toFixed(2)}` : `${Number(reg.diferencia).toFixed(2)}`}
-                                    </span>
-                                  ) : (
-                                    '—'
-                                  )}
-                                </td>
-                              </>
-                            )}
-                            <td className="py-3.5 px-4 text-[#A69F93] text-[11px]">
-                              {reg.fecha_cierre ? (
-                                <div>
-                                  <span>{new Date(reg.fecha_cierre).toLocaleString('es-PA')}</span>
-                                  {reg.cerrado_por && (
-                                    <span className="block text-[10px] text-[#7A7368]">por {reg.cerrado_por}</span>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-emerald-400 font-bold">En curso...</span>
-                              )}
-                            </td>
-                            <td className="py-3.5 px-4 text-[#A69F93] text-[11px] max-w-[200px] truncate">
-                              {reg.notas || '—'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                {/* Mensaje de caja cerrada si subpestaña es 'turno' */}
+                {cajaSubTab === 'turno' && (!sesionCaja || sesionCaja.estado !== 'abierta') && (
+                  <div className="pt-6 border-t border-[#26221E] text-center py-6 space-y-2">
+                    <div className="w-12 h-12 rounded-2xl bg-[#1C1A17] border border-[#2D2822] flex items-center justify-center mx-auto text-[#A69F93]">
+                      <Lock className="w-5 h-5 text-amber-500/70" />
+                    </div>
+                    <h4 className="text-sm font-bold text-white">La caja se encuentra cerrada</h4>
+                    <p className="text-xs text-[#A69F93] max-w-sm mx-auto">
+                      No hay un turno activo. Abre la caja para comenzar o explora las ventas y dinero por Día / Semana en la pestaña superior.
+                    </p>
                   </div>
                 )}
               </div>
+
+              {/* Historial de Turnos de Caja (Visible en subpestaña turno) */}
+              {cajaSubTab === 'turno' && (
+                <div className="bg-[#13110F] rounded-3xl border border-[#26221E] overflow-hidden shadow-xl space-y-4 p-5 sm:p-6 text-white">
+                  <div className="flex items-center justify-between pb-3 border-b border-[#26221E]">
+                    <div>
+                      <h3 className="font-black text-sm text-white">Historial de Turnos & Arqueos de Caja</h3>
+                      <p className="text-[11px] text-[#A69F93]">Registro persistente de aperturas, cierres, duraciones y diferencias de efectivo</p>
+                    </div>
+                    <span className="text-xs font-bold text-[#A69F93]">{historialCaja.length} registros</span>
+                  </div>
+
+                  {historialCaja.length === 0 ? (
+                    <div className="py-10 text-center text-xs text-[#7A7368]">
+                      No hay turnos de caja registrados aún. Abre la caja para comenzar el primer turno.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[850px] text-left text-xs">
+                        <thead className="bg-[#1A1816] border-b border-[#26221E] text-[10px] font-black uppercase text-[#A69F93] tracking-wider">
+                          <tr>
+                            <th className="py-3 px-4">Estado</th>
+                            <th className="py-3 px-4">Apertura</th>
+                            <th className="py-3 px-4">Duración</th>
+                            <th className="py-3 px-4">Abierto por</th>
+                            {userRole !== 'cajero' && (
+                              <>
+                                <th className="py-3 px-4 text-right">Esperado</th>
+                                <th className="py-3 px-4 text-right">Contado (Real)</th>
+                                <th className="py-3 px-4 text-right">Diferencia</th>
+                              </>
+                            )}
+                            <th className="py-3 px-4">Cierre</th>
+                            <th className="py-3 px-4">Notas</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#221F1C]">
+                          {historialCaja.map((reg) => (
+                            <tr key={reg.id} className="hover:bg-[#1A1816] transition-colors">
+                              <td className="py-3.5 px-4">
+                                <span
+                                  className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                                    reg.estado === 'abierta'
+                                      ? 'bg-emerald-950/70 text-emerald-400 border border-emerald-800'
+                                      : 'bg-[#25221F] text-slate-300 border border-[#332E27]'
+                                  }`}
+                                >
+                                  {reg.estado === 'abierta' ? '🟢 Abierta' : 'Cerrada'}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4 font-mono text-[11px] text-[#A69F93]">
+                                {reg.fecha_apertura ? new Date(reg.fecha_apertura).toLocaleString('es-PA') : '—'}
+                              </td>
+                              <td className="py-3.5 px-4 font-mono text-[11px] font-bold text-[#E6C687]">
+                                {reg.estado === 'abierta'
+                                  ? `⏱️ ${getDuracionCaja(reg.fecha_apertura)}`
+                                  : getDuracionCaja(reg.fecha_apertura, reg.fecha_cierre || undefined)}
+                              </td>
+                              <td className="py-3.5 px-4 font-bold text-white">
+                                {reg.abierto_por}
+                              </td>
+                              {userRole !== 'cajero' && (
+                                <>
+                                  <td className="py-3.5 px-4 text-right font-medium text-[#A69F93]">
+                                    {reg.monto_esperado !== undefined && reg.monto_esperado !== null ? `$${Number(reg.monto_esperado).toFixed(2)}` : '—'}
+                                  </td>
+                                  <td className="py-3.5 px-4 text-right font-black text-white">
+                                    {reg.monto_final_real !== undefined && reg.monto_final_real !== null ? `$${Number(reg.monto_final_real).toFixed(2)}` : '—'}
+                                  </td>
+                                  <td className="py-3.5 px-4 text-right font-black">
+                                    {reg.diferencia !== undefined && reg.diferencia !== null && !isNaN(Number(reg.diferencia)) ? (
+                                      <span
+                                        className={`px-2 py-0.5 rounded-md text-[11px] font-black ${
+                                          Number(reg.diferencia) === 0
+                                            ? 'text-emerald-400 bg-emerald-950/60 border border-emerald-800/60'
+                                            : Number(reg.diferencia) > 0
+                                            ? 'text-blue-400 bg-blue-950/60 border border-blue-800/60'
+                                            : 'text-rose-400 bg-rose-950/60 border border-rose-800/60'
+                                        }`}
+                                      >
+                                        {Number(reg.diferencia) > 0 ? `+${Number(reg.diferencia).toFixed(2)}` : `${Number(reg.diferencia).toFixed(2)}`}
+                                      </span>
+                                    ) : (
+                                      '—'
+                                    )}
+                                  </td>
+                                </>
+                              )}
+                              <td className="py-3.5 px-4 text-[#A69F93] text-[11px]">
+                                {reg.fecha_cierre ? (
+                                  <div>
+                                    <span>{new Date(reg.fecha_cierre).toLocaleString('es-PA')}</span>
+                                    {reg.cerrado_por && (
+                                      <span className="block text-[10px] text-[#7A7368]">por {reg.cerrado_por}</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-emerald-400 font-bold">En curso...</span>
+                                )}
+                              </td>
+                              <td className="py-3.5 px-4 text-[#A69F93] text-[11px] max-w-[200px] truncate">
+                                {reg.notas || '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ======================================================== */}
+              {/* SUBPESTAÑA REPORTE: VENTAS Y DINERO POR DÍA O SEMANA */}
+              {/* ======================================================== */}
+              {cajaSubTab === 'reportes' && (() => {
+                const rangoSemana = getRangoSemana(cajaReporteSemanaRef);
+
+                const matchDia = (isoStr?: string | null) => {
+                  if (!isoStr) return false;
+                  if (isoStr.startsWith(cajaReporteFecha)) return true;
+                  const d = new Date(isoStr);
+                  if (isNaN(d.getTime())) return false;
+                  const y = d.getFullYear();
+                  const m = String(d.getMonth() + 1).padStart(2, '0');
+                  const day = String(d.getDate()).padStart(2, '0');
+                  return `${y}-${m}-${day}` === cajaReporteFecha;
+                };
+
+                const matchSemana = (isoStr?: string | null) => {
+                  if (!isoStr) return false;
+                  const t = new Date(isoStr).getTime();
+                  return !isNaN(t) && t >= rangoSemana.inicio && t <= rangoSemana.fin;
+                };
+
+                const ventasFiltradas = ventas.filter((v) =>
+                  cajaReportePeriodo === 'dia' ? matchDia(v.creado_en) : matchSemana(v.creado_en)
+                );
+
+                const pedidosAprobadosFiltrados = pedidos.filter(
+                  (p) =>
+                    (p.estado === 'aprobado' || p.estado === 'entregado') &&
+                    (cajaReportePeriodo === 'dia'
+                      ? matchDia(p.revisado_en) || matchDia(p.creado_en)
+                      : matchSemana(p.revisado_en) || matchSemana(p.creado_en))
+                );
+
+                const gastosFiltrados = gastos.filter((g) =>
+                  cajaReportePeriodo === 'dia' ? matchDia(g.creado_en || g.fecha) : matchSemana(g.creado_en || g.fecha)
+                );
+
+                // Cálculos de Dinero
+                const totalVentasMonto = ventasFiltradas.reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+                const efectivoMonto = ventasFiltradas
+                  .filter((v) => v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega')
+                  .reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+                const yappyMonto = ventasFiltradas
+                  .filter((v) => v.metodo_pago === 'yappy')
+                  .reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+                const transfMonto = ventasFiltradas
+                  .filter((v) => v.metodo_pago === 'transferencia')
+                  .reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+                const otrosMonto = ventasFiltradas
+                  .filter((v) => !['efectivo', 'abono', 'contra_entrega', 'yappy', 'transferencia'].includes(v.metodo_pago))
+                  .reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+
+                const totalGastosMonto = gastosFiltrados.reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
+                const balanceNeto = totalVentasMonto - totalGastosMonto;
+
+                const totalPrendasVendidas = ventasFiltradas.reduce((acc, v) => {
+                  if (Array.isArray(v.items)) {
+                    return acc + v.items.reduce((s, it) => s + Math.max(1, Number(it.cantidad) || 1), 0);
+                  }
+                  return acc;
+                }, 0);
+
+                // Ranking de productos más vendidos
+                const rankingTop = calcularTopProductosVendidos(ventasFiltradas, pedidosAprobadosFiltrados);
+                const productoEstrella = rankingTop[0] || null;
+                const otrosTop = rankingTop.slice(1, 5);
+
+                const hoyStr = new Date().toISOString().split('T')[0];
+                const ayerDate = new Date();
+                ayerDate.setDate(ayerDate.getDate() - 1);
+                const ayerStr = ayerDate.toISOString().split('T')[0];
+
+                const semanaPasadaDate = new Date();
+                semanaPasadaDate.setDate(semanaPasadaDate.getDate() - 7);
+                const semanaPasadaStr = semanaPasadaDate.toISOString().split('T')[0];
+
+                const fechaFormateada = new Date(cajaReporteFecha + 'T12:00:00').toLocaleDateString('es-PA', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric',
+                });
+
+                return (
+                  <div className="space-y-6">
+                    {/* Barra de Filtro de Período: Día vs Semana */}
+                    <div className="bg-[#13110F] rounded-3xl p-5 sm:p-6 border border-[#26221E] shadow-xl space-y-4">
+                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                            <span className="text-[10px] font-black uppercase tracking-wider text-[#A69F93]">
+                              AUDITORÍA DE DINERO & VENTAS
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-800 text-emerald-400 text-[10px] font-black">
+                              🌐 Multi-Dispositivo Sincronizado
+                            </span>
+                          </div>
+                          <h3 className="text-xl sm:text-2xl font-black text-white mt-1">
+                            {cajaReportePeriodo === 'dia'
+                              ? `Ventas del Día: ${fechaFormateada}`
+                              : `Ventas de la Semana: ${rangoSemana.etiqueta}`}
+                          </h3>
+                          <p className="text-xs text-[#A69F93] mt-0.5">
+                            Consulta la entrada de efectivo, Yappy, transferencias, gastos y las prendas que más se vendieron en este rango de tiempo.
+                          </p>
+                        </div>
+
+                        {/* Controles de selección de período */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Toggle Día vs Semana */}
+                          <div className="bg-[#1C1A17] p-1 rounded-2xl border border-[#2D2822] flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setCajaReportePeriodo('dia')}
+                              className={`px-3.5 py-1.5 rounded-xl text-xs font-black tracking-wider transition-all cursor-pointer ${
+                                cajaReportePeriodo === 'dia'
+                                  ? 'bg-[#C59A4D] text-[#141312] shadow-sm'
+                                  : 'text-[#A69F93] hover:text-white'
+                              }`}
+                            >
+                              🗓️ POR DÍA
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCajaReportePeriodo('semana')}
+                              className={`px-3.5 py-1.5 rounded-xl text-xs font-black tracking-wider transition-all cursor-pointer ${
+                                cajaReportePeriodo === 'semana'
+                                  ? 'bg-[#C59A4D] text-[#141312] shadow-sm'
+                                  : 'text-[#A69F93] hover:text-white'
+                              }`}
+                            >
+                              📆 POR SEMANA
+                            </button>
+                          </div>
+
+                          {/* Botones rápidos y Selector de fecha */}
+                          {cajaReportePeriodo === 'dia' ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => setCajaReporteFecha(hoyStr)}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                                  cajaReporteFecha === hoyStr
+                                    ? 'bg-[#C59A4D]/20 border-[#C59A4D] text-[#E6C687]'
+                                    : 'bg-[#1C1A17] border-[#2D2822] text-[#A69F93] hover:text-white'
+                                }`}
+                              >
+                                Hoy
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCajaReporteFecha(ayerStr)}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                                  cajaReporteFecha === ayerStr
+                                    ? 'bg-[#C59A4D]/20 border-[#C59A4D] text-[#E6C687]'
+                                    : 'bg-[#1C1A17] border-[#2D2822] text-[#A69F93] hover:text-white'
+                                }`}
+                              >
+                                Ayer
+                              </button>
+                              <div className="flex items-center gap-1.5 bg-[#1C1A17] px-3 py-1.5 rounded-xl border border-[#2D2822]">
+                                <Calendar className="w-3.5 h-3.5 text-[#C59A4D]" />
+                                <input
+                                  type="date"
+                                  value={cajaReporteFecha}
+                                  onChange={(e) => e.target.value && setCajaReporteFecha(e.target.value)}
+                                  className="bg-transparent text-xs text-white font-mono focus:outline-none cursor-pointer"
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => setCajaReporteSemanaRef(hoyStr)}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                                  cajaReporteSemanaRef === hoyStr
+                                    ? 'bg-[#C59A4D]/20 border-[#C59A4D] text-[#E6C687]'
+                                    : 'bg-[#1C1A17] border-[#2D2822] text-[#A69F93] hover:text-white'
+                                }`}
+                              >
+                                Esta Semana
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCajaReporteSemanaRef(semanaPasadaStr)}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                                  cajaReporteSemanaRef === semanaPasadaStr
+                                    ? 'bg-[#C59A4D]/20 border-[#C59A4D] text-[#E6C687]'
+                                    : 'bg-[#1C1A17] border-[#2D2822] text-[#A69F93] hover:text-white'
+                                }`}
+                              >
+                                Semana Pasada
+                              </button>
+                              <div className="flex items-center gap-1.5 bg-[#1C1A17] px-3 py-1.5 rounded-xl border border-[#2D2822]">
+                                <Calendar className="w-3.5 h-3.5 text-[#C59A4D]" />
+                                <input
+                                  type="date"
+                                  value={cajaReporteSemanaRef}
+                                  onChange={(e) => e.target.value && setCajaReporteSemanaRef(e.target.value)}
+                                  className="bg-transparent text-xs text-white font-mono focus:outline-none cursor-pointer"
+                                  title="Selecciona cualquier día de la semana deseada"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Resumen Financiero del Período (6 Métricas de Dinero) */}
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+                      {/* 1. Total Facturado */}
+                      <div className="bg-[#13110F] rounded-2xl p-4 border border-emerald-900/50 shadow-md">
+                        <div className="flex items-center justify-between text-[#A69F93] text-[10px] font-black uppercase tracking-wider mb-1">
+                          <span>Total Ventas</span>
+                          <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                        </div>
+                        <div className="text-xl sm:text-2xl font-black text-emerald-400">
+                          ${totalVentasMonto.toFixed(2)}
+                        </div>
+                        <div className="text-[10px] text-[#A69F93] mt-1 font-medium">
+                          {ventasFiltradas.length} ventas • {totalPrendasVendidas} prendas
+                        </div>
+                      </div>
+
+                      {/* 2. Efectivo */}
+                      <div className="bg-[#13110F] rounded-2xl p-4 border border-[#26221E] shadow-md">
+                        <div className="flex items-center justify-between text-[#A69F93] text-[10px] font-black uppercase tracking-wider mb-1">
+                          <span>Efectivo</span>
+                          <span>💵</span>
+                        </div>
+                        <div className="text-xl sm:text-2xl font-black text-white">
+                          ${efectivoMonto.toFixed(2)}
+                        </div>
+                        <div className="text-[10px] text-[#A69F93] mt-1">
+                          En gaveta física
+                        </div>
+                      </div>
+
+                      {/* 3. Yappy */}
+                      <div className="bg-[#13110F] rounded-2xl p-4 border border-[#26221E] shadow-md">
+                        <div className="flex items-center justify-between text-[#A69F93] text-[10px] font-black uppercase tracking-wider mb-1">
+                          <span>Yappy</span>
+                          <span className="text-sky-400 font-bold">Y</span>
+                        </div>
+                        <div className="text-xl sm:text-2xl font-black text-sky-400">
+                          ${yappyMonto.toFixed(2)}
+                        </div>
+                        <div className="text-[10px] text-[#A69F93] mt-1">
+                          Pagos digitales
+                        </div>
+                      </div>
+
+                      {/* 4. Transferencia */}
+                      <div className="bg-[#13110F] rounded-2xl p-4 border border-[#26221E] shadow-md">
+                        <div className="flex items-center justify-between text-[#A69F93] text-[10px] font-black uppercase tracking-wider mb-1">
+                          <span>Transferencia</span>
+                          <span>🏦</span>
+                        </div>
+                        <div className="text-xl sm:text-2xl font-black text-amber-300">
+                          ${transfMonto.toFixed(2)}
+                        </div>
+                        <div className="text-[10px] text-[#A69F93] mt-1">
+                          Banco directo
+                        </div>
+                      </div>
+
+                      {/* 5. Gastos */}
+                      <div className="bg-[#13110F] rounded-2xl p-4 border border-rose-900/40 shadow-md">
+                        <div className="flex items-center justify-between text-[#A69F93] text-[10px] font-black uppercase tracking-wider mb-1">
+                          <span>Gastos</span>
+                          <span className="w-2 h-2 rounded-full bg-rose-400"></span>
+                        </div>
+                        <div className="text-xl sm:text-2xl font-black text-rose-400">
+                          -${totalGastosMonto.toFixed(2)}
+                        </div>
+                        <div className="text-[10px] text-[#A69F93] mt-1">
+                          {gastosFiltrados.length} salidas de dinero
+                        </div>
+                      </div>
+
+                      {/* 6. Balance Neto */}
+                      <div className="bg-[#13110F] rounded-2xl p-4 border border-[#26221E] shadow-md">
+                        <div className="flex items-center justify-between text-[#A69F93] text-[10px] font-black uppercase tracking-wider mb-1">
+                          <span>Balance Neto</span>
+                          <span>📊</span>
+                        </div>
+                        <div
+                          className={`text-xl sm:text-2xl font-black ${
+                            balanceNeto >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                          }`}
+                        >
+                          ${balanceNeto.toFixed(2)}
+                        </div>
+                        <div className="text-[10px] text-[#A69F93] mt-1">
+                          Ventas menos Gastos
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ======================================================== */}
+                    {/* 🏆 SECCIÓN: LO QUE MÁS SE VENDIÓ ESE DÍA / SEMANA */}
+                    {/* ======================================================== */}
+                    <div className="bg-gradient-to-br from-[#1C170E] via-[#14120F] to-[#0D0B0A] rounded-3xl p-5 sm:p-7 border border-amber-600/40 shadow-2xl space-y-5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-amber-900/40">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xl">🏆</span>
+                            <span className="text-xs font-black uppercase tracking-widest text-[#E6C687]">
+                              RANKING DE VENTAS • ALEX STORE
+                            </span>
+                            <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-black">
+                              {cajaReportePeriodo === 'dia' ? 'LO MÁS VENDIDO HOY' : 'LO MÁS VENDIDO EN LA SEMANA'}
+                            </span>
+                          </div>
+                          <h3 className="text-lg sm:text-xl font-black text-white mt-1">
+                            Prendas y Artículos Estrella con Mayor Salida
+                          </h3>
+                          <p className="text-xs text-[#A69F93]">
+                            Descubre qué producto lideró las ventas y el desglose de tallas vendidas.
+                          </p>
+                        </div>
+
+                        {rankingTop.length > 0 && (
+                          <div className="text-right shrink-0">
+                            <span className="text-xs text-[#A69F93] block">Prendas totales vendidas</span>
+                            <span className="text-lg font-black text-amber-300">
+                              {totalPrendasVendidas} unidades
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {productoEstrella ? (
+                        <div className="space-y-4">
+                          {/* Tarjeta de Oro #1 Hero */}
+                          <div className="p-4 sm:p-6 rounded-2xl bg-gradient-to-r from-amber-950/40 via-[#1C170E] to-[#14120F] border border-amber-500/60 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-5">
+                            <div className="flex items-center gap-4">
+                              <div className="relative">
+                                {productoEstrella.imagen_url ? (
+                                  <img
+                                    src={productoEstrella.imagen_url}
+                                    alt={productoEstrella.nombre}
+                                    className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl object-cover border-2 border-amber-500/80 shadow-lg"
+                                  />
+                                ) : (
+                                  <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-[#231F19] border-2 border-amber-500/80 flex items-center justify-center text-amber-400">
+                                    <Package className="w-8 h-8" />
+                                  </div>
+                                )}
+                                <span className="absolute -top-2.5 -left-2.5 px-2.5 py-1 rounded-full bg-gradient-to-r from-amber-500 to-yellow-400 text-[#141312] text-[10px] font-black shadow-md flex items-center gap-1 uppercase tracking-wider">
+                                  <span>👑</span>
+                                  <span>#1 TOP</span>
+                                </span>
+                              </div>
+
+                              <div className="space-y-1">
+                                <span className="text-[10px] font-black uppercase tracking-wider text-amber-400/90 block">
+                                  {productoEstrella.categoria || 'Prenda Alex Store'}
+                                </span>
+                                <h4 className="text-base sm:text-lg font-black text-white leading-tight">
+                                  {productoEstrella.nombre}
+                                </h4>
+                                <div className="flex items-center gap-3 pt-1">
+                                  <span className="text-sm font-black text-amber-300">
+                                    {productoEstrella.cantidadTotal} {productoEstrella.cantidadTotal === 1 ? 'unidad vendida' : 'unidades vendidas'}
+                                  </span>
+                                  <span className="text-xs text-[#7A7368]">•</span>
+                                  <span className="text-sm font-black text-emerald-400">
+                                    ${Number(productoEstrella.montoTotal).toFixed(2)} generados
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Desglose de Tallas Vendidas */}
+                            <div className="w-full md:w-auto bg-[#14120F]/90 p-3.5 rounded-xl border border-amber-800/40">
+                              <span className="text-[10px] font-black uppercase tracking-wider text-[#A69F93] block mb-2">
+                                📏 Desglose por Tallas Vendidas:
+                              </span>
+                              {Object.keys(productoEstrella.desgloseTallas).length > 0 ? (
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {Object.entries(productoEstrella.desgloseTallas).map(([talla, cant]) => (
+                                    <span
+                                      key={talla}
+                                      className="px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-200 text-xs font-bold"
+                                    >
+                                      Talla {talla}: <strong className="text-white ml-0.5">{cant}</strong>
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-xs text-[#7A7368]">Talla única / General</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Corredores #2 a #5 si existen */}
+                          {otrosTop.length > 0 && (
+                            <div className="space-y-2 pt-2">
+                              <span className="text-[11px] font-black uppercase tracking-wider text-[#A69F93] block">
+                                Otros Artículos con Buenas Ventas:
+                              </span>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                                {otrosTop.map((item, idx) => (
+                                  <div
+                                    key={item.id}
+                                    className="p-3 rounded-2xl bg-[#14120F] border border-[#2D2822] hover:border-amber-800/50 transition-all flex items-center gap-3"
+                                  >
+                                    <span className="w-6 h-6 rounded-lg bg-[#221E19] text-amber-400 font-black text-xs flex items-center justify-center shrink-0">
+                                      #{idx + 2}
+                                    </span>
+                                    {item.imagen_url ? (
+                                      <img
+                                        src={item.imagen_url}
+                                        alt={item.nombre}
+                                        className="w-12 h-12 rounded-xl object-cover shrink-0 border border-[#2D2822]"
+                                      />
+                                    ) : (
+                                      <div className="w-12 h-12 rounded-xl bg-[#221E19] flex items-center justify-center shrink-0 text-[#7A7368]">
+                                        <Package className="w-5 h-5" />
+                                      </div>
+                                    )}
+                                    <div className="min-w-0 flex-1">
+                                      <h5 className="text-xs font-bold text-white truncate">{item.nombre}</h5>
+                                      <div className="flex items-center gap-1.5 text-[11px] mt-0.5">
+                                        <span className="font-black text-amber-300">{item.cantidadTotal} uds</span>
+                                        <span className="text-[#555]">•</span>
+                                        <span className="text-[#A69F93]">${Number(item.montoTotal).toFixed(2)}</span>
+                                      </div>
+                                      {Object.keys(item.desgloseTallas).length > 0 && (
+                                        <div className="text-[10px] text-[#7A7368] truncate mt-0.5">
+                                          {Object.entries(item.desgloseTallas)
+                                            .map(([t, c]) => `${t}: ${c}`)
+                                            .join(', ')}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="py-8 text-center text-xs text-[#7A7368] space-y-1">
+                          <Package className="w-8 h-8 text-[#A69F93] mx-auto opacity-40 mb-1" />
+                          <p className="font-bold text-[#A69F93]">No hay ventas registradas en esta fecha</p>
+                          <p className="text-[11px]">
+                            Selecciona otro día o semana en los controles superiores para ver los productos más vendidos.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ======================================================== */}
+                    {/* LISTA DETALLADA DE VENTAS CON DESCRIPCIÓN PROMINENTE */}
+                    {/* ======================================================== */}
+                    <div className="bg-[#13110F] rounded-3xl border border-[#26221E] overflow-hidden shadow-xl space-y-4 p-5 sm:p-6 text-white">
+                      <div className="flex items-center justify-between pb-3 border-b border-[#26221E] flex-wrap gap-2">
+                        <div>
+                          <h3 className="font-black text-sm text-white">
+                            Registro de Ventas & Transacciones de Dinero
+                          </h3>
+                          <p className="text-[11px] text-[#A69F93]">
+                            Detalle completo de cada venta con sus notas, descripciones, vendedor y método de pago
+                          </p>
+                        </div>
+                        <span className="px-3 py-1 rounded-xl bg-[#1C1A17] border border-[#2D2822] text-xs font-bold text-[#A69F93]">
+                          {ventasFiltradas.length} {ventasFiltradas.length === 1 ? 'venta' : 'ventas'}
+                        </span>
+                      </div>
+
+                      {ventasFiltradas.length === 0 ? (
+                        <div className="py-12 text-center text-xs text-[#7A7368] space-y-2">
+                          <Receipt className="w-8 h-8 text-[#A69F93] mx-auto opacity-40" />
+                          <p className="font-bold text-[#A69F93]">No hay ventas registradas en esta fecha</p>
+                          <p className="text-[11px]">
+                            Cualquier venta manual o pedido aprobado en este rango aparecerá aquí con su descripción completa.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {ventasFiltradas.map((v) => {
+                            const desc = v.descripcion || v.notas;
+                            return (
+                              <div
+                                key={v.id}
+                                className="p-4 sm:p-5 rounded-2xl bg-[#181614] border border-[#26221E] hover:border-[#3D362E] transition-all space-y-3"
+                              >
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-[#24201C]">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-mono text-xs font-black text-amber-300">
+                                      {v.codigo}
+                                    </span>
+                                    <span className="text-[11px] text-[#A69F93]">
+                                      {v.creado_en ? new Date(v.creado_en).toLocaleString('es-PA') : '—'}
+                                    </span>
+                                    <span className="text-[10px] text-[#7A7368]">
+                                      Registrado por: <strong className="text-white">{v.registrado_por || 'Caja'}</strong>
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center gap-2.5">
+                                    <span
+                                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                        v.metodo_pago === 'efectivo'
+                                          ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
+                                          : v.metodo_pago === 'yappy'
+                                          ? 'bg-sky-950/80 text-sky-300 border border-sky-800'
+                                          : v.metodo_pago === 'transferencia'
+                                          ? 'bg-amber-950/80 text-amber-300 border border-amber-800'
+                                          : 'bg-[#25221F] text-slate-300 border border-[#332E27]'
+                                      }`}
+                                    >
+                                      {v.metodo_pago === 'efectivo'
+                                        ? '💵 Efectivo'
+                                        : v.metodo_pago === 'yappy'
+                                        ? '📱 Yappy'
+                                        : v.metodo_pago === 'transferencia'
+                                        ? '🏦 Transferencia'
+                                        : v.metodo_pago}
+                                    </span>
+                                    <span className="text-base font-black text-emerald-400">
+                                      ${Number(v.total).toFixed(2)}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Cliente y Artículos */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                                  <div>
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-[#A69F93] block mb-1">
+                                      Cliente:
+                                    </span>
+                                    <div className="font-bold text-white">
+                                      {v.cliente_nombre || 'Cliente en Tienda'}
+                                      {v.cliente_telefono && (
+                                        <span className="text-[#A69F93] font-mono text-[11px] ml-2">
+                                          ({v.cliente_telefono})
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-[#A69F93] block mb-1">
+                                      Prendas / Artículos:
+                                    </span>
+                                    <div className="space-y-1">
+                                      {Array.isArray(v.items) && v.items.length > 0 ? (
+                                        v.items.map((it, idx) => (
+                                          <div
+                                            key={idx}
+                                            className="flex items-center justify-between text-xs text-[#E6E1D8]"
+                                          >
+                                            <span className="truncate pr-2">
+                                              {it.cantidad || 1}x {it.nombre}
+                                              {(it.talla || it.variante_titulo) && (
+                                                <span className="ml-1 px-1.5 py-0.2 rounded bg-[#25221F] text-amber-300 text-[10px] font-bold">
+                                                  Talla {it.talla || it.variante_titulo}
+                                                </span>
+                                              )}
+                                            </span>
+                                            <span className="font-mono text-[#A69F93] shrink-0">
+                                              ${Number(it.subtotal || (it.cantidad || 1) * (it.precio || 0)).toFixed(2)}
+                                            </span>
+                                          </div>
+                                        ))
+                                      ) : (
+                                        <span className="text-[#7A7368]">Venta directa sin desglose</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Descripción / Nota destacada de la venta */}
+                                {desc ? (
+                                  <div className="mt-2 p-3 rounded-xl bg-[#14120F] border border-amber-600/40 flex items-start gap-2.5">
+                                    <FileText className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                                    <div className="text-xs">
+                                      <span className="font-black text-amber-300 uppercase tracking-wider text-[10px] block mb-0.5">
+                                        📝 Descripción / Detalle de la Venta:
+                                      </span>
+                                      <p className="text-[#EDE8DF] font-medium leading-relaxed">{desc}</p>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="text-[10px] text-[#7A7368] italic">
+                                    Sin descripción adicional ingresada
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -6945,14 +7863,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               <div>
                 <label className="font-extrabold text-[#E6C687] block mb-1">
-                  Notas o detalles de la venta (opcional)
+                  📝 Descripción de la Venta (se verá en la lista de ventas y en caja)
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="Detalles de entrega presencial, cambio entregado, tallas entregadas, etc."
+                  placeholder="Ej: Camiseta blanca talla M y short negro / Cliente abonó para guardar prenda / Entregado en mostrador"
                   value={ventaManualNotas}
                   onChange={(e) => setVentaManualNotas(e.target.value)}
-                  className="w-full bg-[#1A1816] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none resize-none"
+                  className="w-full bg-[#1A1816] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D] resize-none text-xs"
                 />
               </div>
 

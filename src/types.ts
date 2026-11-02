@@ -164,6 +164,7 @@ export interface Venta {
   items: any[];
   tipo: 'web' | 'manual';
   notas?: string | null;
+  descripcion?: string | null;
   creado_en?: string;
 }
 

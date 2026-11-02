@@ -1096,6 +1096,7 @@ export async function getVentas(): Promise<Venta[]> {
 
     if (!error && Array.isArray(data)) {
       data.forEach((v: any) => {
+        const descRaw = (v.descripcion || v.notas || '').trim() || null;
         const cleanV: Venta = {
           id: v.id,
           codigo: v.codigo,
@@ -1111,7 +1112,8 @@ export async function getVentas(): Promise<Venta[]> {
           registrado_por: v.registrado_por || v.cajero_nombre || 'Cajero',
           items: Array.isArray(v.items) ? v.items : [],
           tipo: v.tipo || (v.pedido_id ? 'web' : 'manual'),
-          notas: v.notas || null,
+          notas: descRaw,
+          descripcion: descRaw,
           creado_en: v.creado_en || new Date().toISOString(),
         };
         const key = cleanV.codigo || cleanV.id;
@@ -1159,6 +1161,7 @@ export async function getVentas(): Promise<Venta[]> {
         const saldoPendiente = metaParsed?.saldo_pendiente !== undefined ? Number(metaParsed.saldo_pendiente) : 0;
         const estadoPago = metaParsed?.estado_pago || (p.estado_pago === 'verificado' ? 'completo' : 'abono_pendiente');
         const cajero = metaParsed?.cajero_nombre || metaParsed?.cajero || p.revisado_por || 'Cajero';
+        const finalDesc = cleanNotas || metaParsed?.descripcion || metaParsed?.notas || (isManual ? null : `Venta generada del pedido ${p.codigo}.`);
 
         // Si ya existe en remoteMap (de la tabla ventas), solo enriquecer si faltan datos
         const existing = remoteMap.get(codVenta) || (p.id ? remoteMap.get(p.id) : undefined);
@@ -1178,11 +1181,16 @@ export async function getVentas(): Promise<Venta[]> {
             registrado_por: cajero,
             items: metaParsed?.items || p.items || [],
             tipo: isManual ? 'manual' : 'web',
-            notas: cleanNotas || (isManual ? null : `Venta generada del pedido ${p.codigo}.`),
+            notas: finalDesc,
+            descripcion: finalDesc,
             creado_en: p.creado_en || p.actualizado_en || new Date().toISOString(),
           };
           remoteMap.set(codVenta, synthVenta);
         } else {
+          if (!existing.descripcion && finalDesc) {
+            existing.descripcion = finalDesc;
+            existing.notas = finalDesc;
+          }
           if (existing.saldo_pendiente === 0 && saldoPendiente > 0) {
             existing.saldo_pendiente = saldoPendiente;
             existing.monto_abonado = montoAbonado;
@@ -1494,6 +1502,7 @@ export async function crearVentaManual(venta: {
   items: any[];
   tipo?: 'web' | 'manual';
   notas?: string;
+  descripcion?: string;
 }): Promise<{ success: boolean; data?: Venta; error?: string }> {
   try {
     const codigo = `VNT-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -1515,6 +1524,7 @@ export async function crearVentaManual(venta: {
         : 'completo');
 
     const author = venta.cajero_nombre || venta.registrado_por || 'Cajero';
+    const descText = (venta.descripcion || venta.notas || '').trim() || null;
 
     const newVentaRecord: Venta = {
       id: `vnt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -1530,7 +1540,8 @@ export async function crearVentaManual(venta: {
       registrado_por: author,
       items: venta.items || [],
       tipo: venta.tipo || 'manual',
-      notas: venta.notas?.trim() || null,
+      notas: descText,
+      descripcion: descText,
       creado_en: now,
     };
 
@@ -1550,6 +1561,7 @@ export async function crearVentaManual(venta: {
         items: newVentaRecord.items,
         tipo: newVentaRecord.tipo,
         notas: newVentaRecord.notas,
+        descripcion: newVentaRecord.descripcion,
         creado_en: newVentaRecord.creado_en,
       };
 
@@ -1559,7 +1571,7 @@ export async function crearVentaManual(venta: {
       if (vRes.error) {
         const errStr = (vRes.error.message || '').toLowerCase();
         console.warn('Aviso insertando en tabla ventas, adaptando columnas:', errStr);
-        const stripCandidates = ['registrado_por', 'cajero_nombre', 'monto_abonado', 'saldo_pendiente', 'estado_pago', 'tipo', 'notas', 'items'];
+        const stripCandidates = ['descripcion', 'registrado_por', 'cajero_nombre', 'monto_abonado', 'saldo_pendiente', 'estado_pago', 'tipo', 'notas', 'items'];
         for (const col of stripCandidates) {
           if (errStr.includes(col)) {
             delete payloadVentas[col];
@@ -1586,6 +1598,8 @@ export async function crearVentaManual(venta: {
         monto_abonado: abonadoNum,
         saldo_pendiente: saldoPendiente,
         estado_pago: estadoPago,
+        descripcion: descText,
+        notas: descText,
         items: newVentaRecord.items,
       })}-->`;
 
@@ -1599,7 +1613,7 @@ export async function crearVentaManual(venta: {
         estado: 'entregado',
         estado_pago: estadoPago === 'completo' ? 'verificado' : 'pendiente_revision',
         items: newVentaRecord.items,
-        notas: `[VENTA_MANUAL] ${newVentaRecord.notas ? newVentaRecord.notas + '\n' : ''}${metaTag}`,
+        notas: `[VENTA_MANUAL] ${descText ? descText + '\n' : ''}${metaTag}`,
         revisado_por: author,
         revisado_en: now,
         actualizado_en: now,
