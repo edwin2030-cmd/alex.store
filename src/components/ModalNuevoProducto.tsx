@@ -13,8 +13,10 @@ import {
   Hash,
   DollarSign,
   Boxes,
-  HelpCircle
+  HelpCircle,
+  MessageCircle,
 } from 'lucide-react';
+import { isArregloFutbol } from '../lib/arregloFutbol';
 import { crearProducto, actualizarProducto, subirFotoStorage } from '../lib/supabase';
 
 interface ModalNuevoProductoProps {
@@ -448,56 +450,84 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-4 sm:p-8 space-y-5 sm:space-y-6 flex-1 overflow-y-auto">
           {/* Row 1: Categoría & Precio Base */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D] block mb-1.5">
-                CATEGORÍA *
-              </label>
-              <select
-                value={categoriaId}
-                onChange={(e) => setCategoriaId(e.target.value)}
-                className="w-full bg-white text-xs sm:text-sm text-[#1A1918] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
-              >
-                {categorias.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nombre}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {(() => {
+            const isSelectedCatArreglo = isArregloFutbol(categorias.find((c) => c.id === categoriaId), null, categorias);
+            return (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D] block mb-1.5">
+                      CATEGORÍA *
+                    </label>
+                    <select
+                      value={categoriaId}
+                      onChange={(e) => setCategoriaId(e.target.value)}
+                      className="w-full bg-white text-xs sm:text-sm text-[#1A1918] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                    >
+                      {categorias.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-            <div>
-              <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D] block mb-1.5">
-                PRECIO BASE ($) *
-              </label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[#8C8375]">$</span>
-                <input
-                  type="number"
-                  required
-                  step="0.01"
-                  min="0"
-                  value={precio}
-                  onChange={(e) => setPrecio(e.target.value)}
-                  placeholder="50"
-                  className="w-full bg-white text-xs sm:text-sm text-[#1A1918] pl-8 pr-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
-                />
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D]">
+                        PRECIO BASE ($) *
+                      </label>
+                      {isSelectedCatArreglo && (
+                        <span className="text-[9px] font-black text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 uppercase">
+                          Oculto en tienda
+                        </span>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[#8C8375]">$</span>
+                      <input
+                        type="number"
+                        required
+                        step="0.01"
+                        min="0"
+                        value={precio}
+                        onChange={(e) => setPrecio(e.target.value)}
+                        placeholder="50"
+                        className="w-full bg-white text-xs sm:text-sm text-[#1A1918] pl-8 pr-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D] block mb-1.5">
+                      SKU / CÓDIGO BASE
+                    </label>
+                    <input
+                      type="text"
+                      value={skuGeneral}
+                      onChange={(e) => setSkuGeneral(e.target.value)}
+                      placeholder="Ej: ALX-CAM-01"
+                      className="w-full bg-white text-xs sm:text-sm text-[#1A1918] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] font-mono"
+                    />
+                  </div>
+                </div>
+
+                {isSelectedCatArreglo && (
+                  <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-300 text-xs text-emerald-950 flex items-start gap-2.5 animate-fade-in">
+                    <MessageCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-black uppercase tracking-wider text-[10px] text-emerald-800 block">
+                        CATEGORÍA ESPECIAL: ARREGLO DE FÚTBOL
+                      </span>
+                      <p className="text-[11px] text-emerald-800 leading-relaxed mt-0.5">
+                        Los artículos que coloques en esta categoría <strong>no mostrarán precio en la tienda</strong> ni se podrán agregar a la bolsa de compras. Los clientes verán el botón <strong>«Hacer Arreglo por WhatsApp»</strong> que genera automáticamente un mensaje tipo recibo con el enlace directo de la imagen de este producto.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-
-            <div>
-              <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D] block mb-1.5">
-                SKU / CÓDIGO BASE
-              </label>
-              <input
-                type="text"
-                value={skuGeneral}
-                onChange={(e) => setSkuGeneral(e.target.value)}
-                placeholder="Ej: ALX-CAM-01"
-                className="w-full bg-white text-xs sm:text-sm text-[#1A1918] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] font-mono"
-              />
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Toggle Activo */}
           <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[#FAF8F5] border border-[#EBE6DD]">

@@ -53,6 +53,7 @@ import {
   supabase,
   CAJA_SYNC_BROADCAST,
 } from '../lib/supabase';
+import { isArregloFutbol } from '../lib/arregloFutbol';
 import {
   ROLE_PERMISSIONS,
   canAccessSection,
@@ -5822,11 +5823,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               </td>
 
                               <td className="py-3 px-6 text-[#C9BFB0] font-medium">
-                                {categorias.find((c) => c.id === prod.categoria_id)?.nombre || 'General'}
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span>{categorias.find((c) => c.id === prod.categoria_id)?.nombre || 'General'}</span>
+                                  {isArregloFutbol(undefined, prod, categorias) && (
+                                    <span className="px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-700/80 text-emerald-400 text-[9px] font-black uppercase">
+                                      Arreglo
+                                    </span>
+                                  )}
+                                </div>
                               </td>
 
                               <td className="py-3 px-6 font-black text-sm text-white">
-                                ${prod.precio}
+                                {isArregloFutbol(undefined, prod, categorias) ? (
+                                  <span className="text-emerald-400 text-xs font-bold flex items-center gap-1">
+                                    <MessageCircle className="w-3.5 h-3.5 fill-current" />
+                                    Cotización WhatsApp
+                                  </span>
+                                ) : (
+                                  `$${prod.precio}`
+                                )}
                               </td>
 
                               <td className="py-3 px-6">

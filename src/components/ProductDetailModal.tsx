@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Producto, VarianteProducto } from '../types';
+import { Producto, VarianteProducto, Categoria } from '../types';
 import {
   X,
   ShoppingBag,
@@ -12,6 +12,7 @@ import {
   Layers,
   Sparkles,
 } from 'lucide-react';
+import { isArregloFutbol, generarWhatsAppReciboArreglo } from '../lib/arregloFutbol';
 
 interface ProductDetailModalProps {
   producto: Producto | null;
@@ -23,14 +24,18 @@ interface ProductDetailModalProps {
     opcionesSeleccionadas?: Record<string, string>,
     varianteSeleccionada?: VarianteProducto
   ) => void;
+  categorias?: Categoria[];
 }
 
 export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   producto,
   onClose,
   onAddToCart,
+  categorias = [],
 }) => {
   if (!producto) return null;
+
+  const isArreglo = isArregloFutbol(undefined, producto, categorias);
 
   const images =
     producto.imagenes && producto.imagenes.length > 0
@@ -155,6 +160,19 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
   };
 
+  const handleHacerArregloWhatsApp = () => {
+    const catName = categorias.find((c) => c.id === producto.categoria_id)?.nombre || 'Arreglo de fútbol';
+    const tallaVal = selectedOptions['Talla'] || selectedOptions['talla'] || Object.values(selectedOptions)[0];
+    const url = generarWhatsAppReciboArreglo({
+      producto,
+      categoriaNombre: catName,
+      talla: tallaVal,
+      opcionesSeleccionadas: selectedOptions,
+      cantidad,
+    });
+    window.open(url, '_blank');
+  };
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-sm">
       <div className="min-h-full flex items-start sm:items-center justify-center p-3 sm:p-6 py-6 sm:py-10">
@@ -236,17 +254,29 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   {producto.nombre}
                 </h2>
 
-                <div className="flex items-baseline gap-2">
-                  <span className="text-2xl sm:text-3xl font-black text-[#C59A4D]">
-                    ${precioUnitario.toFixed(2)}
-                  </span>
-                  <span className="text-xs text-[#7A7368] font-semibold">USD</span>
-                  {matchingVariant?.sku && (
-                    <span className="text-[10px] text-[#7A7368] font-mono ml-auto">
-                      SKU: {matchingVariant.sku}
+                {isArreglo ? (
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-50 to-[#F0FAF4] border border-emerald-300 text-emerald-950 space-y-1">
+                    <div className="flex items-center gap-1.5 font-black text-xs uppercase tracking-wider text-emerald-800">
+                      <MessageCircle className="w-4 h-4 fill-current text-emerald-600" />
+                      <span>Servicio de Arreglo de Fútbol</span>
+                    </div>
+                    <p className="text-xs font-bold text-emerald-700">
+                      Precio a consultar vía WhatsApp (Cotización personalizada según trabajo)
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl sm:text-3xl font-black text-[#C59A4D]">
+                      ${precioUnitario.toFixed(2)}
                     </span>
-                  )}
-                </div>
+                    <span className="text-xs text-[#7A7368] font-semibold">USD</span>
+                    {matchingVariant?.sku && (
+                      <span className="text-[10px] text-[#7A7368] font-mono ml-auto">
+                        SKU: {matchingVariant.sku}
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {producto.descripcion && (() => {
                   const sanitized = producto.descripcion.replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '').trim();
@@ -332,51 +362,81 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 </div>
 
                 {/* Subtotal preview */}
-                <div className="p-2.5 rounded-xl bg-[#F7F5F0] border border-[#EAE5DC] flex items-center justify-between text-xs">
-                  <span className="text-[#7A7368] font-bold">Subtotal de este producto:</span>
-                  <span className="font-black text-sm text-[#1A1918]">
-                    ${(precioUnitario * cantidad).toFixed(2)} USD
-                  </span>
-                </div>
+                {isArreglo ? (
+                  <div className="p-3 rounded-2xl bg-[#FAF8F5] border border-emerald-300/80 flex items-center justify-between text-xs">
+                    <span className="text-[#5A554D] font-bold">Modalidad:</span>
+                    <span className="font-black text-emerald-700 flex items-center gap-1">
+                      <MessageCircle className="w-3.5 h-3.5 fill-current" />
+                      Cotización directa vía WhatsApp
+                    </span>
+                  </div>
+                ) : (
+                  <div className="p-2.5 rounded-xl bg-[#F7F5F0] border border-[#EAE5DC] flex items-center justify-between text-xs">
+                    <span className="text-[#7A7368] font-bold">Subtotal de este producto:</span>
+                    <span className="font-black text-sm text-[#1A1918]">
+                      ${(precioUnitario * cantidad).toFixed(2)} USD
+                    </span>
+                  </div>
+                )}
 
                 {/* Guarantee badge */}
                 <div className="flex items-center gap-2 text-xs text-[#7A7368] pt-0.5">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Calidad Premium 1:1 verificada • Entrega garantizada</span>
+                  <span>
+                    {isArreglo
+                      ? 'Atención personalizada y asesoría en arreglos de camisetas de fútbol'
+                      : 'Calidad Premium 1:1 verificada • Entrega garantizada'}
+                  </span>
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div className="space-y-2.5 pt-1">
-                <button
-                  onClick={handleAdd}
-                  className={`w-full py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all active:scale-98 cursor-pointer ${
-                    added
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-[#141312] hover:bg-black text-[#F5E6BE]'
-                  }`}
-                >
-                  {added ? (
-                    <>
-                      <Check className="w-4 h-4 stroke-[3]" />
-                      <span>¡AGREGADO A TU BOLSA!</span>
-                    </>
-                  ) : (
-                    <>
-                      <ShoppingBag className="w-4 h-4 text-[#E6C687]" />
-                      <span>AGREGAR A LA BOLSA</span>
-                    </>
-                  )}
-                </button>
+              {isArreglo ? (
+                <div className="space-y-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleHacerArregloWhatsApp}
+                    className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2.5 shadow-xl transition-all active:scale-98 cursor-pointer"
+                  >
+                    <MessageCircle className="w-5 h-5 fill-current" />
+                    <span>HACER ARREGLO POR WHATSAPP (66212802)</span>
+                  </button>
+                  <p className="text-[11px] text-center text-[#7A7368]">
+                    Al presionar el botón se abrirá WhatsApp con el recibo de solicitud y el enlace de la imagen del producto.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2.5 pt-1">
+                  <button
+                    onClick={handleAdd}
+                    className={`w-full py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all active:scale-98 cursor-pointer ${
+                      added
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-[#141312] hover:bg-black text-[#F5E6BE]'
+                    }`}
+                  >
+                    {added ? (
+                      <>
+                        <Check className="w-4 h-4 stroke-[3]" />
+                        <span>¡AGREGADO A TU BOLSA!</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShoppingBag className="w-4 h-4 text-[#E6C687]" />
+                        <span>AGREGAR A LA BOLSA</span>
+                      </>
+                    )}
+                  </button>
 
-                <button
-                  onClick={handleWhatsAppDirect}
-                  className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md transition-all active:scale-98 cursor-pointer"
-                >
-                  <MessageCircle className="w-4 h-4 fill-current" />
-                  <span>CONSULTAR POR WHATSAPP (66212802)</span>
-                </button>
-              </div>
+                  <button
+                    onClick={handleWhatsAppDirect}
+                    className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md transition-all active:scale-98 cursor-pointer"
+                  >
+                    <MessageCircle className="w-4 h-4 fill-current" />
+                    <span>CONSULTAR POR WHATSAPP (66212802)</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

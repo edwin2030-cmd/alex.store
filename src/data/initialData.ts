@@ -33,6 +33,14 @@ export const CATEGORIAS_INICIALES: Categoria[] = [
     imagen_url: null,
     activa: true,
     activo: true,
+  },
+  {
+    id: "a7c381f9-9012-4eb2-a162-817bf49a0082",
+    nombre: "Arreglo de fútbol",
+    descripcion: "Servicio especializado de arreglos, parches, dorsales y personalización de camisetas",
+    imagen_url: null,
+    activa: true,
+    activo: true,
   }
 ];
 

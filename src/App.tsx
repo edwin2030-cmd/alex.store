@@ -15,6 +15,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { Footer } from './components/Footer';
 import { CATEGORIAS_INICIALES } from './data/initialData';
 import { Check, X, ArrowUpDown, PackageOpen, Plus } from 'lucide-react';
+import { isArregloFutbol } from './lib/arregloFutbol';
 
 export default function App() {
   const [isAdminMode, setIsAdminMode] = useState(false);
@@ -159,6 +160,13 @@ export default function App() {
     opcionesSeleccionadas?: Record<string, string>,
     varianteSeleccionada?: any
   ) => {
+    // Si el producto pertenece a la categoría de Arreglo de fútbol, no se permite agregar a la bolsa
+    if (isArregloFutbol(undefined, producto, categorias)) {
+      setToastMessage('Los arreglos de fútbol no se piden en la bolsa; se coordinan directamente por WhatsApp.');
+      setTimeout(() => setToastMessage(null), 3500);
+      return;
+    }
+
     const unitPrice = Number(varianteSeleccionada?.precio) || Number(producto.precio) || 0;
     const variantLabel =
       varianteSeleccionada?.titulo ||
@@ -389,6 +397,7 @@ export default function App() {
                       producto={producto}
                       onAddToCart={(p) => handleAddToCart(p, 1)}
                       onOpenDetail={setSelectedProduct}
+                      categorias={categorias}
                     />
                   ))}
                 </div>
@@ -403,6 +412,7 @@ export default function App() {
         producto={selectedProduct}
         onClose={() => setSelectedProduct(null)}
         onAddToCart={handleAddToCart}
+        categorias={categorias}
       />
 
       {/* Cart Drawer */}
