@@ -195,17 +195,18 @@ export async function getProductos(): Promise<Producto[]> {
         } catch {}
       }
 
-      // Parsear tallas robustamente (soporta array de textos o números, llaves de jsonb, string postgres {S,M,L} o "2, 4, 8, 14", o atributos)
+      // Parsear tallas robustamente respetando las eliminaciones del usuario y preservando conteos exactos
       let parsedTallas: string[] = [];
-      if (Object.keys(tallas_stock).length > 0) {
-        parsedTallas = Object.keys(tallas_stock).map(String);
-      } else if (Array.isArray(p.tallas) && p.tallas.length > 0) {
+      if (Array.isArray(p.tallas) && p.tallas.length > 0) {
+        // La columna p.tallas manda como fuente de la verdad
         parsedTallas = p.tallas.map((x: any) => String(x).trim()).filter(Boolean);
       } else if (typeof p.tallas === 'string' && p.tallas.trim()) {
         const raw = p.tallas.replace(/^\{|\}$|^\[|\]$/g, '');
         parsedTallas = raw.split(/[,;\s]+/).map((s: string) => s.trim().replace(/^"|"$/g, '')).filter(Boolean);
-      } else if (det?.tallas && Array.isArray(det.tallas)) {
+      } else if (det?.tallas && Array.isArray(det.tallas) && det.tallas.length > 0) {
         parsedTallas = det.tallas.map((x: any) => String(x).trim()).filter(Boolean);
+      } else if (Object.keys(tallas_stock).length > 0) {
+        parsedTallas = Object.keys(tallas_stock).map(String);
       } else if (p.atributos && Array.isArray(p.atributos)) {
         const tallaAttr = p.atributos.find((a: any) => /talla|tallas|size|calzado|numero|número/i.test(a?.nombre || ''));
         if (tallaAttr && Array.isArray(tallaAttr.valores)) {
@@ -216,16 +217,20 @@ export async function getProductos(): Promise<Producto[]> {
       const tallas = parsedTallas;
       const colores = (Array.isArray(p.colores) && p.colores.length > 0) ? p.colores.map(String) : (det?.colores || []);
 
-      // Si hay tallas pero no tienen cantidades definidas en tallas_stock, inicializar con el stock del producto
-      if (tallas.length > 0 && Object.keys(tallas_stock).length === 0) {
+      // Sincronizar tallas_stock: mantener exactamente las cantidades contadas y descartar tallas eliminadas
+      if (tallas.length > 0) {
+        const cleanStock: Record<string, number> = {};
         const baseStock = stockMap[p.id]?.cantidad ?? p.stock ?? 0;
-        const perTalla = Math.max(0, Math.floor(baseStock / tallas.length));
+        const defaultPerTalla = Math.max(0, Math.floor(baseStock / tallas.length));
         tallas.forEach((t: string) => {
-          tallas_stock[t] = perTalla;
+          cleanStock[t] = tallas_stock[t] !== undefined ? Number(tallas_stock[t]) : defaultPerTalla;
         });
+        tallas_stock = cleanStock;
+      } else {
+        tallas_stock = {};
       }
 
-      const sumTallas = Object.keys(tallas_stock).length > 0
+      const sumTallas = tallas.length > 0 && Object.keys(tallas_stock).length > 0
         ? Object.values(tallas_stock).reduce((acc, q) => acc + (Number(q) || 0), 0)
         : undefined;
 
@@ -414,8 +419,19 @@ export async function actualizarProducto(
   stockMinimo?: number
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const tallas = producto.tallas || (producto.tallas_stock ? Object.keys(producto.tallas_stock) : []);
-    const tallasStock = producto.tallas_stock || {};
+    // Tallas que el usuario quiere guardar (respetando eliminaciones)
+    const tallas = Array.isArray(producto.tallas)
+      ? producto.tallas.map(String).map((s) => s.trim()).filter(Boolean)
+      : (producto.tallas_stock ? Object.keys(producto.tallas_stock).map(String) : []);
+
+    // Sincronizar tallasStock para preservar conteos exactos solo de las tallas que no fueron eliminadas
+    const tallasStock: Record<string, number> = {};
+    if (producto.tallas_stock && typeof producto.tallas_stock === 'object') {
+      tallas.forEach((t) => {
+        tallasStock[t] = producto.tallas_stock![t] !== undefined ? Number(producto.tallas_stock![t]) : 0;
+      });
+    }
+
     let finalStock = stock;
     if (tallasStock && Object.keys(tallasStock).length > 0) {
       finalStock = Object.values(tallasStock).reduce((acc, v) => acc + (Number(v) || 0), 0);
@@ -432,11 +448,9 @@ export async function actualizarProducto(
       }));
     }
 
-    // Guardar en caché local inmediato para que nunca se pierda
+    // Actualizar caché local sin las tallas eliminadas
     try {
-      if (tallasStock && Object.keys(tallasStock).length > 0) {
-        localStorage.setItem('alexstore_tallas_stock_' + id, JSON.stringify(tallasStock));
-      }
+      localStorage.setItem('alexstore_tallas_stock_' + id, JSON.stringify(tallasStock));
     } catch {}
 
     let cleanDesc = (producto.descripcion || '').replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '').trim();

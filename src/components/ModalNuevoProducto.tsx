@@ -99,7 +99,8 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
 
       // Extraer tallas (soporta letras y números como 2, 4, 8, 14, 38, etc.)
       let loadedTallas: string[] = [];
-      if (Array.isArray(productoToEdit.tallas) && productoToEdit.tallas.length > 0) {
+      if (Array.isArray(productoToEdit.tallas)) {
+        // La columna tallas de productos manda como fuente de la verdad
         loadedTallas = productoToEdit.tallas.map(String).map((s) => s.trim()).filter(Boolean);
       } else if (productoToEdit.tallas_stock && Object.keys(productoToEdit.tallas_stock).length > 0) {
         loadedTallas = Object.keys(productoToEdit.tallas_stock).map(String);
@@ -113,12 +114,12 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
         }
       }
 
-      const loadedTallasStock: Record<string, number> = { ...(productoToEdit.tallas_stock || {}) };
+      // Preservar exactamente los números ya contados para cada talla existente
+      const rawStock = productoToEdit.tallas_stock || {};
+      const loadedTallasStock: Record<string, number> = {};
       const defaultPerTalla = Math.max(1, Math.floor((productoToEdit.stock || 10) / (loadedTallas.length || 1)));
       loadedTallas.forEach((t) => {
-        if (loadedTallasStock[t] === undefined) {
-          loadedTallasStock[t] = defaultPerTalla;
-        }
+        loadedTallasStock[t] = rawStock[t] !== undefined ? Number(rawStock[t]) : defaultPerTalla;
       });
 
       setTallas(loadedTallas);
@@ -167,10 +168,26 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
     }));
   };
 
+  // Eliminar una talla específica sin tocar el conteo de las demás
+  const handleRemoveTalla = (t: string) => {
+    const cleanT = String(t).trim();
+    setTallas((prev) => prev.filter((x) => String(x).trim() !== cleanT));
+    setTallasStock((prev) => {
+      const next: Record<string, number> = {};
+      Object.entries(prev).forEach(([k, v]) => {
+        if (String(k).trim() !== cleanT) {
+          next[k] = v;
+        }
+      });
+      return next;
+    });
+  };
+
   const handleToggleTalla = (t: string) => {
     const cleanT = String(t).trim();
-    if (tallas.includes(cleanT)) {
-      setTallas((prev) => prev.filter((x) => x !== cleanT));
+    const isPresent = tallas.some((x) => String(x).trim() === cleanT);
+    if (isPresent) {
+      handleRemoveTalla(cleanT);
     } else {
       setTallas((prev) => [...prev, cleanT]);
       setTallasStock((prev) => ({
@@ -454,9 +471,15 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
     const numPrecio = parseFloat(precio) || 0;
     const numCosto = parseFloat(costo) || 0;
     const numStockMin = parseInt(stockMinimo, 10) || 3;
+    const cleanTallas = tallas.map(String).map((s) => s.trim()).filter(Boolean);
+    const cleanTallasStock: Record<string, number> = {};
+    cleanTallas.forEach((t) => {
+      cleanTallasStock[t] = tallasStock[t] !== undefined ? Number(tallasStock[t]) : 0;
+    });
+
     const finalStock =
-      tallas.length > 0
-        ? stockTotalTallas
+      cleanTallas.length > 0
+        ? cleanTallas.reduce((acc, t) => acc + (cleanTallasStock[t] || 0), 0)
         : tieneVariantes && variantes.length > 0
         ? stockTotalVariantes
         : parseInt(cantidad, 10) || 0;
@@ -472,10 +495,10 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
       imagenes,
       activo,
       sku: skuGeneral.trim() || undefined,
-      tallas,
+      tallas: cleanTallas,
       colores,
-      tallas_stock: tallasStock,
-      tiene_variantes: tieneVariantes || tallas.length > 0 || colores.length > 0,
+      tallas_stock: cleanTallasStock,
+      tiene_variantes: tieneVariantes || cleanTallas.length > 0 || colores.length > 0,
       atributos: tieneVariantes ? atributos : [],
       variantes: tieneVariantes ? variantes : [],
     };
@@ -838,7 +861,12 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
                     </span>
                     <button
                       type="button"
-                      onClick={() => setTallas([])}
+                      onClick={() => {
+                        if (confirm('¿Deseas quitar todas las tallas seleccionadas de este producto?')) {
+                          setTallas([]);
+                          setTallasStock({});
+                        }
+                      }}
                       className="text-[10px] text-rose-600 hover:underline font-bold cursor-pointer"
                     >
                       Limpiar todas
@@ -857,9 +885,9 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
                         </span>
                         <button
                           type="button"
-                          onClick={() => handleToggleTalla(t)}
-                          className="text-[#E6C687] hover:text-white cursor-pointer ml-0.5"
-                          title="Eliminar talla"
+                          onClick={() => handleRemoveTalla(t)}
+                          className="text-[#E6C687] hover:text-white hover:bg-white/20 p-0.5 rounded cursor-pointer ml-0.5 transition-colors"
+                          title={`Eliminar talla ${t}`}
                         >
                           <X className="w-3.5 h-3.5" />
                         </button>
@@ -923,9 +951,17 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
                               min="0"
                               value={tallasStock[t] ?? 0}
                               onChange={(e) => handleSetStockTalla(t, parseInt(e.target.value, 10) || 0)}
-                              className="w-16 text-center font-black text-sm bg-zinc-100 text-black border-2 border-zinc-400 rounded-lg py-1 px-1 focus:outline-none focus:border-[#C59A4D] focus:bg-white"
+                              className="w-14 text-center font-black text-sm bg-zinc-100 text-black border-2 border-zinc-400 rounded-lg py-1 px-1 focus:outline-none focus:border-[#C59A4D] focus:bg-white"
                             />
-                            <span className="text-[11px] text-zinc-700 font-extrabold">u.</span>
+                            <span className="text-[10px] text-zinc-700 font-extrabold">u.</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveTalla(t)}
+                              className="p-1 rounded-lg text-rose-500 hover:text-white hover:bg-rose-600 transition-colors cursor-pointer"
+                              title={`Eliminar talla ${t}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
                       ))}
