@@ -17,12 +17,12 @@ export const CategoryFilter: React.FC<CategoryFilterProps> = ({
   totalCount,
 }) => {
   return (
-    <div className="mx-3 sm:mx-6 lg:mx-8 mb-4 sm:mb-5">
-      <div className="flex items-center gap-2 sm:gap-2.5 overflow-x-auto pb-2 no-scrollbar touch-pan-x">
+    <div className="mx-3 sm:mx-6 lg:mx-8 mb-3 sm:mb-5">
+      <div className="flex items-center gap-2 sm:gap-2.5 overflow-x-auto pb-2 pt-0.5 no-scrollbar touch-pan-x -mx-3 px-3 sm:mx-0 sm:px-0 scroll-smooth">
         {/* "TODOS" button */}
         <button
           onClick={() => onSelectCategoria(null)}
-          className={`px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-full text-[11px] sm:text-xs font-black tracking-wider uppercase whitespace-nowrap transition-all shadow-xs cursor-pointer shrink-0 ${
+          className={`px-3.5 sm:px-5 py-2 sm:py-2.5 min-h-[38px] rounded-full text-[11px] sm:text-xs font-black tracking-wider uppercase whitespace-nowrap transition-all shadow-xs cursor-pointer shrink-0 active:scale-95 touch-manipulation ${
             categoriaSeleccionada === null
               ? 'bg-[#141312] text-white shadow-md'
               : 'bg-[#EFEAE2] hover:bg-[#E7E0D6] text-[#2A2724]'
@@ -40,7 +40,7 @@ export const CategoryFilter: React.FC<CategoryFilterProps> = ({
             <button
               key={cat.id}
               onClick={() => onSelectCategoria(cat.id)}
-              className={`px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-full text-[11px] sm:text-xs font-bold tracking-wider uppercase whitespace-nowrap transition-all shadow-xs flex items-center gap-1.5 sm:gap-2 cursor-pointer shrink-0 ${
+              className={`px-3.5 sm:px-5 py-2 sm:py-2.5 min-h-[38px] rounded-full text-[11px] sm:text-xs font-bold tracking-wider uppercase whitespace-nowrap transition-all shadow-xs flex items-center gap-1.5 sm:gap-2 cursor-pointer shrink-0 active:scale-95 touch-manipulation ${
                 isSelected
                   ? 'bg-[#141312] text-white shadow-md'
                   : 'bg-[#EFEAE2] hover:bg-[#E7E0D6] text-[#2A2724]'

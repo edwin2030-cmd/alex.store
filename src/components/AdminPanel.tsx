@@ -1798,17 +1798,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   return (
     <div className="min-h-screen bg-[#080706] text-white flex flex-col lg:flex-row font-sans selection:bg-[#C59A4D] selection:text-black">
-      {/* Mobile & Tablet Top Header (Optimized for Android & iOS with 3-rayitas Menu button) */}
-      <div className="lg:hidden bg-[#0F0E0D] text-white border-b border-[#26221E] sticky top-0 z-30">
-        <div className="px-3.5 py-3 flex items-center justify-between gap-2">
-          {/* Left side: Botón de 3 rayitas (Menú a la mano izquierda) + Logo */}
-          <div className="flex items-center gap-2.5 min-w-0">
+      {/* Mobile & Tablet Top Header (Optimized for Android & iOS) */}
+      <div className="lg:hidden bg-[#0F0E0D] text-white border-b border-[#26221E] sticky top-0 z-30 shadow-md">
+        <div className="px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2">
+          {/* Left side: Hamburger Button + Brand */}
+          <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"
               onClick={() => setIsMobileMenuOpen(true)}
-              className="p-2 -ml-1 rounded-xl bg-[#1C1A17] hover:bg-[#2A2621] text-[#E6C687] border border-[#2B2722] transition-colors cursor-pointer flex items-center justify-center shrink-0 active:scale-95 shadow-sm"
+              className="p-2 -ml-1 rounded-xl bg-[#1C1A17] hover:bg-[#2A2621] text-[#E6C687] border border-[#2B2722] transition-colors cursor-pointer flex items-center justify-center shrink-0 active:scale-95 shadow-sm touch-manipulation"
               aria-label="Abrir panel de opciones"
-              title="Abrir panel de opciones (3 rayitas)"
+              title="Abrir menú completo"
             >
               <Menu className="w-5 h-5 stroke-[2.5]" />
             </button>
@@ -1816,32 +1816,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <div className="flex items-center gap-2 min-w-0">
               <AlexStoreLogo size="sm" />
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
+                <div className="flex items-center gap-1.5 flex-nowrap">
                   <span className="font-extrabold text-sm text-white leading-none">
                     Alex<span className="text-[#C59A4D]">Store</span>
                   </span>
-                  <span className={`px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-wider ${
+                  <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider shrink-0 ${
                     userRole === 'dueno'
                       ? 'bg-amber-400/20 text-[#E6C687] border border-[#C59A4D]/40'
                       : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                   }`}>
-                    {userRole === 'dueno' ? '👑 DUEÑO' : '💼 TRABAJADOR'}
-                  </span>
-                  <span
-                    className={`px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-wider flex items-center gap-1 border ${
-                      sesionCaja && sesionCaja.estado === 'abierta'
-                        ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60'
-                        : 'bg-rose-950/80 text-rose-300 border-rose-700/60'
-                    }`}
-                    title={sesionCaja && sesionCaja.estado === 'abierta' ? 'Caja abierta y operativa' : 'Caja actualmente cerrada'}
-                  >
-                    <span className={`w-1.5 h-1.5 rounded-full ${sesionCaja && sesionCaja.estado === 'abierta' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
-                    <span>{sesionCaja && sesionCaja.estado === 'abierta' ? '🟢 CAJA ABIERTA' : '🔴 CAJA CERRADA'}</span>
+                    {userRole === 'dueno' ? '👑 DUEÑO' : '💼 STAFF'}
                   </span>
                 </div>
-                <span className="text-[10px] text-[#A69F93] font-bold block truncate capitalize mt-0.5">
-                  {allowedNavItems.find((i) => i.id === activeSection)?.label || activeSection}
-                </span>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sesionCaja && sesionCaja.estado === 'abierta' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+                  <span className="text-[10px] text-[#A69F93] font-bold truncate">
+                    {sesionCaja && sesionCaja.estado === 'abierta' ? 'Caja Abierta' : 'Caja Cerrada'}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -1849,22 +1841,59 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           {/* Right side quick actions */}
           <div className="flex items-center gap-1.5 shrink-0">
             <button
+              onClick={reloadAllData}
+              className="p-2 rounded-xl bg-[#1C1A17] text-[#A69F93] hover:text-white border border-[#2B2722] transition-colors cursor-pointer active:scale-95"
+              title="Actualizar datos"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+
+            <button
               onClick={onExitAdmin}
-              className="px-2.5 py-1.5 rounded-xl bg-[#1C1A17] text-white hover:text-[#E6C687] text-xs font-bold border border-[#2B2722] flex items-center gap-1 cursor-pointer transition-colors"
+              className="px-2.5 py-1.5 rounded-xl bg-[#1C1A17] text-white hover:text-[#E6C687] text-xs font-bold border border-[#2B2722] flex items-center gap-1 cursor-pointer transition-colors active:scale-95"
               title="Ver Tienda Pública"
             >
               <Globe className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden sm:inline">Tienda</span>
+              <span className="text-[11px] font-bold">Tienda</span>
             </button>
 
             <button
               onClick={onLogout}
-              className="p-1.5 rounded-xl bg-rose-950/60 text-rose-400 hover:text-white border border-rose-800 transition-colors cursor-pointer"
+              className="p-1.5 rounded-xl bg-rose-950/60 text-rose-400 hover:text-white border border-rose-800 transition-colors cursor-pointer active:scale-95"
               title="Cerrar Sesión"
             >
               <LogOut className="w-3.5 h-3.5" />
             </button>
           </div>
+        </div>
+
+        {/* Quick Horizontal Tab Bar on Mobile & Tablets: 1-tap switching without opening drawer! */}
+        <div className="flex items-center gap-1.5 overflow-x-auto px-2.5 py-1.5 border-t border-[#221F1C] bg-[#12100E] no-scrollbar touch-pan-x scroll-smooth">
+          {allowedNavItems.map((item) => {
+            const Icon = item.icon;
+            const isSelected = activeSection === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveSection(item.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all cursor-pointer shrink-0 active:scale-95 touch-manipulation ${
+                  isSelected
+                    ? 'bg-[#C59A4D] text-[#141312] shadow-sm font-black'
+                    : 'bg-[#1C1A17] text-[#A69F93] hover:text-white border border-[#282420]'
+                }`}
+              >
+                <Icon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-[#141312]' : 'text-[#C59A4D]'}`} />
+                <span>{item.label}</span>
+                {item.badge > 0 && (
+                  <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
+                    isSelected ? 'bg-black text-[#E6C687]' : 'bg-rose-500 text-white'
+                  }`}>
+                    {item.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -2168,9 +2197,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* Main Content Viewport */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
         {/* Top bar header */}
-        <header className="bg-[#0F0E0D] border-b border-[#26221E] px-4 sm:px-6 py-3.5 sm:py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+        <header className="bg-[#0F0E0D] border-b border-[#26221E] px-3.5 sm:px-6 py-2.5 sm:py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
           <div>
-            <h1 className="text-xl sm:text-2xl font-black text-white font-heading capitalize leading-tight">
+            <h1 className="text-lg sm:text-2xl font-black text-white font-heading capitalize leading-tight">
               {activeSection === 'dashboard' && 'Dashboard General'}
               {activeSection === 'pedidos' && 'Gestión de Pedidos & Comprobantes'}
               {activeSection === 'ventas' && 'Módulo de Ventas & Facturación'}
@@ -2183,7 +2212,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {activeSection === 'clientes' && 'Directorio de Clientes'}
               {activeSection === 'usuarios' && 'Gestión de Usuarios, Roles & Permisos'}
             </h1>
-            <p className="text-xs text-[#A69F93] mt-0.5">
+            <p className="text-xs text-[#A69F93] mt-0.5 hidden sm:block">
               {activeSection === 'dashboard' && 'Métricas operativas y financieras generales de AlexStore'}
               {activeSection === 'pedidos' && 'Verifica comprobantes de pago por Yappy y Transferencias, y aprueba compras'}
               {activeSection === 'ventas' && 'Ventas web aprobadas y registro de ventas manuales de mostrador'}
@@ -3130,7 +3159,151 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </div>
                     ) : (
                       <div className="bg-[#13110F] rounded-2xl sm:rounded-3xl border border-[#26221E] overflow-hidden shadow-xl text-white">
-                        <div className="overflow-x-auto">
+                        {/* 1. Mobile & Tablet Cards View (< 1024px) */}
+                        <div className="block lg:hidden divide-y divide-[#221F1C]">
+                          {ventasFiltradasPorPeriodo.map((v) => {
+                            const hasSaldo = Boolean(v.saldo_pendiente && v.saldo_pendiente > 0 && v.estado_pago !== 'completo');
+                            return (
+                              <div key={v.id || v.codigo} className="p-3.5 sm:p-4 space-y-3 bg-[#13110F] hover:bg-[#181614] transition-colors">
+                                {/* Header: Código, Tipo, Fecha */}
+                                <div className="flex items-center justify-between gap-2 flex-wrap">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-black text-sm text-[#E6C687]">{v.codigo}</span>
+                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                                      v.tipo === 'web'
+                                        ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60'
+                                        : 'bg-[#25221F] text-slate-300 border border-[#332E27]'
+                                    }`}>
+                                      {v.tipo || 'web'}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] text-[#A69F93] font-mono">
+                                    {v.creado_en ? new Date(v.creado_en).toLocaleString('es-PA') : 'Reciente'}
+                                  </span>
+                                </div>
+
+                                {/* Cliente & Cajero */}
+                                <div className="flex items-start justify-between gap-2 text-xs">
+                                  <div>
+                                    <span className="text-[10px] text-[#A69F93] uppercase font-bold block">Cliente</span>
+                                    <strong className="text-white text-xs block">{v.cliente_nombre}</strong>
+                                    {v.cliente_telefono && (
+                                      <span className="text-[10px] text-[#A69F93] font-mono block">📞 {v.cliente_telefono}</span>
+                                    )}
+                                  </div>
+                                  <div className="text-right">
+                                    <span className="text-[10px] text-[#A69F93] uppercase font-bold block">Registrado por</span>
+                                    <span className="text-xs text-slate-200 font-bold block">{v.cajero_nombre || (v.tipo === 'web' ? 'Web' : 'Cajero')}</span>
+                                    <span className="text-[10px] text-[#C59A4D] font-bold uppercase">{v.metodo_pago}</span>
+                                  </div>
+                                </div>
+
+                                {/* Descripción / Notas si existe */}
+                                {(v.descripcion || v.notas) && (
+                                  <div className="p-2 rounded-xl bg-[#181614] border border-[#332E27] text-[11px] text-amber-200/95 leading-relaxed">
+                                    <strong className="text-[#E6C687] mr-1">📝 Descripción:</strong>
+                                    {v.descripcion || v.notas}
+                                  </div>
+                                )}
+
+                                {/* Prendas / Items */}
+                                {v.items && v.items.length > 0 && (
+                                  <div className="space-y-1.5 pt-1">
+                                    <span className="text-[10px] font-black uppercase text-[#8C8375] block">
+                                      Prendas ({v.items.reduce((s, it) => s + (it.cantidad || 1), 0)}):
+                                    </span>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                      {v.items.map((it, idx) => {
+                                        const prodRef = productos.find(
+                                          (p) => p.id === (it.producto_id || it.id) || p.nombre === it.nombre
+                                        );
+                                        const prodImg = it.imagen_url || prodRef?.imagen_url || prodRef?.imagenes?.[0];
+                                        const varDesc =
+                                          it.variante_titulo ||
+                                          (it.talla ? `Talla: ${it.talla}` : null) ||
+                                          (it.color ? `Color: ${it.color}` : null);
+                                        return (
+                                          <div key={idx} className="flex items-center gap-2 bg-[#171513] p-1.5 rounded-xl border border-[#26221E]">
+                                            {prodImg ? (
+                                              <img
+                                                src={prodImg}
+                                                alt={it.nombre}
+                                                onClick={() => setZoomedProductImage({ url: prodImg, title: it.nombre, subtitle: varDesc || undefined })}
+                                                className="w-10 h-10 object-cover rounded-lg bg-black shrink-0 cursor-pointer hover:opacity-80"
+                                                title="Click para ampliar foto"
+                                              />
+                                            ) : (
+                                              <div className="w-10 h-10 rounded-lg bg-[#221F1C] flex items-center justify-center text-[8px] text-[#7A7368] shrink-0">
+                                                Foto
+                                              </div>
+                                            )}
+                                            <div className="min-w-0 flex-1">
+                                              <span className="font-bold text-white text-[11px] block truncate">{it.nombre}</span>
+                                              <div className="flex items-center gap-1.5 text-[10px] text-[#A69F93]">
+                                                <span className="font-black text-[#E6C687]">x{it.cantidad || 1}</span>
+                                                {varDesc && <span className="text-slate-300">({varDesc})</span>}
+                                                {it.precio && <span>${Number(it.precio).toFixed(2)}</span>}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Footer: Monto y Acciones */}
+                                <div className="pt-2 border-t border-[#221F1C] flex items-center justify-between gap-2 flex-wrap">
+                                  <div>
+                                    {userRole === 'cajero' ? (
+                                      <span className="text-xs font-bold text-slate-300">
+                                        {v.items?.length || 1} prenda(s)
+                                      </span>
+                                    ) : (
+                                      <div className="flex items-baseline gap-2 flex-wrap">
+                                        <span className="text-xs text-[#A69F93]">Total:</span>
+                                        <span className="text-base font-black text-white">${Number(v.total).toFixed(2)}</span>
+                                        {hasSaldo && (
+                                          <span className="text-[10px] font-extrabold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-800/80">
+                                            Debe: ${Number(v.saldo_pendiente || 0).toFixed(2)}
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    {hasSaldo && (
+                                      <button
+                                        type="button"
+                                        disabled={liquidandoVentaId === (v.id || v.codigo)}
+                                        onClick={() => handleLiquidarVenta(v.id || v.codigo)}
+                                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center gap-1 shadow-sm transition-all active:scale-95 cursor-pointer disabled:opacity-50 touch-manipulation"
+                                      >
+                                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                        <span>{liquidandoVentaId === (v.id || v.codigo) ? 'Cobrando...' : 'COBRAR SALDO'}</span>
+                                      </button>
+                                    )}
+
+                                    {(userRole === 'dueno' || userRole === 'administrador') && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEliminarVenta(v.id || v.codigo)}
+                                        className="px-2.5 py-1.5 rounded-xl text-rose-400 bg-rose-950/40 hover:bg-rose-950/80 border border-rose-900/50 font-bold text-xs inline-flex items-center gap-1 transition-colors cursor-pointer touch-manipulation"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                        <span>Eliminar</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* 2. Desktop Table View (>= 1024px) */}
+                        <div className="hidden lg:block overflow-x-auto">
                           <table className="w-full min-w-[950px] text-left text-xs">
                             <thead className="bg-[#1A1816] border-b border-[#26221E] text-[10px] font-black uppercase text-[#A69F93] tracking-wider">
                               <tr>
@@ -4745,7 +4918,53 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           </p>
                         </div>
                       ) : (
-                        <div className="overflow-x-auto">
+                        <>
+                          {/* 1. Mobile Cards View (< 640px) */}
+                          <div className="block sm:hidden divide-y divide-[#221F1C]">
+                          {gastosFiltrados.map((g) => (
+                            <div key={g.id || g.concepto} className="p-3.5 space-y-2.5 bg-[#13110F] hover:bg-[#181614] transition-colors">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <strong className="text-white text-sm block font-extrabold">{g.concepto}</strong>
+                                  {g.notas && (
+                                    <p className="text-[11px] text-[#A69F93] mt-0.5">{g.notas}</p>
+                                  )}
+                                </div>
+                                <span className="font-black text-rose-400 text-base shrink-0">
+                                  -${Number(g.monto).toFixed(2)}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#221F1C] text-xs flex-wrap">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#1E1B18] border border-[#38332B] text-[#E6C687]">
+                                    {g.categoria}
+                                  </span>
+                                  <span className="text-[#A69F93] text-[10px] font-mono">
+                                    {g.fecha ? new Date(g.fecha).toLocaleDateString('es-PA') : 'Reciente'}
+                                  </span>
+                                  <span className="text-[10px] text-slate-300">
+                                    Por: {g.creado_por || 'Admin'}
+                                  </span>
+                                </div>
+
+                                {g.id && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleEliminarGasto(g.id!, g.concepto)}
+                                    className="px-2.5 py-1 rounded-lg text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 font-bold text-xs inline-flex items-center gap-1 transition-colors cursor-pointer touch-manipulation active:scale-95"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>Eliminar</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* 2. Desktop Table View (>= 640px) */}
+                        <div className="hidden sm:block overflow-x-auto">
                           <table className="w-full min-w-[620px] text-left text-xs">
                             <thead className="bg-[#1A1816] border-b border-[#26221E] text-[10px] font-black uppercase text-[#E6C687] tracking-wider">
                               <tr>
@@ -4798,7 +5017,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             </tbody>
                           </table>
                         </div>
-                      )}
+                      </>
+                    )}
                     </div>
                   </>
                 );
@@ -4959,9 +5179,108 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              {/* Tabla de Movimientos */}
-              <div className="bg-[#13110F] rounded-3xl border border-[#26221E] overflow-hidden shadow-md">
-                <div className="overflow-x-auto">
+              {/* Tabla de Movimientos & Mobile Cards */}
+              <div className="bg-[#13110F] rounded-2xl sm:rounded-3xl border border-[#26221E] overflow-hidden shadow-md">
+                {/* 1. Mobile Cards View (< 640px) */}
+                <div className="block sm:hidden divide-y divide-[#221F1C]">
+                  {movimientos
+                    .filter((m) => {
+                      if (movimientosModuloFilter !== 'todos' && m.modulo !== movimientosModuloFilter) return false;
+                      if (movimientosRolFilter !== 'todos' && m.rol !== movimientosRolFilter) return false;
+                      if (movimientosFechaFilter) {
+                        const dStr = m.creado_en ? new Date(m.creado_en).toISOString().slice(0, 10) : '';
+                        if (dStr !== movimientosFechaFilter) return false;
+                      }
+                      if (movimientosSearch.trim()) {
+                        const query = movimientosSearch.toLowerCase();
+                        const matchesNombre = m.usuario_nombre.toLowerCase().includes(query);
+                        const matchesEmail = m.usuario_email.toLowerCase().includes(query);
+                        const matchesAccion = m.accion.toLowerCase().includes(query);
+                        const matchesDetalles = (m.detalles || '').toLowerCase().includes(query);
+                        if (!matchesNombre && !matchesEmail && !matchesAccion && !matchesDetalles) {
+                          return false;
+                        }
+                      }
+                      return true;
+                    })
+                    .map((mov) => {
+                      const dateObj = new Date(mov.creado_en);
+                      const formattedDate = dateObj.toLocaleDateString('es-PA', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                      });
+                      const formattedTime = dateObj.toLocaleTimeString('es-PA', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: true,
+                      });
+                      const isWorker = mov.rol === 'cajero' || mov.rol === 'trabajador';
+
+                      return (
+                        <div key={mov.id} className="p-3.5 space-y-2 bg-[#13110F] hover:bg-[#181614] transition-colors">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] text-[#A69F93] font-mono">
+                              {formattedTime} • {formattedDate}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-[#1E1B18] text-[#E6C687] border border-[#38332B]">
+                              {mov.modulo || 'general'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 ${
+                              isWorker ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-[#E6C687] border border-amber-800'
+                            }`}>
+                              {mov.usuario_nombre.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <strong className="text-xs text-white">{mov.usuario_nombre}</strong>
+                                <span className={`px-1.5 py-0.2 rounded text-[8px] font-black uppercase ${
+                                  isWorker ? 'bg-emerald-950/80 text-emerald-300' : 'bg-amber-950/80 text-[#E6C687]'
+                                }`}>
+                                  {isWorker ? 'TRABAJADOR' : mov.rol.toUpperCase()}
+                                </span>
+                              </div>
+                            </div>
+                            {userRole === 'dueno' && (
+                              <button
+                                onClick={() => handleEliminarMovimientoRegistro(mov.id)}
+                                className="p-1 rounded-lg text-rose-400 hover:bg-rose-950/50"
+                                title="Eliminar registro"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+
+                          <div>
+                            <span className={`inline-block px-2 py-0.5 rounded-lg text-[10px] font-extrabold ${
+                              mov.accion.includes('Aprobó') || mov.accion.includes('Verificado')
+                                ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/80'
+                                : mov.accion.includes('Rechazó')
+                                ? 'bg-rose-950/60 text-rose-300 border border-rose-800/80'
+                                : mov.accion.includes('Stock')
+                                ? 'bg-sky-950/60 text-sky-300 border border-sky-800/80'
+                                : 'bg-amber-950/60 text-[#E6C687] border border-amber-800/80'
+                            }`}>
+                              {mov.accion}
+                            </span>
+                          </div>
+
+                          {mov.detalles && (
+                            <p className="text-[11px] text-[#C9BFB0] leading-relaxed bg-[#171513] p-2 rounded-xl border border-[#26221E]">
+                              {mov.detalles}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+
+                {/* 2. Desktop Table View (>= 640px) */}
+                <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full min-w-[700px] text-left text-xs">
                     <thead className="bg-[#1A1816] border-b border-[#26221E] text-[10px] font-black uppercase text-[#E6C687] tracking-wider">
                       <tr>
@@ -5772,9 +6091,124 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </button>
               </div>
 
-              {/* Table (Image 5) */}
-              <div className="bg-[#13110F] rounded-3xl border border-[#26221E] overflow-hidden shadow-md">
-                <div className="overflow-x-auto">
+              {/* Table & Mobile Cards */}
+              <div className="bg-[#13110F] rounded-2xl sm:rounded-3xl border border-[#26221E] overflow-hidden shadow-md">
+                {/* 1. Mobile Cards View (< 640px) */}
+                <div className="block sm:hidden divide-y divide-[#221F1C]">
+                  {productos
+                    .filter((p) => {
+                      if (categoriaFilter !== 'todas' && p.categoria_id !== categoriaFilter) return false;
+                      if (searchQuery.trim()) {
+                        return p.nombre.toLowerCase().includes(searchQuery.toLowerCase());
+                      }
+                      return true;
+                    })
+                    .map((prod) => {
+                      const stock = prod.stock ?? 0;
+                      const isAgotado = stock <= 0;
+                      const isBajo = stock > 0 && stock < 5;
+                      const prodImg = prod.imagen_url || (prod.imagenes && prod.imagenes[0]) || '';
+                      const isArreglo = isArregloFutbol(undefined, prod, categorias);
+
+                      return (
+                        <div key={prod.id} className="p-3.5 space-y-3 bg-[#13110F] hover:bg-[#181614] transition-colors">
+                          <div className="flex items-start gap-3">
+                            {prodImg ? (
+                              <img
+                                src={prodImg}
+                                alt={prod.nombre}
+                                onClick={() => setZoomedProductImage({ url: prodImg, title: prod.nombre })}
+                                className="w-16 h-18 object-cover rounded-xl bg-black border border-[#2D2822] shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                                title="Click para ampliar foto"
+                              />
+                            ) : (
+                              <div className="w-16 h-18 rounded-xl bg-[#1C1A17] border border-[#2D2822] flex items-center justify-center text-[10px] text-[#7A7368] shrink-0 font-bold">
+                                Sin foto
+                              </div>
+                            )}
+
+                            <div className="min-w-0 flex-1">
+                              <h4 className="font-extrabold text-sm text-white line-clamp-2 leading-snug">
+                                {prod.nombre}
+                              </h4>
+                              <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                                <span className="text-[11px] text-[#A69F93]">
+                                  {categorias.find((c) => c.id === prod.categoria_id)?.nombre || 'General'}
+                                </span>
+                                {isArreglo && (
+                                  <span className="px-1.5 py-0.2 rounded bg-emerald-950/80 border border-emerald-700/80 text-emerald-400 text-[9px] font-black uppercase">
+                                    Arreglo
+                                  </span>
+                                )}
+                              </div>
+                              <div className="mt-1">
+                                {isArreglo ? (
+                                  <span className="text-emerald-400 text-xs font-bold flex items-center gap-1">
+                                    <MessageCircle className="w-3.5 h-3.5 fill-current shrink-0" />
+                                    Cotización WhatsApp
+                                  </span>
+                                ) : (
+                                  <span className="text-sm font-black text-[#E6C687]">
+                                    ${Number(prod.precio).toFixed(2)} USD
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#221F1C] flex-wrap text-xs">
+                            <div className="flex items-center gap-2">
+                              {isAgotado ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-950/60 text-rose-300 font-bold text-[10px] border border-rose-800/80">
+                                  <XCircle className="w-3 h-3" />
+                                  Agotado (0)
+                                </span>
+                              ) : isBajo ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-950/60 text-[#E6C687] font-bold text-[10px] border border-amber-800/80">
+                                  <AlertTriangle className="w-3 h-3 text-amber-400" />
+                                  Últimas {stock}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-950/60 text-emerald-300 font-bold text-[10px] border border-emerald-800/80">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                  Stock: {stock}
+                                </span>
+                              )}
+
+                              <span className={`inline-flex items-center gap-1 text-[10px] font-bold ${prod.activo ? 'text-emerald-400' : 'text-[#A69F93]'}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${prod.activo ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                                {prod.activo ? 'Activo' : 'Inactivo'}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => {
+                                  setProductoToEdit(prod);
+                                  setIsModalProductoOpen(true);
+                                }}
+                                className="px-3 py-1.5 rounded-xl text-[#E6C687] bg-[#1E1B18] hover:bg-[#282420] border border-[#38332B] font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer active:scale-95 touch-manipulation"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                                <span>Editar</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleDeleteProducto(prod.id, prod.nombre)}
+                                className="p-1.5 rounded-xl text-rose-400 bg-rose-950/40 hover:bg-rose-950 border border-rose-900/50 transition-colors cursor-pointer active:scale-95 touch-manipulation"
+                                title="Eliminar producto"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+
+                {/* 2. Desktop Table View (>= 640px) */}
+                <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full min-w-[650px] text-left text-xs">
                     <thead className="bg-[#1A1816] border-b border-[#26221E] text-[#E6C687] font-bold uppercase tracking-wider text-[10px]">
                       <tr>
@@ -7579,6 +8013,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       varTitulo = foundV?.titulo || (foundV as any)?.nombre || ventaManualVarianteId;
                     }
 
+                    const cleanTalla = (ventaManualTalla.startsWith('__custom__:') ? ventaManualTalla.replace('__custom__:', '').trim() : ventaManualTalla.trim()) || (hasVariantes ? varTitulo : undefined);
+
                     const newItem: VentaManualItem = {
                       producto_id: selectedProd.id,
                       nombre: selectedProd.nombre,
@@ -7586,7 +8022,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       precio: selectedProd.precio,
                       subtotal: subtotalItem,
                       imagen_url: prodImg,
-                      talla: ventaManualTalla || (hasVariantes ? varTitulo : undefined),
+                      talla: cleanTalla || undefined,
                       color: ventaManualColor || undefined,
                       variante_titulo: varTitulo || undefined,
                     };
@@ -7640,13 +8076,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       {/* Talla, Color y Variantes */}
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                         {selectedProd.tallas_stock && Object.keys(selectedProd.tallas_stock).length > 0 ? (
-                          <div className="sm:col-span-2">
+                          <div className="sm:col-span-2 space-y-1">
                             <label className="text-[10px] font-bold text-[#E6C687] block mb-1">
                               👕 Talla a Vender (Existencias de cada talla):
                             </label>
                             <select
-                              value={ventaManualTalla}
-                              onChange={(e) => setVentaManualTalla(e.target.value)}
+                              value={ventaManualTalla.startsWith('__custom__:') ? '__custom__' : ventaManualTalla}
+                              onChange={(e) => {
+                                if (e.target.value === '__custom__') {
+                                  setVentaManualTalla('__custom__:');
+                                } else {
+                                  setVentaManualTalla(e.target.value);
+                                }
+                              }}
                               className="w-full bg-[#1A1816] text-[#E6C687] font-bold px-2.5 py-1.5 rounded-lg border border-[#C59A4D]/50 text-xs focus:outline-none"
                             >
                               <option value="">-- Seleccionar Talla a Descontar --</option>
@@ -7655,7 +8097,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   Talla {t} — ({cant} disponible{cant === 1 ? '' : 's'}{cant <= 0 ? ' • AGOTADA' : ''})
                                 </option>
                               ))}
+                              <option value="__custom__">✏️ Otra talla o número (ej: 2, 8, 14, 38, etc.)...</option>
                             </select>
+                            {ventaManualTalla.startsWith('__custom__:') && (
+                              <input
+                                type="text"
+                                placeholder="Escribe el número o letra (ej: 2, 8, 14, 38, etc.)..."
+                                value={ventaManualTalla.replace('__custom__:', '')}
+                                onChange={(e) => setVentaManualTalla(`__custom__:${e.target.value}`)}
+                                className="w-full bg-[#1A1816] text-[#E6C687] font-bold px-2.5 py-1.5 rounded-lg border border-[#C59A4D] text-xs focus:outline-none"
+                                autoFocus
+                              />
+                            )}
                           </div>
                         ) : hasVariantes ? (
                           <div className="sm:col-span-2">
@@ -7682,13 +8135,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             </select>
                           </div>
                         ) : selectedProd.tallas && selectedProd.tallas.length > 0 ? (
-                          <div className="sm:col-span-2">
+                          <div className="sm:col-span-2 space-y-1">
                             <label className="text-[10px] font-bold text-[#E6C687] block mb-1">
                               👕 Talla a Vender:
                             </label>
                             <select
-                              value={ventaManualTalla}
-                              onChange={(e) => setVentaManualTalla(e.target.value)}
+                              value={ventaManualTalla.startsWith('__custom__:') ? '__custom__' : ventaManualTalla}
+                              onChange={(e) => {
+                                if (e.target.value === '__custom__') {
+                                  setVentaManualTalla('__custom__:');
+                                } else {
+                                  setVentaManualTalla(e.target.value);
+                                }
+                              }}
                               className="w-full bg-[#1A1816] text-[#E6C687] font-bold px-2.5 py-1.5 rounded-lg border border-[#C59A4D]/50 text-xs focus:outline-none"
                             >
                               <option value="">-- Seleccionar Talla --</option>
@@ -7697,17 +8156,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   Talla {t}
                                 </option>
                               ))}
+                              <option value="__custom__">✏️ Otra talla o número (ej: 2, 8, 14, 38, etc.)...</option>
                             </select>
+                            {ventaManualTalla.startsWith('__custom__:') && (
+                              <input
+                                type="text"
+                                placeholder="Escribe el número o letra (ej: 2, 8, 14, 38, etc.)..."
+                                value={ventaManualTalla.replace('__custom__:', '')}
+                                onChange={(e) => setVentaManualTalla(`__custom__:${e.target.value}`)}
+                                className="w-full bg-[#1A1816] text-[#E6C687] font-bold px-2.5 py-1.5 rounded-lg border border-[#C59A4D] text-xs focus:outline-none"
+                                autoFocus
+                              />
+                            )}
                           </div>
                         ) : (
                           <div>
                             <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
-                              Talla (ej: S, M, L, XL):
+                              Talla (Número o Letra):
                             </label>
                             <input
                               type="text"
-                              placeholder="Talla..."
-                              value={ventaManualTalla}
+                              placeholder="Ej: 2, 8, 14, 38, S, M, XL..."
+                              value={ventaManualTalla.replace('__custom__:', '')}
                               onChange={(e) => setVentaManualTalla(e.target.value)}
                               className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
                             />

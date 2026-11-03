@@ -63,10 +63,12 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
   const [variantes, setVariantes] = useState<VarianteProducto[]>(productoToEdit?.variantes || []);
 
   // Tallas y Colores directos para el cliente
-  const [tallas, setTallas] = useState<string[]>(productoToEdit?.tallas || []);
+  const [tallas, setTallas] = useState<string[]>(productoToEdit?.tallas ? productoToEdit.tallas.map(String) : []);
   const [colores, setColores] = useState<string[]>(productoToEdit?.colores || []);
   const [tallasStock, setTallasStock] = useState<Record<string, number>>(productoToEdit?.tallas_stock || {});
   const [tallaInput, setTallaInput] = useState('');
+  const [tallaCategoryTab, setTallaCategoryTab] = useState<'letras' | 'ninos' | 'calzado_us' | 'calzado_eu' | 'pantalones'>('letras');
+  const [stockMasivoInput, setStockMasivoInput] = useState('5');
   const [colorInput, setColorInput] = useState('');
 
   // Input temporal para agregar valor a un atributo
@@ -94,9 +96,34 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
       setStockMinimo(String(productoToEdit.stock_minimo ?? 3));
       setDescripcion(productoToEdit.descripcion || '');
       setImagenes(productoToEdit.imagenes || (productoToEdit.imagen_url ? [productoToEdit.imagen_url] : []));
-      setTallas(productoToEdit.tallas || []);
+
+      // Extraer tallas (soporta letras y números como 2, 4, 8, 14, 38, etc.)
+      let loadedTallas: string[] = [];
+      if (Array.isArray(productoToEdit.tallas) && productoToEdit.tallas.length > 0) {
+        loadedTallas = productoToEdit.tallas.map(String).map((s) => s.trim()).filter(Boolean);
+      } else if (productoToEdit.tallas_stock && Object.keys(productoToEdit.tallas_stock).length > 0) {
+        loadedTallas = Object.keys(productoToEdit.tallas_stock).map(String);
+      } else if (typeof (productoToEdit as any).tallas === 'string' && (productoToEdit as any).tallas.trim()) {
+        const raw = (productoToEdit as any).tallas.replace(/^\{|\}$|^\[|\]$/g, '');
+        loadedTallas = raw.split(/[,;\s]+/).map((s: string) => s.trim().replace(/^"|"$/g, '')).filter(Boolean);
+      } else if (productoToEdit.atributos && Array.isArray(productoToEdit.atributos)) {
+        const tallaAttr = productoToEdit.atributos.find((a: any) => /talla|tallas|size|medida|numero|número|calzado/i.test(a.nombre || ''));
+        if (tallaAttr && Array.isArray(tallaAttr.valores)) {
+          loadedTallas = tallaAttr.valores.map(String).map((s) => s.trim()).filter(Boolean);
+        }
+      }
+
+      const loadedTallasStock: Record<string, number> = { ...(productoToEdit.tallas_stock || {}) };
+      const defaultPerTalla = Math.max(1, Math.floor((productoToEdit.stock || 10) / (loadedTallas.length || 1)));
+      loadedTallas.forEach((t) => {
+        if (loadedTallasStock[t] === undefined) {
+          loadedTallasStock[t] = defaultPerTalla;
+        }
+      });
+
+      setTallas(loadedTallas);
       setColores(productoToEdit.colores || []);
-      setTallasStock(productoToEdit.tallas_stock || {});
+      setTallasStock(loadedTallasStock);
       setTieneVariantes(Boolean(productoToEdit.tiene_variantes || (productoToEdit.variantes && productoToEdit.variantes.length > 0)));
       setAtributos(productoToEdit.atributos || []);
       setVariantes(productoToEdit.variantes || []);
@@ -141,27 +168,78 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
   };
 
   const handleToggleTalla = (t: string) => {
-    if (tallas.includes(t)) {
-      setTallas((prev) => prev.filter((x) => x !== t));
+    const cleanT = String(t).trim();
+    if (tallas.includes(cleanT)) {
+      setTallas((prev) => prev.filter((x) => x !== cleanT));
     } else {
-      setTallas((prev) => [...prev, t]);
+      setTallas((prev) => [...prev, cleanT]);
       setTallasStock((prev) => ({
         ...prev,
-        [t]: prev[t] !== undefined ? prev[t] : 5,
+        [cleanT]: prev[cleanT] !== undefined ? prev[cleanT] : 5,
       }));
     }
   };
 
+  // Agregar múltiples tallas manuales separadas por coma, punto y coma, barra o espacio
+  // Ej: "2, 9, 8, 14" agrega las 4 tallas por separado
   const handleAddManualTalla = () => {
-    const clean = tallaInput.trim();
-    if (clean && !tallas.includes(clean)) {
-      setTallas((prev) => [...prev, clean]);
-      setTallasStock((prev) => ({
-        ...prev,
-        [clean]: prev[clean] !== undefined ? prev[clean] : 5,
-      }));
-      setTallaInput('');
-    }
+    if (!tallaInput.trim()) return;
+    const raw = tallaInput.trim();
+    const delimiter = /[,;/]/.test(raw) ? /[,;/]+/ : /\s+/;
+    const pieces = raw
+      .split(delimiter)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+    if (pieces.length === 0) return;
+
+    setTallas((prev) => {
+      const existing = new Set(prev);
+      pieces.forEach((p) => existing.add(p));
+      return Array.from(existing);
+    });
+
+    setTallasStock((prev) => {
+      const updated = { ...prev };
+      pieces.forEach((p) => {
+        if (updated[p] === undefined) {
+          updated[p] = 5;
+        }
+      });
+      return updated;
+    });
+
+    setTallaInput('');
+  };
+
+  // Agregar todo un grupo de tallas predefinido (ej: todas las de niños)
+  const handleAddGroupTallas = (grupoTallas: string[]) => {
+    setTallas((prev) => {
+      const existing = new Set(prev);
+      grupoTallas.forEach((t) => existing.add(t));
+      return Array.from(existing);
+    });
+    setTallasStock((prev) => {
+      const updated = { ...prev };
+      grupoTallas.forEach((t) => {
+        if (updated[t] === undefined) {
+          updated[t] = 5;
+        }
+      });
+      return updated;
+    });
+  };
+
+  // Asignar el mismo stock a todas las tallas activas con un solo clic
+  const handleStockMasivo = (qty: number) => {
+    const val = Math.max(0, qty);
+    setTallasStock((prev) => {
+      const updated: Record<string, number> = { ...prev };
+      tallas.forEach((t) => {
+        updated[t] = val;
+      });
+      return updated;
+    });
   };
 
   // Si tiene variantes, calcular el stock total sumando las variantes
@@ -619,66 +697,168 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
                 )}
               </div>
 
-              {/* Botones rápidos de tallas */}
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-[10px] text-[#8C8375] font-bold mr-1">Rápidos:</span>
-                {['S', 'M', 'L', 'XL', '2XL', '3XL', 'Única'].map((t) => {
-                  const exists = tallas.includes(t);
+              {/* Selector de tipo de talla: Letras o Números */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between flex-wrap gap-1">
+                  <span className="text-[11px] font-extrabold text-[#1A1918]">
+                    ¿Cómo se mide la talla de este producto?
+                  </span>
+                  <span className="text-[10px] text-[#8C8375]">
+                    Elige por Letras, Números o escribe a mano
+                  </span>
+                </div>
+
+                {/* Pestañas de tipos de tallas */}
+                <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none">
+                  {[
+                    { id: 'letras' as const, label: '🔤 Letras (Adulto)', desc: 'XS, S, M, L, XL...' },
+                    { id: 'ninos' as const, label: '🔢 Números Niños (2, 4, 6... 16)', desc: '2, 4, 6, 8, 10, 12, 14, 16' },
+                    { id: 'calzado_us' as const, label: '👟 Calzado US (6-12)', desc: 'Guayos y zapatos' },
+                    { id: 'calzado_eu' as const, label: '👟 Calzado EU (36-44)', desc: 'Tallas 36 a 44' },
+                    { id: 'pantalones' as const, label: '👖 Shorts / Pantalón', desc: '28, 30, 32, 34...' },
+                  ].map((tab) => {
+                    const isActive = tallaCategoryTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setTallaCategoryTab(tab.id)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                          isActive
+                            ? 'bg-[#141312] text-[#E6C687] shadow-xs'
+                            : 'bg-[#FAF8F5] text-[#5A554D] border border-[#DDD7CC] hover:bg-[#F0ECE4]'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Botones de tallas rápidas según la pestaña activa */}
+                {(() => {
+                  const groups: Record<typeof tallaCategoryTab, { tallas: string[]; label: string }> = {
+                    letras: {
+                      label: 'Tallas de Adulto (Letras)',
+                      tallas: ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Única'],
+                    },
+                    ninos: {
+                      label: 'Tallas de Niños y Juvenil (Números)',
+                      tallas: ['2', '4', '6', '8', '10', '12', '14', '16'],
+                    },
+                    calzado_us: {
+                      label: 'Calzado & Guayos Talla US (Números)',
+                      tallas: ['5', '5.5', '6', '6.5', '7', '7.5', '8', '8.5', '9', '9.5', '10', '10.5', '11', '12'],
+                    },
+                    calzado_eu: {
+                      label: 'Calzado & Guayos Talla EU / CO / PA (Números)',
+                      tallas: ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45'],
+                    },
+                    pantalones: {
+                      label: 'Shorts & Pantalones Deportivos (Números)',
+                      tallas: ['26', '28', '30', '32', '34', '36', '38', '40'],
+                    },
+                  };
+
+                  const activeGroup = groups[tallaCategoryTab];
                   return (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => handleToggleTalla(t)}
-                      className={`px-2.5 py-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
-                        exists
-                          ? 'bg-[#141312] text-[#E6C687] border border-[#141312] shadow-xs'
-                          : 'bg-[#FAF8F5] text-[#5A554D] border border-[#DDD7CC] hover:border-[#141312]'
-                      }`}
-                    >
-                      {exists ? `✓ ${t}` : `+ ${t}`}
-                    </button>
+                    <div className="p-2.5 rounded-xl bg-[#FAF8F5] border border-[#E5DFD5] space-y-2">
+                      <div className="flex items-center justify-between flex-wrap gap-1">
+                        <span className="text-[10px] font-extrabold uppercase text-[#7A7368]">
+                          {activeGroup.label}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleAddGroupTallas(activeGroup.tallas)}
+                          className="text-[10px] font-bold text-[#C59A4D] hover:underline cursor-pointer"
+                        >
+                          + Agregar todas ({activeGroup.tallas.length})
+                        </button>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {activeGroup.tallas.map((t) => {
+                          const exists = tallas.includes(t);
+                          return (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => handleToggleTalla(t)}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                                exists
+                                  ? 'bg-[#141312] text-[#E6C687] border border-[#141312] shadow-sm ring-1 ring-[#E6C687]/40'
+                                  : 'bg-white text-[#2C2720] border border-[#DDD7CC] hover:border-[#141312] hover:bg-slate-50'
+                              }`}
+                            >
+                              {exists ? `✓ ${t}` : `+ ${t}`}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   );
-                })}
+                })()}
               </div>
 
-              {/* Input manual para agregar cualquier talla personalizada */}
-              <div className="flex items-center gap-2 pt-1">
-                <input
-                  type="text"
-                  placeholder="Escribe otra talla manual (ej: 38, 40, Oversize, 12 Meses...)"
-                  value={tallaInput}
-                  onChange={(e) => setTallaInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleAddManualTalla();
-                    }
-                  }}
-                  className="flex-1 bg-[#FAF8F5] text-xs px-3.5 py-2 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
-                />
-                <button
-                  type="button"
-                  onClick={handleAddManualTalla}
-                  className="px-3.5 py-2 rounded-xl bg-[#141312] text-[#F5E6BE] text-xs font-bold hover:bg-black transition-colors cursor-pointer shrink-0"
-                >
-                  + Agregar Talla
-                </button>
+              {/* Input manual para escribir CUALQUIER talla por número o letra (soporta comas) */}
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Escribe números o letras (ej: 2, 9, 8, 14 o 38, 39, 40 o M, L, XL)..."
+                    value={tallaInput}
+                    onChange={(e) => setTallaInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddManualTalla();
+                      }
+                    }}
+                    className="flex-1 bg-[#FAF8F5] text-xs px-3.5 py-2 rounded-xl border border-[#E5DFD5] text-[#1A1918] placeholder-[#8C8375] focus:outline-none focus:border-[#C59A4D]"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddManualTalla}
+                    className="px-4 py-2 rounded-xl bg-[#141312] text-[#F5E6BE] text-xs font-black hover:bg-black transition-colors cursor-pointer shrink-0 shadow-xs"
+                  >
+                    + Agregar Talla(s)
+                  </button>
+                </div>
+                <p className="text-[10px] text-[#7A7368]">
+                  💡 Puedes escribir varias tallas separadas por coma (ejemplo: <strong>2, 9, 8, 14</strong>) y se agregarán individualmente con su propio inventario.
+                </p>
               </div>
 
               {/* Chips de tallas activas y control de inventario por talla */}
               {tallas.length > 0 && (
                 <div className="space-y-3 pt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold text-[#1A1918]">
+                      Tallas seleccionadas para este producto:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setTallas([])}
+                      className="text-[10px] text-rose-600 hover:underline font-bold cursor-pointer"
+                    >
+                      Limpiar todas
+                    </button>
+                  </div>
+
                   <div className="flex flex-wrap gap-1.5">
                     {tallas.map((t, idx) => (
                       <span
                         key={idx}
-                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#141312] text-white text-xs font-bold shadow-xs"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#141312] text-white text-xs font-black shadow-xs"
                       >
-                        <span>{t}</span>
+                        <span className="text-[#E6C687]">{t}</span>
+                        <span className="text-[10px] text-slate-300 font-normal">
+                          ({tallasStock[t] ?? 5}u)
+                        </span>
                         <button
                           type="button"
                           onClick={() => handleToggleTalla(t)}
-                          className="text-[#E6C687] hover:text-white cursor-pointer"
+                          className="text-[#E6C687] hover:text-white cursor-pointer ml-0.5"
                           title="Eliminar talla"
                         >
                           <X className="w-3.5 h-3.5" />
@@ -689,28 +869,52 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
 
                   {/* Panel de asignación de cantidades por talla */}
                   <div className="p-3.5 bg-[#FAF8F5] rounded-2xl border border-[#E0D9CD] space-y-2.5">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
                       <div className="flex items-center gap-2">
                         <Boxes className="w-4 h-4 text-[#C59A4D]" />
                         <span className="text-xs font-black uppercase text-[#1A1918]">
-                          Stock Específico por Talla
+                          Stock Específico por Talla ({tallas.length} tallas)
                         </span>
                       </div>
                       <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-[#141312] text-[#E6C687]">
                         Total: {stockTotalTallas} unids.
                       </span>
                     </div>
+
+                    {/* Asignador masivo de stock para ahorrar tiempo */}
+                    <div className="flex items-center justify-between bg-white p-2 rounded-xl border border-[#E5DFD5] flex-wrap gap-2 text-xs">
+                      <span className="text-[11px] font-bold text-[#5A554D]">
+                        ⚡ Asignar el mismo stock a todas:
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number"
+                          min="0"
+                          value={stockMasivoInput}
+                          onChange={(e) => setStockMasivoInput(e.target.value)}
+                          className="w-14 text-center font-black text-xs bg-slate-50 border border-slate-300 rounded-lg py-1 text-black"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleStockMasivo(parseInt(stockMasivoInput, 10) || 0)}
+                          className="px-2.5 py-1 bg-[#141312] text-[#E6C687] hover:bg-black rounded-lg font-black text-[11px] cursor-pointer"
+                        >
+                          Aplicar a todas
+                        </button>
+                      </div>
+                    </div>
+
                     <p className="text-[11px] text-[#7A7368]">
-                      Define cuántas unidades físicas tienes disponibles de cada talla para controlar el inventario con precisión:
+                      Indica cuántas unidades físicas tienes de cada número o letra:
                     </p>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 pt-1">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 pt-1 max-h-60 overflow-y-auto pr-1">
                       {tallas.map((t) => (
                         <div
                           key={t}
                           className="flex items-center justify-between p-2.5 rounded-xl bg-white border-2 border-[#D5CDC0] shadow-xs"
                         >
-                          <span className="font-black text-xs text-black px-2.5 py-1 rounded-lg bg-amber-100 border border-amber-300">
+                          <span className="font-black text-xs text-black px-2.5 py-1 rounded-lg bg-amber-100 border border-amber-300 min-w-8 text-center">
                             {t}
                           </span>
                           <div className="flex items-center gap-1.5">

@@ -55,11 +55,17 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const atributos = useMemo(() => {
     const list: { nombre: string; valores: string[] }[] = [];
 
-    // 1. Tallas configuradas manualmente
-    if (producto.tallas && Array.isArray(producto.tallas) && producto.tallas.length > 0) {
+    // 1. Tallas configuradas (soporta letras y números como 2, 4, 8, 14, 38, etc.)
+    const rawTallas = (producto.tallas && Array.isArray(producto.tallas) && producto.tallas.length > 0)
+      ? producto.tallas.map(String)
+      : (producto.tallas_stock && Object.keys(producto.tallas_stock).length > 0)
+      ? Object.keys(producto.tallas_stock).map(String)
+      : [];
+
+    if (rawTallas.length > 0) {
       list.push({
         nombre: 'Talla',
-        valores: producto.tallas,
+        valores: rawTallas,
       });
     }
 
@@ -67,7 +73,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     if (producto.colores && Array.isArray(producto.colores) && producto.colores.length > 0) {
       list.push({
         nombre: 'Color',
-        valores: producto.colores,
+        valores: producto.colores.map(String),
       });
     }
 
@@ -84,9 +90,14 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       return list;
     }
 
-    // Si no tiene tallas ni atributos configurados explícitamente, detectar de la descripción o estándar
+    // Si es arreglo de fútbol, no forzar tallas de ropa
+    if (isArreglo) {
+      return [];
+    }
+
+    // Si no tiene tallas ni atributos configurados explícitamente, detectar de la descripción
     const descLower = (producto.descripcion || '').toLowerCase();
-    const commonSizes = ['s', 'm', 'l', 'xl', '2xl', '3xl'];
+    const commonSizes = ['xs', 's', 'm', 'l', 'xl', '2xl', '3xl', '4xl'];
     const detected: string[] = [];
     commonSizes.forEach((sz) => {
       const regex = new RegExp(`\\b${sz}\\b`, 'i');
@@ -94,6 +105,17 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
         detected.push(sz.toUpperCase());
       }
     });
+
+    // Detectar números si la descripción incluye "tallas: 2, 4, 6, 8" o similar
+    const numMatches = descLower.match(/tallas?[:\s]+([0-9\s,/-]+)/i);
+    if (numMatches && numMatches[1]) {
+      const parsedNums = numMatches[1].split(/[,/\s-]+/).map(s => s.trim()).filter(s => s.length > 0 && !isNaN(Number(s)));
+      if (parsedNums.length > 0) {
+        parsedNums.forEach(n => {
+          if (!detected.includes(n)) detected.push(n);
+        });
+      }
+    }
 
     const tallasFinales = detected.length > 0 ? detected : ['S', 'M', 'L', 'XL', '2XL'];
     return [
@@ -174,19 +196,19 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-sm">
-      <div className="min-h-full flex items-start sm:items-center justify-center p-3 sm:p-6 py-6 sm:py-10">
-        <div className="relative w-full max-w-3xl bg-white border border-[#E5DFD5] rounded-3xl shadow-2xl overflow-hidden my-auto animate-fade-in max-h-[90dvh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm">
+      <div className="min-h-full flex items-end sm:items-center justify-center p-2 sm:p-6 py-3 sm:py-10">
+        <div className="relative w-full max-w-3xl bg-white border border-[#E5DFD5] rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden my-auto animate-fade-in max-h-[92dvh] overflow-y-auto">
           {/* Close button */}
           <button
             onClick={onClose}
-            className="absolute top-3.5 right-3.5 z-20 w-9 h-9 rounded-full bg-white/90 hover:bg-white text-[#7A7368] hover:text-[#1A1918] flex items-center justify-center border border-[#E5DFD5] shadow-sm transition-colors cursor-pointer"
+            className="absolute top-3 right-3 sm:top-4 sm:right-4 z-20 w-10 h-10 rounded-full bg-white/95 hover:bg-white text-[#7A7368] hover:text-[#1A1918] flex items-center justify-center border border-[#E5DFD5] shadow-sm transition-colors cursor-pointer touch-manipulation active:scale-95"
             aria-label="Cerrar modal"
           >
             <X className="w-5 h-5" />
           </button>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-8 p-4 sm:p-6 md:p-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-8 p-3.5 sm:p-6 md:p-8">
             {/* Gallery Column */}
             <div className="space-y-2.5 sm:space-y-3">
               <div className="relative aspect-[4/5] max-h-[340px] sm:max-h-[440px] w-full bg-[#F7F5F0] rounded-2xl overflow-hidden border border-[#EAE6DF] mx-auto">
@@ -396,9 +418,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   <button
                     type="button"
                     onClick={handleHacerArregloWhatsApp}
-                    className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2.5 shadow-xl transition-all active:scale-98 cursor-pointer"
+                    className="w-full min-h-[46px] py-3.5 sm:py-4 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2.5 shadow-xl transition-all active:scale-98 cursor-pointer touch-manipulation"
                   >
-                    <MessageCircle className="w-5 h-5 fill-current" />
+                    <MessageCircle className="w-5 h-5 fill-current shrink-0" />
                     <span>HACER ARREGLO POR WHATSAPP (66212802)</span>
                   </button>
                   <p className="text-[11px] text-center text-[#7A7368]">
@@ -409,7 +431,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 <div className="space-y-2.5 pt-1">
                   <button
                     onClick={handleAdd}
-                    className={`w-full py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all active:scale-98 cursor-pointer ${
+                    className={`w-full min-h-[46px] py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all active:scale-98 cursor-pointer touch-manipulation ${
                       added
                         ? 'bg-emerald-600 text-white'
                         : 'bg-[#141312] hover:bg-black text-[#F5E6BE]'
@@ -430,9 +452,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
                   <button
                     onClick={handleWhatsAppDirect}
-                    className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md transition-all active:scale-98 cursor-pointer"
+                    className="w-full min-h-[44px] py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md transition-all active:scale-98 cursor-pointer touch-manipulation"
                   >
-                    <MessageCircle className="w-4 h-4 fill-current" />
+                    <MessageCircle className="w-4 h-4 fill-current shrink-0" />
                     <span>CONSULTAR POR WHATSAPP (66212802)</span>
                   </button>
                 </div>

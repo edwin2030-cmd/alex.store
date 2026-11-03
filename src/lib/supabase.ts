@@ -195,11 +195,26 @@ export async function getProductos(): Promise<Producto[]> {
         } catch {}
       }
 
-      const tallasFromKeys = Object.keys(tallas_stock);
-      const tallas = tallasFromKeys.length > 0
-        ? tallasFromKeys
-        : (Array.isArray(p.tallas) && p.tallas.length > 0) ? p.tallas : (det?.tallas || []);
-      const colores = (Array.isArray(p.colores) && p.colores.length > 0) ? p.colores : (det?.colores || []);
+      // Parsear tallas robustamente (soporta array de textos o números, llaves de jsonb, string postgres {S,M,L} o "2, 4, 8, 14", o atributos)
+      let parsedTallas: string[] = [];
+      if (Object.keys(tallas_stock).length > 0) {
+        parsedTallas = Object.keys(tallas_stock).map(String);
+      } else if (Array.isArray(p.tallas) && p.tallas.length > 0) {
+        parsedTallas = p.tallas.map((x: any) => String(x).trim()).filter(Boolean);
+      } else if (typeof p.tallas === 'string' && p.tallas.trim()) {
+        const raw = p.tallas.replace(/^\{|\}$|^\[|\]$/g, '');
+        parsedTallas = raw.split(/[,;\s]+/).map((s: string) => s.trim().replace(/^"|"$/g, '')).filter(Boolean);
+      } else if (det?.tallas && Array.isArray(det.tallas)) {
+        parsedTallas = det.tallas.map((x: any) => String(x).trim()).filter(Boolean);
+      } else if (p.atributos && Array.isArray(p.atributos)) {
+        const tallaAttr = p.atributos.find((a: any) => /talla|tallas|size|calzado|numero|número/i.test(a?.nombre || ''));
+        if (tallaAttr && Array.isArray(tallaAttr.valores)) {
+          parsedTallas = tallaAttr.valores.map((x: any) => String(x).trim()).filter(Boolean);
+        }
+      }
+
+      const tallas = parsedTallas;
+      const colores = (Array.isArray(p.colores) && p.colores.length > 0) ? p.colores.map(String) : (det?.colores || []);
 
       // Si hay tallas pero no tienen cantidades definidas en tallas_stock, inicializar con el stock del producto
       if (tallas.length > 0 && Object.keys(tallas_stock).length === 0) {
