@@ -1184,13 +1184,14 @@ export async function getVentas(): Promise<Venta[]> {
           cleanNotas = cleanNotas.replace(/^\[VENTA_MANUAL\]\s*/, '').trim();
         }
 
-        const isManual = rawCode.startsWith('VNT-') || metaParsed?.tipo === 'manual' || p.cliente_direccion === 'Venta Mostrador';
+        const isManual = rawCode.startsWith('VNT-') || metaParsed?.tipo === 'manual' || metaParsed?.tipo === 'pedido_especial' || p.cliente_direccion === 'Venta Mostrador';
         const totalNum = Number(p.total) || 0;
         const montoAbonado = metaParsed?.monto_abonado !== undefined ? Number(metaParsed.monto_abonado) : totalNum;
         const saldoPendiente = metaParsed?.saldo_pendiente !== undefined ? Number(metaParsed.saldo_pendiente) : 0;
         const estadoPago = metaParsed?.estado_pago || (p.estado_pago === 'verificado' ? 'completo' : 'abono_pendiente');
         const cajero = metaParsed?.cajero_nombre || metaParsed?.cajero || p.revisado_por || 'Cajero';
         const finalDesc = cleanNotas || metaParsed?.descripcion || metaParsed?.notas || (isManual ? null : `Venta generada del pedido ${p.codigo}.`);
+        const tipoFinal = metaParsed?.tipo || (isManual ? 'manual' : 'web');
 
         // Si ya existe en remoteMap (de la tabla ventas), solo enriquecer si faltan datos
         const existing = remoteMap.get(codVenta) || (p.id ? remoteMap.get(p.id) : undefined);
@@ -1209,7 +1210,7 @@ export async function getVentas(): Promise<Venta[]> {
             cajero_nombre: cajero,
             registrado_por: cajero,
             items: metaParsed?.items || p.items || [],
-            tipo: isManual ? 'manual' : 'web',
+            tipo: tipoFinal,
             notas: finalDesc,
             descripcion: finalDesc,
             creado_en: p.creado_en || p.actualizado_en || new Date().toISOString(),

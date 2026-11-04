@@ -1460,19 +1460,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
       const totalEspecial = Math.round(precioEspecial * cantEspecial * 100) / 100;
       let montoAbonado = totalEspecial;
-      let metodoReal: string = ventaManualMetodo === 'abono_contraentrega' ? 'efectivo' : ventaManualMetodo;
+      let metodoReal: string = (ventaManualMetodo === 'abono_contraentrega' || !ventaManualMetodo) ? 'efectivo' : ventaManualMetodo;
 
       if (pedidoEspecialTipoCobro === 'abono') {
         if (ventaManualTipoAbono === 'mitad') {
           montoAbonado = Math.round((totalEspecial / 2) * 100) / 100;
-          metodoReal = 'abono';
         } else if (ventaManualTipoAbono === 'cero') {
           montoAbonado = 0;
           metodoReal = 'contra_entrega';
         } else {
           const customAb = parseFloat(ventaManualMontoAbonado);
           montoAbonado = isNaN(customAb) ? 0 : Math.min(totalEspecial, Math.max(0, customAb));
-          metodoReal = montoAbonado > 0 ? 'abono' : 'contra_entrega';
+          if (montoAbonado === 0) {
+            metodoReal = 'contra_entrega';
+          }
         }
       }
 
@@ -4030,6 +4031,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                       <div className="flex items-center gap-1.5 flex-wrap">
                                         <span className="font-black text-white text-[11px]">Venta {v.codigo}</span>
                                         <span className="text-[10px] text-[#E6C687] font-bold">({v.cliente_nombre})</span>
+                                        {v.tipo === 'pedido_especial' && (
+                                          <span className="px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 text-[9px] font-bold uppercase">
+                                            ⭐ Especial
+                                          </span>
+                                        )}
                                         <span className={`px-1.5 py-0.2 rounded border text-[9px] uppercase font-mono font-bold ${tagColor}`}>
                                           {v.metodo_pago}
                                         </span>
@@ -4357,16 +4363,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 const totalVentasMonto = ventasFiltradas.reduce((acc, v) => acc + (Number(v.total) || 0), 0);
                 const efectivoMonto = ventasFiltradas
                   .filter((v) => v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega')
-                  .reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+                  .reduce((acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0), 0);
                 const yappyMonto = ventasFiltradas
                   .filter((v) => v.metodo_pago === 'yappy')
-                  .reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+                  .reduce((acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0), 0);
                 const transfMonto = ventasFiltradas
                   .filter((v) => v.metodo_pago === 'transferencia')
-                  .reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+                  .reduce((acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0), 0);
                 const otrosMonto = ventasFiltradas
                   .filter((v) => !['efectivo', 'abono', 'contra_entrega', 'yappy', 'transferencia'].includes(v.metodo_pago))
-                  .reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+                  .reduce((acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0), 0);
 
                 const totalGastosMonto = gastosFiltrados.reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
                 const balanceNeto = totalVentasMonto - totalGastosMonto;
@@ -9099,8 +9105,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
           0
         );
-        const totalVentasYappy = ventasYappyTurnoList.reduce((acc, v) => acc + (Number(v.total) || 0), 0);
-        const totalVentasTransf = ventasTransfTurnoList.reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+        const totalVentasYappy = ventasYappyTurnoList.reduce(
+          (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
+          0
+        );
+        const totalVentasTransf = ventasTransfTurnoList.reduce(
+          (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
+          0
+        );
         const totalGranFacturado = totalVentasEfectivo + totalVentasYappy + totalVentasTransf;
 
         const gastosTurnoList = gastos.filter(
