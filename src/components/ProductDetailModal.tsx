@@ -33,17 +33,18 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   onAddToCart,
   categorias = [],
 }) => {
-  if (!producto) return null;
+  const isArreglo = producto ? isArregloFutbol(undefined, producto, categorias) : false;
 
-  const isArreglo = isArregloFutbol(undefined, producto, categorias);
-
-  const images =
-    producto.imagenes && producto.imagenes.length > 0
+  const images = useMemo(() => {
+    if (!producto) return [];
+    const raw = (producto.imagenes && producto.imagenes.length > 0)
       ? producto.imagenes
-      : [
-          producto.imagen_url ||
-            'https://images.unsplash.com/photo-1577212017184-80cc0da11082?auto=format&fit=crop&w=600&q=80',
-        ];
+      : [producto.imagen_url];
+    const filtered = raw.filter((img): img is string => typeof img === 'string' && img.trim().length > 0);
+    return filtered.length > 0
+      ? filtered
+      : ['https://images.unsplash.com/photo-1577212017184-80cc0da11082?auto=format&fit=crop&w=600&q=80'];
+  }, [producto]);
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [cantidad, setCantidad] = useState(1);
@@ -53,6 +54,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
   // Atributos y opciones disponibles (Tallas y Colores configurados)
   const atributos = useMemo(() => {
+    if (!producto) return [];
     const list: { nombre: string; valores: string[] }[] = [];
 
     // 1. Tallas configuradas (soporta letras y números como 2, 4, 8, 14, 38, etc.)
@@ -124,24 +126,29 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
         valores: tallasFinales,
       },
     ];
-  }, [producto]);
+  }, [producto, isArreglo]);
 
   // Buscar variante que coincide exactamente con las opciones seleccionadas
   const matchingVariant = useMemo<VarianteProducto | undefined>(() => {
-    if (!producto.variantes || producto.variantes.length === 0) return undefined;
+    if (!producto || !producto.variantes || producto.variantes.length === 0) return undefined;
     return producto.variantes.find((v) => {
       if (!v.opciones) return false;
       return Object.entries(selectedOptions).every(([attr, val]) => v.opciones[attr] === val);
     });
-  }, [producto.variantes, selectedOptions]);
+  }, [producto, selectedOptions]);
+
+  const sanitizedDescripcion = useMemo(() => {
+    if (!producto?.descripcion) return '';
+    return producto.descripcion.replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '').trim();
+  }, [producto?.descripcion]);
 
   // Precio final según variante o producto base
   const precioUnitario = matchingVariant?.precio !== undefined && matchingVariant.precio > 0
     ? matchingVariant.precio
-    : producto.precio;
+    : (producto?.precio ?? 0);
 
   // Stock según variante o producto base
-  const stockDisponible = matchingVariant?.stock !== undefined ? matchingVariant.stock : (producto.stock ?? 0);
+  const stockDisponible = matchingVariant?.stock !== undefined ? matchingVariant.stock : (producto?.stock ?? 0);
 
   const handleSelectOption = (attrName: string, value: string) => {
     setValidationError(null);
@@ -152,6 +159,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   };
 
   const handleAdd = () => {
+    if (!producto) return;
     // Validar que todas las opciones obligatorias estén seleccionadas
     for (const attr of atributos) {
       if (!selectedOptions[attr.nombre]) {
@@ -171,6 +179,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   };
 
   const handleWhatsAppDirect = () => {
+    if (!producto) return;
     const phone = '50766212802';
     const optText = Object.entries(selectedOptions)
       .map(([k, v]) => `${k}: ${v}`)
@@ -183,6 +192,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   };
 
   const handleHacerArregloWhatsApp = () => {
+    if (!producto) return;
     const catName = categorias.find((c) => c.id === producto.categoria_id)?.nombre || 'Arreglo de fútbol';
     const tallaVal = selectedOptions['Talla'] || selectedOptions['talla'] || Object.values(selectedOptions)[0];
     const url = generarWhatsAppReciboArreglo({
@@ -194,6 +204,8 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     });
     window.open(url, '_blank');
   };
+
+  if (!producto) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm">
@@ -300,15 +312,11 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   </div>
                 )}
 
-                {producto.descripcion && (() => {
-                  const sanitized = producto.descripcion.replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '').trim();
-                  if (!sanitized) return null;
-                  return (
-                    <div className="p-3 rounded-2xl bg-[#FCFAF7] border border-[#EFEAE2] text-xs text-[#5A554D] leading-relaxed max-h-28 overflow-y-auto">
-                      {sanitized}
-                    </div>
-                  );
-                })()}
+                {sanitizedDescripcion ? (
+                  <div className="p-3 rounded-2xl bg-[#FCFAF7] border border-[#EFEAE2] text-xs text-[#5A554D] leading-relaxed max-h-28 overflow-y-auto">
+                    {sanitizedDescripcion}
+                  </div>
+                ) : null}
 
                 {/* SELECTORES DE OPCIONES Y VARIANTES */}
                 <div className="space-y-3 pt-1">

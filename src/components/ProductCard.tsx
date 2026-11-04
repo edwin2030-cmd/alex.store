@@ -17,9 +17,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   categorias = [],
 }) => {
   const isArreglo = isArregloFutbol(undefined, producto, categorias);
-  const images = producto.imagenes && producto.imagenes.length > 0
+  const rawImages = (producto.imagenes && producto.imagenes.length > 0)
     ? producto.imagenes
-    : [producto.imagen_url || 'https://images.unsplash.com/photo-1577212017184-80cc0da11082?auto=format&fit=crop&w=600&q=80'];
+    : [producto.imagen_url];
+  const validImages = rawImages.filter((img): img is string => typeof img === 'string' && img.trim().length > 0);
+  const images = validImages.length > 0
+    ? validImages
+    : ['https://images.unsplash.com/photo-1577212017184-80cc0da11082?auto=format&fit=crop&w=600&q=80'];
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [justAdded, setJustAdded] = useState(false);

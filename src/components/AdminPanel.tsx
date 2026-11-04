@@ -122,6 +122,7 @@ import {
   ChevronRight,
   FileText,
   Award,
+  ShoppingBag,
 } from 'lucide-react';
 
 interface AdminPanelProps {
@@ -142,6 +143,20 @@ export type AdminSection =
   | 'inventario'
   | 'clientes'
   | 'usuarios';
+
+const getProductThumbnailUrl = (item?: { imagen_url?: string | null; imagenes?: string[] | null } | null): string | null => {
+  if (!item) return null;
+  if (item.imagen_url && typeof item.imagen_url === 'string' && item.imagen_url.trim().length > 0) {
+    return item.imagen_url.trim();
+  }
+  if (item.imagenes && Array.isArray(item.imagenes) && item.imagenes.length > 0) {
+    const first = item.imagenes[0];
+    if (first && typeof first === 'string' && first.trim().length > 0) {
+      return first.trim();
+    }
+  }
+  return null;
+};
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
   onExitAdmin,
@@ -244,6 +259,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     imagen_url?: string;
   }>>([]);
   const [ventaManualNotas, setVentaManualNotas] = useState('');
+  // Modo de Venta: Catálogo regular o Pedido Especial (Prendas que no existen en la tienda pública)
+  const [ventaManualModo, setVentaManualModo] = useState<'catalogo' | 'especial'>('catalogo');
+  const [pedidoEspecialNombre, setPedidoEspecialNombre] = useState('');
+  const [pedidoEspecialPrecio, setPedidoEspecialPrecio] = useState('');
+  const [pedidoEspecialCantidad, setPedidoEspecialCantidad] = useState('1');
+  const [pedidoEspecialDetalle, setPedidoEspecialDetalle] = useState('');
+  const [pedidoEspecialColor, setPedidoEspecialColor] = useState('');
+  const [pedidoEspecialTipoCobro, setPedidoEspecialTipoCobro] = useState<'completo' | 'abono'>('completo');
   const [submittingVentaManual, setSubmittingVentaManual] = useState(false);
   const [liquidandoVentaId, setLiquidandoVentaId] = useState<string | null>(null);
 
@@ -1408,9 +1431,153 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleCrearVentaManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')) {
-      alert('⚠️ LA CAJA ESTÁ CERRADA: Como trabajador, no puedes registrar ventas manuales mientras la caja esté cerrada. Pide al Dueño o Administrador que abra el turno de caja.');
+      alert('⚠️ LA CAJA ESTÁ CERRADA: Como trabajador, no puedes registrar ventas manuales ni pedidos especiales mientras la caja esté cerrada. Pide al Dueño o Administrador que abra el turno de caja.');
       return;
     }
+
+    const cajeroActual = currentUser?.nombre || currentUser?.email?.split('@')[0] || 'Cajero';
+
+    // ========================================================
+    // CASO 1: PEDIDO ESPECIAL (Prendas que NO existen en el catálogo)
+    // ========================================================
+    if (ventaManualModo === 'especial') {
+      const nombreEspecial = pedidoEspecialNombre.trim();
+      const precioEspecial = parseFloat(pedidoEspecialPrecio);
+      const cantEspecial = Math.max(1, parseInt(pedidoEspecialCantidad) || 1);
+
+      if (!ventaManualCliente.trim()) {
+        alert('Por favor ingresa el nombre del cliente.');
+        return;
+      }
+      if (!nombreEspecial) {
+        alert('Por favor escribe el nombre o descripción del producto especial.');
+        return;
+      }
+      if (isNaN(precioEspecial) || precioEspecial <= 0) {
+        alert('Por favor ingresa un valor / precio válido mayor a $0.');
+        return;
+      }
+
+      const totalEspecial = Math.round(precioEspecial * cantEspecial * 100) / 100;
+      let montoAbonado = totalEspecial;
+      let metodoReal: string = ventaManualMetodo === 'abono_contraentrega' ? 'efectivo' : ventaManualMetodo;
+
+      if (pedidoEspecialTipoCobro === 'abono') {
+        if (ventaManualTipoAbono === 'mitad') {
+          montoAbonado = Math.round((totalEspecial / 2) * 100) / 100;
+          metodoReal = 'abono';
+        } else if (ventaManualTipoAbono === 'cero') {
+          montoAbonado = 0;
+          metodoReal = 'contra_entrega';
+        } else {
+          const customAb = parseFloat(ventaManualMontoAbonado);
+          montoAbonado = isNaN(customAb) ? 0 : Math.min(totalEspecial, Math.max(0, customAb));
+          metodoReal = montoAbonado > 0 ? 'abono' : 'contra_entrega';
+        }
+      }
+
+      const saldoPendiente = Math.max(0, totalEspecial - montoAbonado);
+      const estadoPago =
+        saldoPendiente === 0
+          ? 'completo'
+          : montoAbonado > 0
+          ? 'abono_pendiente'
+          : 'contra_entrega_pendiente';
+
+      const itemsEspeciales = [
+        {
+          id: `esp_${Date.now()}`,
+          producto_id: `esp_${Date.now()}`,
+          nombre: `⭐ [PEDIDO ESPECIAL] ${nombreEspecial}`,
+          precio: precioEspecial,
+          cantidad: cantEspecial,
+          subtotal: totalEspecial,
+          talla: pedidoEspecialDetalle.trim() || undefined,
+          color: pedidoEspecialColor.trim() || undefined,
+          is_especial: true,
+          es_pedido_especial: true,
+        },
+      ];
+
+      setSubmittingVentaManual(true);
+      try {
+        const descCompleta =
+          `⭐ Pedido Especial: ${nombreEspecial} (x${cantEspecial})` +
+          (pedidoEspecialDetalle.trim() ? ` • Detalle/Talla: ${pedidoEspecialDetalle.trim()}` : '') +
+          (pedidoEspecialColor.trim() ? ` • Color: ${pedidoEspecialColor.trim()}` : '') +
+          (ventaManualNotas.trim() ? ` • Notas: ${ventaManualNotas.trim()}` : '');
+
+        const res = await crearVentaManual({
+          cliente_nombre: ventaManualCliente.trim(),
+          cliente_telefono: ventaManualTelefono.trim() || undefined,
+          metodo_pago: metodoReal,
+          total: totalEspecial,
+          monto_abonado: montoAbonado,
+          saldo_pendiente: saldoPendiente,
+          estado_pago: estadoPago,
+          cajero_nombre: cajeroActual,
+          registrado_por: cajeroActual,
+          items: itemsEspeciales,
+          tipo: 'pedido_especial',
+          descripcion: descCompleta,
+          notas:
+            descCompleta +
+            (saldoPendiente > 0
+              ? ` • Abonó: $${montoAbonado.toFixed(2)}, Debe al entregar: $${saldoPendiente.toFixed(2)}`
+              : ' • Pagado completo'),
+        });
+
+        if (res.success && res.data) {
+          const nuevaVenta = res.data;
+          setVentas((prev) => [nuevaVenta, ...prev.filter((v) => v.codigo !== nuevaVenta.codigo)]);
+          setIsModalVentaManualOpen(false);
+
+          // Resetear estados
+          setVentaManualCliente('');
+          setVentaManualTelefono('');
+          setVentaManualMonto('');
+          setVentaManualMontoAbonado('');
+          setVentaManualTipoAbono('mitad');
+          setVentaManualNotas('');
+          setVentaManualMetodo('efectivo');
+          setPedidoEspecialNombre('');
+          setPedidoEspecialPrecio('');
+          setPedidoEspecialCantidad('1');
+          setPedidoEspecialDetalle('');
+          setPedidoEspecialColor('');
+          setPedidoEspecialTipoCobro('completo');
+
+          reloadAllData();
+
+          registrarMovimiento({
+            usuario_id: currentUser?.id,
+            usuario_nombre: cajeroActual,
+            usuario_email: currentUser?.email || '',
+            rol: currentUser?.rol || 'cajero',
+            accion: 'Registró Pedido Especial',
+            modulo: 'ventas',
+            detalles: `Pedido Especial "${nombreEspecial}" por $${totalEspecial.toFixed(2)} (${metodoReal.toUpperCase()}) para ${ventaManualCliente.trim()} (Tel: ${ventaManualTelefono.trim() || 'N/A'})${saldoPendiente > 0 ? ` [Abonado: $${montoAbonado.toFixed(2)} | Pendiente: $${saldoPendiente.toFixed(2)}]` : ' [Pago Completo]'}. Guardado en ventas y caja.`,
+          }).then(() => getMovimientosTrabajadores().then(setMovimientos));
+
+          setUserFeedback({
+            type: 'success',
+            msg: `¡Pedido Especial ${nuevaVenta.codigo} registrado con éxito! Guardado en Ventas y en Caja. ${saldoPendiente > 0 ? `(Abono: $${montoAbonado.toFixed(2)} - Saldo por cobrar: $${saldoPendiente.toFixed(2)})` : ''}`,
+          });
+          setTimeout(() => setUserFeedback(null), 4500);
+        } else {
+          alert(res.error || 'Error al registrar pedido especial');
+        }
+      } catch (err: any) {
+        alert(err.message || 'Error registrando pedido especial');
+      } finally {
+        setSubmittingVentaManual(false);
+      }
+      return;
+    }
+
+    // ========================================================
+    // CASO 2: VENTA REGULAR DE CATÁLOGO
+    // ========================================================
     const montoNum = parseFloat(ventaManualMonto);
     if (!ventaManualCliente.trim() || isNaN(montoNum) || montoNum <= 0) {
       alert('Ingresa el nombre del cliente y un monto válido mayor a $0.');
@@ -2623,34 +2790,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
 
                   <div className="space-y-3">
-                    {productos.filter((p) => (p.stock ?? 0) > 0 && (p.stock ?? 0) < 5).slice(0, 4).map((p) => (
-                      <div
-                        key={p.id}
-                        className="p-3 rounded-2xl bg-[#1A1816] border border-[#2D2822] flex items-center justify-between gap-3 text-white"
-                      >
-                        <img
-                          src={p.imagen_url || (p.imagenes && p.imagenes[0]) || ''}
-                          alt=""
-                          className="w-12 h-14 object-cover rounded-xl bg-black border border-[#2D2822] shrink-0"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <h4 className="font-extrabold text-xs text-white truncate">{p.nombre}</h4>
-                          <span className="text-[11px] text-[#A69F93] block">
-                            {categorias.find((c) => c.id === p.categoria_id)?.nombre || 'General'}
-                          </span>
-                        </div>
-                        <div className="text-right">
-                          <span className="font-black text-sm text-amber-400">{p.stock} unids.</span>
-                          <span className="text-[10px] text-[#A69F93] block">Mín: {p.stock_minimo || 5}</span>
-                        </div>
-                        <button
-                          onClick={() => handleStockDelta(p.id, p.stock ?? 0, 5)}
-                          className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs cursor-pointer shadow-sm"
+                    {productos.filter((p) => (p.stock ?? 0) > 0 && (p.stock ?? 0) < 5).slice(0, 4).map((p) => {
+                      const pImg = getProductThumbnailUrl(p);
+                      return (
+                        <div
+                          key={p.id}
+                          className="p-3 rounded-2xl bg-[#1A1816] border border-[#2D2822] flex items-center justify-between gap-3 text-white"
                         >
-                          Ajustar
-                        </button>
-                      </div>
-                    ))}
+                          {pImg ? (
+                            <img
+                              src={pImg}
+                              alt=""
+                              className="w-12 h-14 object-cover rounded-xl bg-black border border-[#2D2822] shrink-0"
+                            />
+                          ) : (
+                            <div className="w-12 h-14 rounded-xl bg-black border border-[#2D2822] flex items-center justify-center text-[#7A7368] text-[9px] font-bold shrink-0">
+                              Sin foto
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-extrabold text-xs text-white truncate">{p.nombre}</h4>
+                            <span className="text-[11px] text-[#A69F93] block">
+                              {categorias.find((c) => c.id === p.categoria_id)?.nombre || 'General'}
+                            </span>
+                          </div>
+                          <div className="text-right">
+                            <span className="font-black text-sm text-amber-400">{p.stock} unids.</span>
+                            <span className="text-[10px] text-[#A69F93] block">Mín: {p.stock_minimo || 5}</span>
+                          </div>
+                          <button
+                            onClick={() => handleStockDelta(p.id, p.stock ?? 0, 5)}
+                            className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs cursor-pointer shadow-sm"
+                          >
+                            Ajustar
+                          </button>
+                        </div>
+                      );
+                    })}
                     {stockBajoCount === 0 && (
                       <p className="text-xs text-[#A69F93] py-8 text-center">No hay productos con stock bajo actualmente.</p>
                     )}
@@ -2676,33 +2852,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
 
                   <div className="space-y-3">
-                    {productos.filter((p) => (p.stock ?? 0) <= 0).slice(0, 4).map((p) => (
-                      <div
-                        key={p.id}
-                        className="p-3 rounded-2xl bg-[#1A1816] border border-[#2D2822] flex items-center justify-between gap-3 text-white"
-                      >
-                        <img
-                          src={p.imagen_url || (p.imagenes && p.imagenes[0]) || ''}
-                          alt=""
-                          className="w-12 h-14 object-cover rounded-xl bg-black border border-[#2D2822] shrink-0"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <h4 className="font-extrabold text-xs text-white truncate">{p.nombre}</h4>
-                          <span className="text-[11px] text-[#A69F93] block">
-                            {categorias.find((c) => c.id === p.categoria_id)?.nombre || 'General'}
-                          </span>
-                        </div>
-                        <div className="text-right">
-                          <span className="font-black text-sm text-rose-400">0 unidades</span>
-                        </div>
-                        <button
-                          onClick={() => handleStockDelta(p.id, 0, 5)}
-                          className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs cursor-pointer shadow-sm"
+                    {productos.filter((p) => (p.stock ?? 0) <= 0).slice(0, 4).map((p) => {
+                      const pImg = getProductThumbnailUrl(p);
+                      return (
+                        <div
+                          key={p.id}
+                          className="p-3 rounded-2xl bg-[#1A1816] border border-[#2D2822] flex items-center justify-between gap-3 text-white"
                         >
-                          Reponer
-                        </button>
-                      </div>
-                    ))}
+                          {pImg ? (
+                            <img
+                              src={pImg}
+                              alt=""
+                              className="w-12 h-14 object-cover rounded-xl bg-black border border-[#2D2822] shrink-0"
+                            />
+                          ) : (
+                            <div className="w-12 h-14 rounded-xl bg-black border border-[#2D2822] flex items-center justify-center text-[#7A7368] text-[9px] font-bold shrink-0">
+                              Sin foto
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-extrabold text-xs text-white truncate">{p.nombre}</h4>
+                            <span className="text-[11px] text-[#A69F93] block">
+                              {categorias.find((c) => c.id === p.categoria_id)?.nombre || 'General'}
+                            </span>
+                          </div>
+                          <div className="text-right">
+                            <span className="font-black text-sm text-rose-400">0 unidades</span>
+                          </div>
+                          <button
+                            onClick={() => handleStockDelta(p.id, 0, 5)}
+                            className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs cursor-pointer shadow-sm"
+                          >
+                            Reponer
+                          </button>
+                        </div>
+                      );
+                    })}
                     {agotadosCount === 0 && (
                       <p className="text-xs text-[#A69F93] py-8 text-center">¡Genial! No hay productos agotados.</p>
                     )}
@@ -2864,6 +3049,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             setVentaManualProductoId('');
                             setVentaManualNotas('');
                             setVentaManualMetodo('efectivo');
+                            setVentaManualModo('catalogo');
+                            setPedidoEspecialNombre('');
+                            setPedidoEspecialPrecio('');
+                            setPedidoEspecialCantidad('1');
+                            setPedidoEspecialDetalle('');
+                            setPedidoEspecialColor('');
+                            setPedidoEspecialTipoCobro('completo');
                             setIsModalVentaManualOpen(true);
                           }}
                           className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all ${
@@ -3172,9 +3364,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
                                       v.tipo === 'web'
                                         ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60'
+                                        : v.tipo === 'pedido_especial'
+                                        ? 'bg-purple-950/80 text-purple-300 border border-purple-800 font-extrabold'
                                         : 'bg-[#25221F] text-slate-300 border border-[#332E27]'
                                     }`}>
-                                      {v.tipo || 'web'}
+                                      {v.tipo === 'pedido_especial' ? '⭐ Especial' : v.tipo || 'web'}
                                     </span>
                                   </div>
                                   <span className="text-[10px] text-[#A69F93] font-mono">
@@ -3331,10 +3525,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     className={`block mt-1 px-2 py-0.2 rounded-full text-[9px] font-black uppercase w-fit ${
                                       v.tipo === 'web'
                                         ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60'
+                                        : v.tipo === 'pedido_especial'
+                                        ? 'bg-purple-950/80 text-purple-300 border border-purple-800 font-extrabold'
                                         : 'bg-[#25221F] text-slate-300 border border-[#332E27]'
                                     }`}
                                   >
-                                    {v.tipo || 'web'}
+                                    {v.tipo === 'pedido_especial' ? '⭐ Pedido Especial' : v.tipo || 'web'}
                                   </span>
                                 </td>
 
@@ -4617,6 +4813,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     <span className="font-mono text-xs font-black text-amber-300">
                                       {v.codigo}
                                     </span>
+                                    {v.tipo === 'pedido_especial' && (
+                                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-purple-950/80 text-purple-300 border border-purple-800">
+                                        ⭐ Pedido Especial
+                                      </span>
+                                    )}
                                     <span className="text-[11px] text-[#A69F93]">
                                       {v.creado_en ? new Date(v.creado_en).toLocaleString('es-PA') : '—'}
                                     </span>
@@ -6234,15 +6435,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           const isAgotado = stock <= 0;
                           const isBajo = stock > 0 && stock < 5;
 
+                          const prodImg = getProductThumbnailUrl(prod);
+
                           return (
                             <tr key={prod.id} className="hover:bg-[#1A1816]/60 transition-colors">
                               <td className="py-3 px-6">
                                 <div className="flex items-center gap-3">
-                                  <img
-                                    src={prod.imagen_url || (prod.imagenes && prod.imagenes[0]) || ''}
-                                    alt=""
-                                    className="w-12 h-14 object-cover rounded-xl bg-[#1E1B18] border border-[#38332B]"
-                                  />
+                                  {prodImg ? (
+                                    <img
+                                      src={prodImg}
+                                      alt=""
+                                      className="w-12 h-14 object-cover rounded-xl bg-[#1E1B18] border border-[#38332B]"
+                                    />
+                                  ) : (
+                                    <div className="w-12 h-14 rounded-xl bg-[#1E1B18] border border-[#38332B] flex items-center justify-center text-[#7A7368] text-[9px] font-bold shrink-0">
+                                      Sin foto
+                                    </div>
+                                  )}
                                   <div>
                                     <span className="font-extrabold text-sm text-white block max-w-xs truncate">
                                       {prod.nombre}
@@ -6537,15 +6746,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         const isAgotado = stock <= 0;
                         const isBajo = stock > 0 && stock < 5;
 
+                        const prodImg = getProductThumbnailUrl(prod);
+
                         return (
                           <tr key={prod.id} className="hover:bg-[#1A1816]/60 transition-colors">
                             <td className="py-3 px-6">
                               <div className="flex items-center gap-3">
-                                <img
-                                  src={prod.imagen_url || (prod.imagenes && prod.imagenes[0]) || ''}
-                                  alt=""
-                                  className="w-12 h-14 object-cover rounded-xl bg-[#1E1B18] border border-[#38332B]"
-                                />
+                                {prodImg ? (
+                                  <img
+                                    src={prodImg}
+                                    alt=""
+                                    className="w-12 h-14 object-cover rounded-xl bg-[#1E1B18] border border-[#38332B]"
+                                  />
+                                ) : (
+                                  <div className="w-12 h-14 rounded-xl bg-[#1E1B18] border border-[#38332B] flex items-center justify-center text-[#7A7368] text-[9px] font-bold shrink-0">
+                                    Sin foto
+                                  </div>
+                                )}
                                 <div>
                                   <span className="font-extrabold text-sm text-white block max-w-xs truncate">
                                     {prod.nombre}
@@ -7752,12 +7969,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <div className="bg-[#13110F] text-white rounded-3xl w-full max-w-lg p-4 sm:p-6 space-y-4 sm:space-y-5 border border-[#26221E] shadow-2xl animate-fade-in max-h-[90dvh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between pb-3 border-b border-[#26221E]">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-emerald-950/60 text-emerald-300 border border-emerald-800/80 flex items-center justify-center font-bold">
-                  <Receipt className="w-5 h-5" />
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold ${
+                  ventaManualModo === 'especial'
+                    ? 'bg-purple-950/70 text-purple-300 border border-purple-800'
+                    : 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/80'
+                }`}>
+                  {ventaManualModo === 'especial' ? <Sparkles className="w-5 h-5 text-purple-300" /> : <Receipt className="w-5 h-5" />}
                 </div>
                 <div>
-                  <h3 className="font-black text-sm text-white">Registrar Venta Manual (Tienda Física / Caja)</h3>
-                  <p className="text-[11px] text-[#A69F93]">Opción exclusiva del panel administrativo para cobros directos</p>
+                  <h3 className="font-black text-sm text-white">
+                    {ventaManualModo === 'especial'
+                      ? '⭐ Registrar Pedido Especial (Prenda Externa / Encargo)'
+                      : 'Registrar Venta Manual (Tienda Física / Caja)'}
+                  </h3>
+                  <p className="text-[11px] text-[#A69F93]">
+                    {ventaManualModo === 'especial'
+                      ? 'Artículos que NO existen en la tienda pública • Se guarda en ventas y caja'
+                      : 'Opción del panel para cobros directos de productos del catálogo'}
+                  </p>
                 </div>
               </div>
               <button
@@ -7768,7 +7997,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </button>
             </div>
 
+            {/* Pestañas de Selector de Modo: Catálogo Regular vs Pedido Especial */}
+            <div className="grid grid-cols-2 gap-2 p-1 bg-[#1A1816] rounded-2xl border border-[#2D2822]">
+              <button
+                type="button"
+                onClick={() => setVentaManualModo('catalogo')}
+                className={`py-2 px-3 rounded-xl font-extrabold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  ventaManualModo === 'catalogo'
+                    ? 'bg-[#C59A4D] text-black shadow-md font-black'
+                    : 'text-[#A69F93] hover:text-white hover:bg-[#25221F]'
+                }`}
+              >
+                <ShoppingBag className="w-3.5 h-3.5" />
+                <span>🛍️ Venta de Catálogo</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setVentaManualModo('especial')}
+                className={`py-2 px-3 rounded-xl font-extrabold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  ventaManualModo === 'especial'
+                    ? 'bg-purple-600 text-white shadow-md font-black ring-1 ring-purple-400/80'
+                    : 'text-[#A69F93] hover:text-white hover:bg-[#25221F]'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>⭐ Pedido Especial (No en Tienda)</span>
+              </button>
+            </div>
+
             <form onSubmit={handleCrearVentaManualSubmit} className="space-y-4 text-xs">
+              {/* Datos del Cliente (Común para ambos modos) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="font-extrabold text-[#E6C687] block mb-1">
@@ -7787,7 +8045,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div>
                   <label className="font-extrabold text-[#E6C687] block mb-1 flex items-center gap-1">
                     <Phone className="w-3 h-3 text-[#C59A4D]" />
-                    <span>Teléfono (ID del Cliente) *</span>
+                    <span>Teléfono / WhatsApp *</span>
                   </label>
                   <input
                     type="tel"
@@ -7800,582 +8058,942 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              {/* Selector de Método de Pago (Efectivo, Yappy, Transferencia, Abono / Contra Entrega) */}
-              <div>
-                <label className="font-extrabold text-[#E6C687] block mb-1.5">
-                  Método de Pago *
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setVentaManualMetodo('efectivo')}
-                    className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
-                      ventaManualMetodo === 'efectivo'
-                        ? 'bg-emerald-600 text-white border-emerald-500 font-black shadow-md scale-98'
-                        : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-emerald-500'
-                    }`}
-                  >
-                    <span className="text-base">💵</span>
-                    <span className="text-[11px] font-extrabold">Efectivo (Caja)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setVentaManualMetodo('yappy')}
-                    className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
-                      ventaManualMetodo === 'yappy'
-                        ? 'bg-sky-600 text-white border-sky-500 font-black shadow-md scale-98'
-                        : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-sky-500'
-                    }`}
-                  >
-                    <span className="text-base">📱</span>
-                    <span className="text-[11px] font-extrabold">Yappy</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setVentaManualMetodo('transferencia')}
-                    className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
-                      ventaManualMetodo === 'transferencia'
-                        ? 'bg-[#C59A4D] text-black border-[#C59A4D] font-black shadow-md scale-98'
-                        : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-[#C59A4D]'
-                    }`}
-                  >
-                    <span className="text-base">🏦</span>
-                    <span className="text-[11px] font-extrabold">Transferencia</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setVentaManualMetodo('abono_contraentrega');
-                      setVentaManualTipoAbono('mitad');
-                    }}
-                    className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
-                      ventaManualMetodo === 'abono_contraentrega'
-                        ? 'bg-amber-500 text-black border-amber-400 font-black shadow-md scale-98'
-                        : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-amber-500'
-                    }`}
-                  >
-                    <span className="text-base">🤝</span>
-                    <span className="text-[11px] font-extrabold">Abono / Contra Entrega</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Opciones de Abono y saldo si se eligió abono_contraentrega */}
-              {ventaManualMetodo === 'abono_contraentrega' && (
-                <div className="p-3.5 sm:p-4 rounded-2xl bg-[#1A1816] border border-amber-900/50 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-xs text-[#E6C687] flex items-center gap-1.5">
-                      <span>🤝</span>
-                      <span>Configurar Abono Inicial & Saldo Pendiente</span>
-                    </span>
-                    <span className="text-[10px] text-amber-400 font-bold">
-                      Termina de pagar al recibir
-                    </span>
+              {/* ======================================================== */}
+              {/* MODO A: PANEL EXCLUSIVO DE PEDIDO ESPECIAL */}
+              {/* ======================================================== */}
+              {ventaManualModo === 'especial' ? (
+                <div className="space-y-4">
+                  {/* Banner Explicativo */}
+                  <div className="p-3 rounded-2xl bg-purple-950/40 border border-purple-800/60 text-purple-200 text-xs flex items-start gap-2.5">
+                    <Sparkles className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <strong className="text-white block font-black text-xs">Prenda / Encargo No Existente en Tienda</strong>
+                      <p className="text-[11px] text-purple-200/90 leading-relaxed">
+                        Escribe el producto y su valor. Se registrará en <strong>Ventas</strong> y en la <strong>Caja activa</strong> sin alterar el inventario contado de la tienda.
+                      </p>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setVentaManualTipoAbono('mitad')}
-                      className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                        ventaManualTipoAbono === 'mitad'
-                          ? 'bg-[#C59A4D] text-black shadow-sm'
-                          : 'bg-[#13110F] border border-[#38332B] text-[#A69F93] hover:text-white'
-                      }`}
-                    >
-                      50% (La Mitad)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setVentaManualTipoAbono('personalizado')}
-                      className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                        ventaManualTipoAbono === 'personalizado'
-                          ? 'bg-[#C59A4D] text-black shadow-sm'
-                          : 'bg-[#13110F] border border-[#38332B] text-[#A69F93] hover:text-white'
-                      }`}
-                    >
-                      Menos / Otro Monto
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setVentaManualTipoAbono('cero')}
-                      className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                        ventaManualTipoAbono === 'cero'
-                          ? 'bg-[#C59A4D] text-black shadow-sm'
-                          : 'bg-[#13110F] border border-[#38332B] text-[#A69F93] hover:text-white'
-                      }`}
-                    >
-                      0% (Contra Entrega Pura)
-                    </button>
-                  </div>
+                  {/* Nombre y Precio del Producto Especial */}
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-[#181614] border border-purple-900/50 space-y-3">
+                    <span className="font-black text-xs text-purple-300 flex items-center gap-1.5 uppercase tracking-wider">
+                      <span>🏷️</span>
+                      <span>Detalles de la Prenda Especial</span>
+                    </span>
 
-                  {ventaManualTipoAbono === 'personalizado' && (
                     <div>
-                      <label className="text-[11px] font-bold text-[#E6C687] block mb-1">
-                        ¿Cuánto abonó el cliente en este momento? ($)
+                      <label className="font-extrabold text-white block mb-1">
+                        Nombre o Descripción del Producto Especial *
                       </label>
                       <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="Ej: 15.00"
-                        value={ventaManualMontoAbonado}
-                        onChange={(e) => setVentaManualMontoAbonado(e.target.value)}
-                        className="w-full bg-[#13110F] px-3.5 py-2 rounded-xl border border-[#38332B] text-white focus:outline-none focus:border-[#C59A4D] font-black text-sm"
+                        type="text"
+                        required
+                        placeholder="Ej: Camiseta retro Bayern Munich 1999 con dorsal #10"
+                        value={pedidoEspecialNombre}
+                        onChange={(e) => setPedidoEspecialNombre(e.target.value)}
+                        className="w-full bg-[#13110F] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-purple-500 font-bold"
                       />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="font-extrabold text-[#E6C687] block mb-1">
+                          Valor / Precio en USD ($) *
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.01"
+                          required
+                          placeholder="0.00"
+                          value={pedidoEspecialPrecio}
+                          onChange={(e) => setPedidoEspecialPrecio(e.target.value)}
+                          className="w-full bg-[#13110F] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-purple-500 font-black text-base"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="font-extrabold text-[#A69F93] block mb-1">
+                          Cantidad *
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          required
+                          value={pedidoEspecialCantidad}
+                          onChange={(e) => setPedidoEspecialCantidad(e.target.value)}
+                          className="w-full bg-[#13110F] text-white px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-purple-500 font-black"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-[#A69F93] block mb-1">
+                          Talla / Medidas / Especificaciones (opcional):
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ej: Talla L, estampado dorado, cuello V..."
+                          value={pedidoEspecialDetalle}
+                          onChange={(e) => setPedidoEspecialDetalle(e.target.value)}
+                          className="w-full bg-[#13110F] text-white placeholder-[#6A6358] px-3 py-2 rounded-xl border border-[#38332B] focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-[#A69F93] block mb-1">
+                          Color / Tela / Modelo (opcional):
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ej: Negro y rojo, tela transpirable..."
+                          value={pedidoEspecialColor}
+                          onChange={(e) => setPedidoEspecialColor(e.target.value)}
+                          className="w-full bg-[#13110F] text-white placeholder-[#6A6358] px-3 py-2 rounded-xl border border-[#38332B] focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Decidir si es Abono o Pago Completo */}
+                  <div>
+                    <label className="font-extrabold text-[#E6C687] block mb-1.5">
+                      ¿Forma de Cobro del Pedido Especial? *
+                    </label>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setPedidoEspecialTipoCobro('completo')}
+                        className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col gap-0.5 ${
+                          pedidoEspecialTipoCobro === 'completo'
+                            ? 'bg-emerald-950/60 border-emerald-500 text-white shadow-md ring-1 ring-emerald-500/50'
+                            : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 font-black text-xs text-emerald-300">
+                          <span>💳</span>
+                          <span>Pago Completo (100%)</span>
+                        </div>
+                        <span className="text-[10px] text-[#A69F93]">El cliente paga todo el valor ahora</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPedidoEspecialTipoCobro('abono');
+                          setVentaManualTipoAbono('mitad');
+                        }}
+                        className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col gap-0.5 ${
+                          pedidoEspecialTipoCobro === 'abono'
+                            ? 'bg-amber-950/60 border-amber-500 text-white shadow-md ring-1 ring-amber-500/50'
+                            : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 font-black text-xs text-amber-300">
+                          <span>🤝</span>
+                          <span>Abono (Pago Parcial)</span>
+                        </div>
+                        <span className="text-[10px] text-[#A69F93]">Deja un anticipo y liquida al recibir</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Configuración de Abono si se eligió abono */}
+                  {pedidoEspecialTipoCobro === 'abono' && (
+                    <div className="p-3.5 sm:p-4 rounded-2xl bg-[#1A1816] border border-amber-900/60 space-y-3 animate-fade-in">
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-xs text-[#E6C687] flex items-center gap-1.5">
+                          <span>🤝</span>
+                          <span>Configurar Monto del Abono Inicial</span>
+                        </span>
+                        <span className="text-[10px] text-amber-400 font-bold">
+                          Termina de pagar al entregar
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setVentaManualTipoAbono('mitad')}
+                          className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                            ventaManualTipoAbono === 'mitad'
+                              ? 'bg-[#C59A4D] text-black shadow-sm'
+                              : 'bg-[#13110F] border border-[#38332B] text-[#A69F93] hover:text-white'
+                          }`}
+                        >
+                          50% (La Mitad)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setVentaManualTipoAbono('personalizado')}
+                          className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                            ventaManualTipoAbono === 'personalizado'
+                              ? 'bg-[#C59A4D] text-black shadow-sm'
+                              : 'bg-[#13110F] border border-[#38332B] text-[#A69F93] hover:text-white'
+                          }`}
+                        >
+                          Otro Monto ($)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setVentaManualTipoAbono('cero')}
+                          className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                            ventaManualTipoAbono === 'cero'
+                              ? 'bg-[#C59A4D] text-black shadow-sm'
+                              : 'bg-[#13110F] border border-[#38332B] text-[#A69F93] hover:text-white'
+                          }`}
+                        >
+                          0% (Contra Entrega)
+                        </button>
+                      </div>
+
+                      {ventaManualTipoAbono === 'personalizado' && (
+                        <div>
+                          <label className="text-[11px] font-bold text-[#E6C687] block mb-1">
+                            ¿Cuánto dinero abonó el cliente en este momento? ($)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="Ej: 15.00"
+                            value={ventaManualMontoAbonado}
+                            onChange={(e) => setVentaManualMontoAbonado(e.target.value)}
+                            className="w-full bg-[#13110F] px-3.5 py-2 rounded-xl border border-[#38332B] text-white focus:outline-none focus:border-[#C59A4D] font-black text-sm"
+                          />
+                        </div>
+                      )}
+
+                      {(() => {
+                        const pUnit = parseFloat(pedidoEspecialPrecio) || 0;
+                        const cNum = Math.max(1, parseInt(pedidoEspecialCantidad) || 1);
+                        const tot = Math.round(pUnit * cNum * 100) / 100;
+                        let abonoVal = tot;
+                        if (ventaManualTipoAbono === 'mitad') abonoVal = Math.round((tot / 2) * 100) / 100;
+                        else if (ventaManualTipoAbono === 'cero') abonoVal = 0;
+                        else abonoVal = Math.min(tot, Math.max(0, parseFloat(ventaManualMontoAbonado) || 0));
+                        const saldo = Math.max(0, tot - abonoVal);
+
+                        return (
+                          <div className="flex items-center justify-between text-xs pt-2 border-t border-[#26221E]">
+                            <div>
+                              <span className="text-[#A69F93] text-[10px] block font-bold">Abono Inicial (entra a caja):</span>
+                              <strong className="text-emerald-400 font-black text-sm">${abonoVal.toFixed(2)} USD</strong>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[#E6C687] text-[10px] block font-extrabold">Saldo que pagará al entregar:</span>
+                              <strong className="text-rose-400 font-black text-base">${saldo.toFixed(2)} USD</strong>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
 
+                  {/* Método de Cobro del Dinero Recibido Hoy */}
+                  <div>
+                    <label className="font-extrabold text-[#E6C687] block mb-1.5">
+                      Método de Pago de Hoy ({pedidoEspecialTipoCobro === 'abono' ? 'del Abono Inicial' : 'del Pago Total'}) *
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setVentaManualMetodo('efectivo')}
+                        className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                          ventaManualMetodo === 'efectivo'
+                            ? 'bg-emerald-600 text-white border-emerald-500 font-black shadow-md scale-98'
+                            : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-emerald-500'
+                        }`}
+                      >
+                        <span className="text-base">💵</span>
+                        <span className="text-[11px] font-extrabold">Efectivo (Caja)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setVentaManualMetodo('yappy')}
+                        className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                          ventaManualMetodo === 'yappy'
+                            ? 'bg-sky-600 text-white border-sky-500 font-black shadow-md scale-98'
+                            : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-sky-500'
+                        }`}
+                      >
+                        <span className="text-base">📱</span>
+                        <span className="text-[11px] font-extrabold">Yappy</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setVentaManualMetodo('transferencia')}
+                        className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                          ventaManualMetodo === 'transferencia'
+                            ? 'bg-[#C59A4D] text-black border-[#C59A4D] font-black shadow-md scale-98'
+                            : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-[#C59A4D]'
+                        }`}
+                      >
+                        <span className="text-base">🏦</span>
+                        <span className="text-[11px] font-extrabold">Transferencia</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Resumen Financiero del Pedido Especial */}
                   {(() => {
-                    const totalNum = parseFloat(ventaManualMonto) || 0;
-                    let abonoNum = totalNum;
-                    if (ventaManualTipoAbono === 'mitad') abonoNum = Math.round((totalNum / 2) * 100) / 100;
-                    else if (ventaManualTipoAbono === 'cero') abonoNum = 0;
-                    else abonoNum = Math.min(totalNum, Math.max(0, parseFloat(ventaManualMontoAbonado) || 0));
-                    const pendiente = Math.max(0, totalNum - abonoNum);
+                    const pUnit = parseFloat(pedidoEspecialPrecio) || 0;
+                    const cNum = Math.max(1, parseInt(pedidoEspecialCantidad) || 1);
+                    const totalEsp = Math.round(pUnit * cNum * 100) / 100;
+                    let abonoVal = totalEsp;
+                    if (pedidoEspecialTipoCobro === 'abono') {
+                      if (ventaManualTipoAbono === 'mitad') abonoVal = Math.round((totalEsp / 2) * 100) / 100;
+                      else if (ventaManualTipoAbono === 'cero') abonoVal = 0;
+                      else abonoVal = Math.min(totalEsp, Math.max(0, parseFloat(ventaManualMontoAbonado) || 0));
+                    }
+                    const saldoVal = Math.max(0, totalEsp - abonoVal);
 
                     return (
-                      <div className="flex items-center justify-between text-xs pt-2 border-t border-[#26221E]">
+                      <div className="p-3.5 rounded-2xl bg-purple-950/30 border border-purple-800/50 flex items-center justify-between">
                         <div>
-                          <span className="text-[#A69F93] text-[10px] block font-bold">Abono Inicial recibido:</span>
-                          <strong className="text-white font-black text-sm">${abonoNum.toFixed(2)} USD</strong>
+                          <span className="text-[10px] text-purple-300 font-bold block uppercase tracking-wider">
+                            Valor Total del Pedido:
+                          </span>
+                          <strong className="text-lg font-black text-white">
+                            ${totalEsp.toFixed(2)} USD
+                          </strong>
                         </div>
                         <div className="text-right">
-                          <span className="text-[#E6C687] text-[10px] block font-extrabold">Saldo que pagará al entregar:</span>
-                          <strong className="text-rose-400 font-black text-base">${pendiente.toFixed(2)} USD</strong>
+                          <span className="text-[10px] text-[#A69F93] font-bold block">
+                            Cobro registrado hoy:
+                          </span>
+                          <strong className="text-base font-black text-emerald-400">
+                            ${abonoVal.toFixed(2)} USD
+                          </strong>
+                          {saldoVal > 0 && (
+                            <span className="text-[10px] text-amber-400 block font-bold">
+                              Saldo al entregar: ${saldoVal.toFixed(2)}
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
                   })()}
+
+                  {/* Notas o Instrucciones del Pedido Especial */}
+                  <div>
+                    <label className="font-extrabold text-[#E6C687] block mb-1">
+                      📝 Notas / Instrucciones para este Pedido Especial (se verá en lista y en caja):
+                    </label>
+                    <textarea
+                      rows={2}
+                      placeholder="Ej: Pedido para entregar el sábado / Avisar al cliente apenas llegue / Confección especial..."
+                      value={ventaManualNotas}
+                      onChange={(e) => setVentaManualNotas(e.target.value)}
+                      className="w-full bg-[#1A1816] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-purple-500 resize-none text-xs"
+                    />
+                  </div>
+
+                  {/* Botones de Acción para Pedido Especial */}
+                  <div className="pt-2 flex items-center justify-end gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsModalVentaManualOpen(false)}
+                      className="px-4 py-2.5 rounded-xl text-[#A69F93] hover:text-white font-bold transition-colors cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={submittingVentaManual}
+                      className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-black flex items-center gap-1.5 shadow-md shadow-purple-950/40 disabled:opacity-50 cursor-pointer transition-colors"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>{submittingVentaManual ? 'Guardando en Ventas y Caja...' : 'GUARDAR PEDIDO ESPECIAL'}</span>
+                    </button>
+                  </div>
                 </div>
-              )}
+              ) : (
+                /* ======================================================== */
+                /* MODO B: PANEL REGULAR DE VENTA DE CATÁLOGO */
+                /* ======================================================== */
+                <div className="space-y-4">
+                  {/* Selector de Método de Pago (Efectivo, Yappy, Transferencia, Abono / Contra Entrega) */}
+                  <div>
+                    <label className="font-extrabold text-[#E6C687] block mb-1.5">
+                      Método de Pago *
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setVentaManualMetodo('efectivo')}
+                        className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                          ventaManualMetodo === 'efectivo'
+                            ? 'bg-emerald-600 text-white border-emerald-500 font-black shadow-md scale-98'
+                            : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-emerald-500'
+                        }`}
+                      >
+                        <span className="text-base">💵</span>
+                        <span className="text-[11px] font-extrabold">Efectivo (Caja)</span>
+                      </button>
 
-              {/* SELECCIÓN Y AGREGADO DE PRODUCTOS A LA VENTA */}
-              <div className="p-3.5 sm:p-4 rounded-2xl bg-[#181614] border border-[#2D2822] space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-[#E6C687] text-xs flex items-center gap-1.5">
-                    <span>👗</span>
-                    <span>Prendas / Productos a Incluir en la Venta</span>
-                  </span>
-                  <span className="text-[11px] text-[#A69F93] font-bold">
-                    {ventaManualItems.length} agregada(s)
-                  </span>
-                </div>
+                      <button
+                        type="button"
+                        onClick={() => setVentaManualMetodo('yappy')}
+                        className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                          ventaManualMetodo === 'yappy'
+                            ? 'bg-sky-600 text-white border-sky-500 font-black shadow-md scale-98'
+                            : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-sky-500'
+                        }`}
+                      >
+                        <span className="text-base">📱</span>
+                        <span className="text-[11px] font-extrabold">Yappy</span>
+                      </button>
 
-                {/* Selector de Producto */}
-                <div>
-                  <label className="text-[11px] font-bold text-[#A69F93] block mb-1">
-                    Seleccionar Producto del Catálogo:
-                  </label>
-                  <select
-                    value={ventaManualProductoId}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      setVentaManualProductoId(id);
-                      setVentaManualVarianteId('');
-                      setVentaManualTalla('');
-                      setVentaManualColor('');
-                      const prod = productos.find((p) => p.id === id);
-                      if (prod && ventaManualItems.length === 0) {
-                        const qty = Math.max(1, parseInt(ventaManualCantidad) || 1);
-                        setVentaManualMonto((prod.precio * qty).toFixed(2));
-                      }
-                    }}
-                    className="w-full bg-[#13110F] text-white px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D]"
-                  >
-                    <option value="" className="bg-[#13110F] text-white">-- Escoger un producto para agregar --</option>
-                    {productos.map((p) => (
-                      <option key={p.id} value={p.id} className="bg-[#13110F] text-white">
-                        {p.nombre} (${Number(p.precio).toFixed(2)}) — Stock: {p.stock ?? 0}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                      <button
+                        type="button"
+                        onClick={() => setVentaManualMetodo('transferencia')}
+                        className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                          ventaManualMetodo === 'transferencia'
+                            ? 'bg-[#C59A4D] text-black border-[#C59A4D] font-black shadow-md scale-98'
+                            : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-[#C59A4D]'
+                        }`}
+                      >
+                        <span className="text-base">🏦</span>
+                        <span className="text-[11px] font-extrabold">Transferencia</span>
+                      </button>
 
-                {/* Previsualización del Producto Seleccionado con Foto, Talla, Color y Botón Agregar */}
-                {(() => {
-                  const selectedProd = productos.find((p) => p.id === ventaManualProductoId);
-                  if (!selectedProd) return null;
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVentaManualMetodo('abono_contraentrega');
+                          setVentaManualTipoAbono('mitad');
+                        }}
+                        className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                          ventaManualMetodo === 'abono_contraentrega'
+                            ? 'bg-amber-500 text-black border-amber-400 font-black shadow-md scale-98'
+                            : 'bg-[#1A1816] border-[#38332B] text-[#A69F93] hover:text-white hover:border-amber-500'
+                        }`}
+                      >
+                        <span className="text-base">🤝</span>
+                        <span className="text-[11px] font-extrabold">Abono / Contra Entrega</span>
+                      </button>
+                    </div>
+                  </div>
 
-                  const prodImg = selectedProd.imagen_url || selectedProd.imagenes?.[0] || '';
-                  const stockActual = selectedProd.stock ?? 0;
-                  const hasVariantes = Array.isArray(selectedProd.variantes) && selectedProd.variantes.length > 0;
-                  const qty = Math.max(1, parseInt(ventaManualCantidad) || 1);
-                  const subtotalItem = selectedProd.precio * qty;
-
-                  const handleAgregarItem = () => {
-                    let varTitulo = '';
-                    if (ventaManualVarianteId) {
-                      const foundV = selectedProd.variantes?.find((v: any) => (v.id || v.titulo) === ventaManualVarianteId);
-                      varTitulo = foundV?.titulo || (foundV as any)?.nombre || ventaManualVarianteId;
-                    }
-
-                    const cleanTalla = (ventaManualTalla.startsWith('__custom__:') ? ventaManualTalla.replace('__custom__:', '').trim() : ventaManualTalla.trim()) || (hasVariantes ? varTitulo : undefined);
-
-                    const newItem: VentaManualItem = {
-                      producto_id: selectedProd.id,
-                      nombre: selectedProd.nombre,
-                      cantidad: qty,
-                      precio: selectedProd.precio,
-                      subtotal: subtotalItem,
-                      imagen_url: prodImg,
-                      talla: cleanTalla || undefined,
-                      color: ventaManualColor || undefined,
-                      variante_titulo: varTitulo || undefined,
-                    };
-
-                    const updated = [...ventaManualItems, newItem];
-                    setVentaManualItems(updated);
-                    const newTot = updated.reduce((s, it) => s + it.subtotal, 0);
-                    setVentaManualMonto(newTot.toFixed(2));
-
-                    // Reset selection
-                    setVentaManualProductoId('');
-                    setVentaManualVarianteId('');
-                    setVentaManualTalla('');
-                    setVentaManualColor('');
-                    setVentaManualCantidad('1');
-                  };
-
-                  return (
-                    <div className="p-3 rounded-xl bg-[#13110F] border border-[#38332B] space-y-3 animate-fade-in">
-                      <div className="flex items-center gap-3">
-                        {prodImg ? (
-                          <img
-                            src={prodImg}
-                            alt={selectedProd.nombre}
-                            className="w-16 h-16 object-cover rounded-xl bg-black border border-[#2D2822] shadow-sm shrink-0"
-                          />
-                        ) : (
-                          <div className="w-16 h-16 rounded-xl bg-black border border-[#2D2822] flex items-center justify-center text-[10px] text-[#7A7368] shrink-0 font-bold">
-                            Sin foto
-                          </div>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <h4 className="font-extrabold text-sm text-white truncate">{selectedProd.nombre}</h4>
-                          <span className="text-emerald-400 font-black text-sm block">
-                            ${Number(selectedProd.precio).toFixed(2)} USD
-                          </span>
-                          <span
-                            className={`inline-block px-2 py-0.2 rounded-md font-bold text-[10px] mt-0.5 ${
-                              stockActual <= 0
-                                ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
-                                : stockActual < 5
-                                ? 'bg-amber-950/80 text-amber-300 border border-amber-800'
-                                : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
-                            }`}
-                          >
-                            Existencias: {stockActual} unids.
-                          </span>
-                        </div>
+                  {/* Opciones de Abono y saldo si se eligió abono_contraentrega */}
+                  {ventaManualMetodo === 'abono_contraentrega' && (
+                    <div className="p-3.5 sm:p-4 rounded-2xl bg-[#1A1816] border border-amber-900/50 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-xs text-[#E6C687] flex items-center gap-1.5">
+                          <span>🤝</span>
+                          <span>Configurar Abono Inicial & Saldo Pendiente</span>
+                        </span>
+                        <span className="text-[10px] text-amber-400 font-bold">
+                          Termina de pagar al recibir
+                        </span>
                       </div>
 
-                      {/* Talla, Color y Variantes */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                        {selectedProd.tallas_stock && Object.keys(selectedProd.tallas_stock).length > 0 ? (
-                          <div className="sm:col-span-2 space-y-1">
-                            <label className="text-[10px] font-bold text-[#E6C687] block mb-1">
-                              👕 Talla a Vender (Existencias de cada talla):
-                            </label>
-                            <select
-                              value={ventaManualTalla.startsWith('__custom__:') ? '__custom__' : ventaManualTalla}
-                              onChange={(e) => {
-                                if (e.target.value === '__custom__') {
-                                  setVentaManualTalla('__custom__:');
-                                } else {
-                                  setVentaManualTalla(e.target.value);
-                                }
-                              }}
-                              className="w-full bg-[#1A1816] text-[#E6C687] font-bold px-2.5 py-1.5 rounded-lg border border-[#C59A4D]/50 text-xs focus:outline-none"
-                            >
-                              <option value="">-- Seleccionar Talla a Descontar --</option>
-                              {Object.entries(selectedProd.tallas_stock).map(([t, cant]) => (
-                                <option key={t} value={t}>
-                                  Talla {t} — ({cant} disponible{cant === 1 ? '' : 's'}{cant <= 0 ? ' • AGOTADA' : ''})
-                                </option>
-                              ))}
-                              <option value="__custom__">✏️ Otra talla o número (ej: 2, 8, 14, 38, etc.)...</option>
-                            </select>
-                            {ventaManualTalla.startsWith('__custom__:') && (
-                              <input
-                                type="text"
-                                placeholder="Escribe el número o letra (ej: 2, 8, 14, 38, etc.)..."
-                                value={ventaManualTalla.replace('__custom__:', '')}
-                                onChange={(e) => setVentaManualTalla(`__custom__:${e.target.value}`)}
-                                className="w-full bg-[#1A1816] text-[#E6C687] font-bold px-2.5 py-1.5 rounded-lg border border-[#C59A4D] text-xs focus:outline-none"
-                                autoFocus
-                              />
-                            )}
-                          </div>
-                        ) : hasVariantes ? (
-                          <div className="sm:col-span-2">
-                            <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
-                              Variante / Talla:
-                            </label>
-                            <select
-                              value={ventaManualVarianteId}
-                              onChange={(e) => {
-                                setVentaManualVarianteId(e.target.value);
-                                const found = selectedProd.variantes?.find((v: any) => (v.id || v.titulo) === e.target.value);
-                                if (found?.opciones?.Talla) {
-                                  setVentaManualTalla(found.opciones.Talla);
-                                }
-                              }}
-                              className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
-                            >
-                              <option value="">Seleccionar variante</option>
-                              {selectedProd.variantes?.map((v: any) => (
-                                <option key={v.id || v.titulo} value={v.id || v.titulo}>
-                                  {v.titulo || v.nombre} (Stock: {v.stock ?? stockActual})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        ) : selectedProd.tallas && selectedProd.tallas.length > 0 ? (
-                          <div className="sm:col-span-2 space-y-1">
-                            <label className="text-[10px] font-bold text-[#E6C687] block mb-1">
-                              👕 Talla a Vender:
-                            </label>
-                            <select
-                              value={ventaManualTalla.startsWith('__custom__:') ? '__custom__' : ventaManualTalla}
-                              onChange={(e) => {
-                                if (e.target.value === '__custom__') {
-                                  setVentaManualTalla('__custom__:');
-                                } else {
-                                  setVentaManualTalla(e.target.value);
-                                }
-                              }}
-                              className="w-full bg-[#1A1816] text-[#E6C687] font-bold px-2.5 py-1.5 rounded-lg border border-[#C59A4D]/50 text-xs focus:outline-none"
-                            >
-                              <option value="">-- Seleccionar Talla --</option>
-                              {selectedProd.tallas.map((t) => (
-                                <option key={t} value={t}>
-                                  Talla {t}
-                                </option>
-                              ))}
-                              <option value="__custom__">✏️ Otra talla o número (ej: 2, 8, 14, 38, etc.)...</option>
-                            </select>
-                            {ventaManualTalla.startsWith('__custom__:') && (
-                              <input
-                                type="text"
-                                placeholder="Escribe el número o letra (ej: 2, 8, 14, 38, etc.)..."
-                                value={ventaManualTalla.replace('__custom__:', '')}
-                                onChange={(e) => setVentaManualTalla(`__custom__:${e.target.value}`)}
-                                className="w-full bg-[#1A1816] text-[#E6C687] font-bold px-2.5 py-1.5 rounded-lg border border-[#C59A4D] text-xs focus:outline-none"
-                                autoFocus
-                              />
-                            )}
-                          </div>
-                        ) : (
-                          <div>
-                            <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
-                              Talla (Número o Letra):
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="Ej: 2, 8, 14, 38, S, M, XL..."
-                              value={ventaManualTalla.replace('__custom__:', '')}
-                              onChange={(e) => setVentaManualTalla(e.target.value)}
-                              className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
-                            />
-                          </div>
-                        )}
+                      <div className="grid grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setVentaManualTipoAbono('mitad')}
+                          className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                            ventaManualTipoAbono === 'mitad'
+                              ? 'bg-[#C59A4D] text-black shadow-sm'
+                              : 'bg-[#13110F] border border-[#38332B] text-[#A69F93] hover:text-white'
+                          }`}
+                        >
+                          50% (La Mitad)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setVentaManualTipoAbono('personalizado')}
+                          className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                            ventaManualTipoAbono === 'personalizado'
+                              ? 'bg-[#C59A4D] text-black shadow-sm'
+                              : 'bg-[#13110F] border border-[#38332B] text-[#A69F93] hover:text-white'
+                          }`}
+                        >
+                          Menos / Otro Monto
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setVentaManualTipoAbono('cero')}
+                          className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                            ventaManualTipoAbono === 'cero'
+                              ? 'bg-[#C59A4D] text-black shadow-sm'
+                              : 'bg-[#13110F] border border-[#38332B] text-[#A69F93] hover:text-white'
+                          }`}
+                        >
+                          0% (Contra Entrega Pura)
+                        </button>
+                      </div>
 
+                      {ventaManualTipoAbono === 'personalizado' && (
                         <div>
-                          <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
-                            Color:
-                          </label>
-                          <input
-                            type="text"
-                            placeholder="Color..."
-                            value={ventaManualColor}
-                            onChange={(e) => setVentaManualColor(e.target.value)}
-                            className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
-                            Cantidad:
+                          <label className="text-[11px] font-bold text-[#E6C687] block mb-1">
+                            ¿Cuánto abonó el cliente en este momento? ($)
                           </label>
                           <input
                             type="number"
-                            min="1"
-                            value={ventaManualCantidad}
-                            onChange={(e) => setVentaManualCantidad(e.target.value)}
-                            className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs font-black focus:outline-none"
+                            step="0.01"
+                            min="0"
+                            placeholder="Ej: 15.00"
+                            value={ventaManualMontoAbonado}
+                            onChange={(e) => setVentaManualMontoAbonado(e.target.value)}
+                            className="w-full bg-[#13110F] px-3.5 py-2 rounded-xl border border-[#38332B] text-white focus:outline-none focus:border-[#C59A4D] font-black text-sm"
                           />
                         </div>
-                      </div>
+                      )}
 
-                      <div className="flex items-center justify-between pt-1">
-                        <span className="text-xs text-[#A69F93]">
-                          Subtotal prenda: <strong className="text-white">${subtotalItem.toFixed(2)}</strong>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={handleAgregarItem}
-                          className="px-3.5 py-1.5 rounded-xl bg-[#C59A4D] hover:bg-[#D4A95D] text-black font-black text-xs cursor-pointer shadow-md transition-all active:scale-95 flex items-center gap-1.5"
-                        >
-                          <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                          <span>AGREGAR A ESTA VENTA</span>
-                        </button>
-                      </div>
+                      {(() => {
+                        const totalNum = parseFloat(ventaManualMonto) || 0;
+                        let abonoNum = totalNum;
+                        if (ventaManualTipoAbono === 'mitad') abonoNum = Math.round((totalNum / 2) * 100) / 100;
+                        else if (ventaManualTipoAbono === 'cero') abonoNum = 0;
+                        else abonoNum = Math.min(totalNum, Math.max(0, parseFloat(ventaManualMontoAbonado) || 0));
+                        const pendiente = Math.max(0, totalNum - abonoNum);
+
+                        return (
+                          <div className="flex items-center justify-between text-xs pt-2 border-t border-[#26221E]">
+                            <div>
+                              <span className="text-[#A69F93] text-[10px] block font-bold">Abono Inicial recibido:</span>
+                              <strong className="text-white font-black text-sm">${abonoNum.toFixed(2)} USD</strong>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[#E6C687] text-[10px] block font-extrabold">Saldo que pagará al entregar:</span>
+                              <strong className="text-rose-400 font-black text-base">${pendiente.toFixed(2)} USD</strong>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
-                  );
-                })()}
+                  )}
 
-                {/* Lista de Prendas Agregadas a la Venta */}
-                {ventaManualItems.length > 0 && (
-                  <div className="space-y-2 pt-2 border-t border-[#26221E]">
-                    <span className="text-[10px] font-black uppercase text-[#E6C687] block tracking-wider">
-                      Prendas en esta venta ({ventaManualItems.length}):
-                    </span>
-                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                      {ventaManualItems.map((it, idx) => (
-                        <div
-                          key={idx}
-                          className="p-2 rounded-xl bg-[#13110F] border border-[#2D2822] flex items-center justify-between gap-2.5 text-xs"
-                        >
-                          <div className="flex items-center gap-2 min-w-0 flex-1">
-                            {it.imagen_url ? (
+                  {/* SELECCIÓN Y AGREGADO DE PRODUCTOS A LA VENTA */}
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-[#181614] border border-[#2D2822] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-[#E6C687] text-xs flex items-center gap-1.5">
+                        <span>👗</span>
+                        <span>Prendas / Productos a Incluir en la Venta</span>
+                      </span>
+                      <span className="text-[11px] text-[#A69F93] font-bold">
+                        {ventaManualItems.length} agregada(s)
+                      </span>
+                    </div>
+
+                    {/* Selector de Producto */}
+                    <div>
+                      <label className="text-[11px] font-bold text-[#A69F93] block mb-1">
+                        Seleccionar Producto del Catálogo:
+                      </label>
+                      <select
+                        value={ventaManualProductoId}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          setVentaManualProductoId(id);
+                          setVentaManualVarianteId('');
+                          setVentaManualTalla('');
+                          setVentaManualColor('');
+                          const prod = productos.find((p) => p.id === id);
+                          if (prod && ventaManualItems.length === 0) {
+                            const qty = Math.max(1, parseInt(ventaManualCantidad) || 1);
+                            setVentaManualMonto((prod.precio * qty).toFixed(2));
+                          }
+                        }}
+                        className="w-full bg-[#13110F] text-white px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D]"
+                      >
+                        <option value="" className="bg-[#13110F] text-white">-- Escoger un producto para agregar --</option>
+                        {productos.map((p) => (
+                          <option key={p.id} value={p.id} className="bg-[#13110F] text-white">
+                            {p.nombre} (${Number(p.precio).toFixed(2)}) — Stock: {p.stock ?? 0}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Previsualización del Producto Seleccionado con Foto, Talla, Color y Botón Agregar */}
+                    {(() => {
+                      const selectedProd = productos.find((p) => p.id === ventaManualProductoId);
+                      if (!selectedProd) return null;
+
+                      const prodImg = selectedProd.imagen_url || selectedProd.imagenes?.[0] || '';
+                      const stockActual = selectedProd.stock ?? 0;
+                      const hasVariantes = Array.isArray(selectedProd.variantes) && selectedProd.variantes.length > 0;
+                      const qty = Math.max(1, parseInt(ventaManualCantidad) || 1);
+                      const subtotalItem = selectedProd.precio * qty;
+
+                      const handleAgregarItem = () => {
+                        let varTitulo = '';
+                        if (ventaManualVarianteId) {
+                          const foundV = selectedProd.variantes?.find((v: any) => (v.id || v.titulo) === ventaManualVarianteId);
+                          varTitulo = foundV?.titulo || (foundV as any)?.nombre || ventaManualVarianteId;
+                        }
+
+                        const cleanTalla = (ventaManualTalla.startsWith('__custom__:') ? ventaManualTalla.replace('__custom__:', '').trim() : ventaManualTalla.trim()) || (hasVariantes ? varTitulo : undefined);
+
+                        const newItem: VentaManualItem = {
+                          producto_id: selectedProd.id,
+                          nombre: selectedProd.nombre,
+                          cantidad: qty,
+                          precio: selectedProd.precio,
+                          subtotal: subtotalItem,
+                          imagen_url: prodImg,
+                          talla: cleanTalla || undefined,
+                          color: ventaManualColor || undefined,
+                          variante_titulo: varTitulo || undefined,
+                        };
+
+                        const updated = [...ventaManualItems, newItem];
+                        setVentaManualItems(updated);
+                        const newTot = updated.reduce((s, it) => s + it.subtotal, 0);
+                        setVentaManualMonto(newTot.toFixed(2));
+
+                        // Reset selection
+                        setVentaManualProductoId('');
+                        setVentaManualVarianteId('');
+                        setVentaManualTalla('');
+                        setVentaManualColor('');
+                        setVentaManualCantidad('1');
+                      };
+
+                      return (
+                        <div className="p-3 rounded-xl bg-[#13110F] border border-[#38332B] space-y-3 animate-fade-in">
+                          <div className="flex items-center gap-3">
+                            {prodImg ? (
                               <img
-                                src={it.imagen_url}
-                                alt={it.nombre}
-                                className="w-9 h-9 object-cover rounded-lg bg-black border border-[#2D2822] shrink-0"
+                                src={prodImg}
+                                alt={selectedProd.nombre}
+                                className="w-16 h-16 object-cover rounded-xl bg-black border border-[#2D2822] shadow-sm shrink-0"
                               />
                             ) : (
-                              <div className="w-9 h-9 rounded-lg bg-black border border-[#2D2822] flex items-center justify-center text-[8px] text-[#7A7368] shrink-0">
+                              <div className="w-16 h-16 rounded-xl bg-black border border-[#2D2822] flex items-center justify-center text-[10px] text-[#7A7368] shrink-0 font-bold">
                                 Sin foto
                               </div>
                             )}
                             <div className="min-w-0 flex-1">
-                              <span className="font-extrabold text-white block truncate text-[11px]">{it.nombre}</span>
-                              <div className="flex items-center gap-1 text-[10px] text-[#A69F93]">
-                                {it.talla && <span className="text-[#E6C687]">Talla: {it.talla}</span>}
-                                {it.color && <span>• {it.color}</span>}
-                                <span>• ${(Number(it.precio) || 0).toFixed(2)} c/u</span>
-                              </div>
+                              <h4 className="font-extrabold text-sm text-white truncate">{selectedProd.nombre}</h4>
+                              <span className="text-emerald-400 font-black text-sm block">
+                                ${Number(selectedProd.precio).toFixed(2)} USD
+                              </span>
+                              <span
+                                className={`inline-block px-2 py-0.2 rounded-md font-bold text-[10px] mt-0.5 ${
+                                  stockActual <= 0
+                                    ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
+                                    : stockActual < 5
+                                    ? 'bg-amber-950/80 text-amber-300 border border-amber-800'
+                                    : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
+                                }`}
+                              >
+                                Existencias: {stockActual} unids.
+                              </span>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 shrink-0">
-                            {/* Stepper */}
-                            <div className="flex items-center border border-[#332E27] rounded-lg overflow-hidden bg-[#1A1816]">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const updated = [...ventaManualItems];
-                                  if (updated[idx].cantidad > 1) {
-                                    updated[idx].cantidad -= 1;
-                                    updated[idx].subtotal = updated[idx].cantidad * (Number(updated[idx].precio) || 0);
-                                    setVentaManualItems(updated);
-                                    const sumTot = updated.reduce((s, x) => s + (Number(x.subtotal) || 0), 0);
-                                    setVentaManualMonto(sumTot.toFixed(2));
-                                  }
-                                }}
-                                className="px-2 py-0.5 text-xs hover:bg-[#25221E] text-[#A69F93] hover:text-white cursor-pointer"
-                              >
-                                -
-                              </button>
-                              <span className="px-2 py-0.5 font-black text-xs text-white">
-                                {it.cantidad}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const updated = [...ventaManualItems];
-                                  updated[idx].cantidad += 1;
-                                  updated[idx].subtotal = updated[idx].cantidad * (Number(updated[idx].precio) || 0);
-                                  setVentaManualItems(updated);
-                                  const sumTot = updated.reduce((s, x) => s + (Number(x.subtotal) || 0), 0);
-                                  setVentaManualMonto(sumTot.toFixed(2));
-                                }}
-                                className="px-2 py-0.5 text-xs hover:bg-[#25221E] text-[#A69F93] hover:text-white cursor-pointer"
-                              >
-                                +
-                              </button>
+                          {/* Talla, Color y Variantes */}
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            {selectedProd.tallas_stock && Object.keys(selectedProd.tallas_stock).length > 0 ? (
+                              <div className="sm:col-span-2 space-y-1">
+                                <label className="text-[10px] font-bold text-[#E6C687] block mb-1">
+                                  👕 Talla a Vender (Existencias de cada talla):
+                                </label>
+                                <select
+                                  value={ventaManualTalla.startsWith('__custom__:') ? '__custom__' : ventaManualTalla}
+                                  onChange={(e) => {
+                                    if (e.target.value === '__custom__') {
+                                      setVentaManualTalla('__custom__:');
+                                    } else {
+                                      setVentaManualTalla(e.target.value);
+                                    }
+                                  }}
+                                  className="w-full bg-[#1A1816] text-[#E6C687] font-bold px-2.5 py-1.5 rounded-lg border border-[#C59A4D]/50 text-xs focus:outline-none"
+                                >
+                                  <option value="">-- Seleccionar Talla a Descontar --</option>
+                                  {Object.entries(selectedProd.tallas_stock).map(([t, cant]) => (
+                                    <option key={t} value={t}>
+                                      Talla {t} — ({cant} disponible{cant === 1 ? '' : 's'}{cant <= 0 ? ' • AGOTADA' : ''})
+                                    </option>
+                                  ))}
+                                  <option value="__custom__">✏️ Otra talla o número (ej: 2, 8, 14, 38, etc.)...</option>
+                                </select>
+                                {ventaManualTalla.startsWith('__custom__:') && (
+                                  <input
+                                    type="text"
+                                    placeholder="Escribe el número o letra (ej: 2, 8, 14, 38, etc.)..."
+                                    value={ventaManualTalla.replace('__custom__:', '')}
+                                    onChange={(e) => setVentaManualTalla(`__custom__:${e.target.value}`)}
+                                    className="w-full bg-[#1A1816] text-[#E6C687] font-bold px-2.5 py-1.5 rounded-lg border border-[#C59A4D] text-xs focus:outline-none"
+                                    autoFocus
+                                  />
+                                )}
+                              </div>
+                            ) : hasVariantes ? (
+                              <div className="sm:col-span-2">
+                                <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
+                                  Variante / Talla:
+                                </label>
+                                <select
+                                  value={ventaManualVarianteId}
+                                  onChange={(e) => {
+                                    setVentaManualVarianteId(e.target.value);
+                                    const found = selectedProd.variantes?.find((v: any) => (v.id || v.titulo) === e.target.value);
+                                    if (found?.opciones?.Talla) {
+                                      setVentaManualTalla(found.opciones.Talla);
+                                    }
+                                  }}
+                                  className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
+                                >
+                                  <option value="">Seleccionar variante</option>
+                                  {selectedProd.variantes?.map((v: any) => (
+                                    <option key={v.id || v.titulo} value={v.id || v.titulo}>
+                                      {v.titulo || v.nombre} (Stock: {v.stock ?? stockActual})
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            ) : selectedProd.tallas && selectedProd.tallas.length > 0 ? (
+                              <div className="sm:col-span-2 space-y-1">
+                                <label className="text-[10px] font-bold text-[#E6C687] block mb-1">
+                                  👕 Talla a Vender:
+                                </label>
+                                <select
+                                  value={ventaManualTalla.startsWith('__custom__:') ? '__custom__' : ventaManualTalla}
+                                  onChange={(e) => {
+                                    if (e.target.value === '__custom__') {
+                                      setVentaManualTalla('__custom__:');
+                                    } else {
+                                      setVentaManualTalla(e.target.value);
+                                    }
+                                  }}
+                                  className="w-full bg-[#1A1816] text-[#E6C687] font-bold px-2.5 py-1.5 rounded-lg border border-[#C59A4D]/50 text-xs focus:outline-none"
+                                >
+                                  <option value="">-- Seleccionar Talla --</option>
+                                  {selectedProd.tallas.map((t) => (
+                                    <option key={t} value={t}>
+                                      Talla {t}
+                                    </option>
+                                  ))}
+                                  <option value="__custom__">✏️ Otra talla o número (ej: 2, 8, 14, 38, etc.)...</option>
+                                </select>
+                                {ventaManualTalla.startsWith('__custom__:') && (
+                                  <input
+                                    type="text"
+                                    placeholder="Escribe el número o letra (ej: 2, 8, 14, 38, etc.)..."
+                                    value={ventaManualTalla.replace('__custom__:', '')}
+                                    onChange={(e) => setVentaManualTalla(`__custom__:${e.target.value}`)}
+                                    className="w-full bg-[#1A1816] text-[#E6C687] font-bold px-2.5 py-1.5 rounded-lg border border-[#C59A4D] text-xs focus:outline-none"
+                                    autoFocus
+                                  />
+                                )}
+                              </div>
+                            ) : (
+                              <div>
+                                <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
+                                  Talla (Número o Letra):
+                                </label>
+                                <input
+                                  type="text"
+                                  placeholder="Ej: 2, 8, 14, 38, S, M, XL..."
+                                  value={ventaManualTalla.replace('__custom__:', '')}
+                                  onChange={(e) => setVentaManualTalla(e.target.value)}
+                                  className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
+                                />
+                              </div>
+                            )}
+
+                            <div>
+                              <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
+                                Color:
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="Color..."
+                                value={ventaManualColor}
+                                onChange={(e) => setVentaManualColor(e.target.value)}
+                                className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs focus:outline-none"
+                              />
                             </div>
 
-                            <span className="font-black text-emerald-400 text-xs w-16 text-right">
-                              ${(Number(it.subtotal) || 0).toFixed(2)}
-                            </span>
+                            <div>
+                              <label className="text-[10px] font-bold text-[#A69F93] block mb-1">
+                                Cantidad:
+                              </label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={ventaManualCantidad}
+                                onChange={(e) => setVentaManualCantidad(e.target.value)}
+                                className="w-full bg-[#1A1816] text-white px-2.5 py-1.5 rounded-lg border border-[#38332B] text-xs font-black focus:outline-none"
+                              />
+                            </div>
+                          </div>
 
+                          <div className="flex items-center justify-between pt-1">
+                            <span className="text-xs text-[#A69F93]">
+                              Subtotal prenda: <strong className="text-white">${subtotalItem.toFixed(2)}</strong>
+                            </span>
                             <button
                               type="button"
-                              onClick={() => {
-                                const updated = ventaManualItems.filter((_, i) => i !== idx);
-                                setVentaManualItems(updated);
-                                const sumTot = updated.reduce((s, x) => s + x.subtotal, 0);
-                                setVentaManualMonto(sumTot.toFixed(2));
-                              }}
-                              className="p-1 rounded-lg text-rose-400 hover:bg-rose-950/60 cursor-pointer"
-                              title="Eliminar de esta venta"
+                              onClick={handleAgregarItem}
+                              className="px-3.5 py-1.5 rounded-xl bg-[#C59A4D] hover:bg-[#D4A95D] text-black font-black text-xs cursor-pointer shadow-md transition-all active:scale-95 flex items-center gap-1.5"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                              <span>AGREGAR A ESTA VENTA</span>
                             </button>
                           </div>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })()}
+
+                    {/* Lista de Prendas Agregadas a la Venta */}
+                    {ventaManualItems.length > 0 && (
+                      <div className="space-y-2 pt-2 border-t border-[#26221E]">
+                        <span className="text-[10px] font-black uppercase text-[#E6C687] block tracking-wider">
+                          Prendas en esta venta ({ventaManualItems.length}):
+                        </span>
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                          {ventaManualItems.map((it, idx) => (
+                            <div
+                              key={idx}
+                              className="p-2 rounded-xl bg-[#13110F] border border-[#2D2822] flex items-center justify-between gap-2.5 text-xs"
+                            >
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                {it.imagen_url ? (
+                                  <img
+                                    src={it.imagen_url}
+                                    alt={it.nombre}
+                                    className="w-9 h-9 object-cover rounded-lg bg-black border border-[#2D2822] shrink-0"
+                                  />
+                                ) : (
+                                  <div className="w-9 h-9 rounded-lg bg-black border border-[#2D2822] flex items-center justify-center text-[8px] text-[#7A7368] shrink-0">
+                                    Sin foto
+                                  </div>
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <span className="font-extrabold text-white block truncate text-[11px]">{it.nombre}</span>
+                                  <div className="flex items-center gap-1 text-[10px] text-[#A69F93]">
+                                    {it.talla && <span className="text-[#E6C687]">Talla: {it.talla}</span>}
+                                    {it.color && <span>• {it.color}</span>}
+                                    <span>• ${(Number(it.precio) || 0).toFixed(2)} c/u</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                {/* Stepper */}
+                                <div className="flex items-center border border-[#332E27] rounded-lg overflow-hidden bg-[#1A1816]">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = [...ventaManualItems];
+                                      if (updated[idx].cantidad > 1) {
+                                        updated[idx].cantidad -= 1;
+                                        updated[idx].subtotal = updated[idx].cantidad * (Number(updated[idx].precio) || 0);
+                                        setVentaManualItems(updated);
+                                        const sumTot = updated.reduce((s, x) => s + (Number(x.subtotal) || 0), 0);
+                                        setVentaManualMonto(sumTot.toFixed(2));
+                                      }
+                                    }}
+                                    className="px-2 py-0.5 text-xs hover:bg-[#25221E] text-[#A69F93] hover:text-white cursor-pointer"
+                                  >
+                                    -
+                                  </button>
+                                  <span className="px-2 py-0.5 font-black text-xs text-white">
+                                    {it.cantidad}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = [...ventaManualItems];
+                                      updated[idx].cantidad += 1;
+                                      updated[idx].subtotal = updated[idx].cantidad * (Number(updated[idx].precio) || 0);
+                                      setVentaManualItems(updated);
+                                      const sumTot = updated.reduce((s, x) => s + (Number(x.subtotal) || 0), 0);
+                                      setVentaManualMonto(sumTot.toFixed(2));
+                                    }}
+                                    className="px-2 py-0.5 text-xs hover:bg-[#25221E] text-[#A69F93] hover:text-white cursor-pointer"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+
+                                <span className="font-black text-emerald-400 text-xs w-16 text-right">
+                                  ${(Number(it.subtotal) || 0).toFixed(2)}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = ventaManualItems.filter((_, i) => i !== idx);
+                                    setVentaManualItems(updated);
+                                    const sumTot = updated.reduce((s, x) => s + x.subtotal, 0);
+                                    setVentaManualMonto(sumTot.toFixed(2));
+                                  }}
+                                  className="p-1 rounded-lg text-rose-400 hover:bg-rose-950/60 cursor-pointer"
+                                  title="Eliminar de esta venta"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
 
-              <div>
-                <label className="font-extrabold text-[#E6C687] block mb-1">
-                  Monto Total de la Venta en USD ($) *
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  required
-                  placeholder="0.00"
-                  value={ventaManualMonto}
-                  onChange={(e) => setVentaManualMonto(e.target.value)}
-                  className="w-full bg-[#1A1816] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D] font-black text-base"
-                />
-                {ventaManualItems.length > 0 && (
-                  <span className="text-[10px] text-emerald-400 mt-1 block font-bold">
-                    ✓ Calculado automáticamente de las {ventaManualItems.length} prenda(s) agregadas.
-                  </span>
-                )}
-              </div>
+                  <div>
+                    <label className="font-extrabold text-[#E6C687] block mb-1">
+                      Monto Total de la Venta en USD ($) *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      required
+                      placeholder="0.00"
+                      value={ventaManualMonto}
+                      onChange={(e) => setVentaManualMonto(e.target.value)}
+                      className="w-full bg-[#1A1816] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D] font-black text-base"
+                    />
+                    {ventaManualItems.length > 0 && (
+                      <span className="text-[10px] text-emerald-400 mt-1 block font-bold">
+                        ✓ Calculado automáticamente de las {ventaManualItems.length} prenda(s) agregadas.
+                      </span>
+                    )}
+                  </div>
 
-              <div>
-                <label className="font-extrabold text-[#E6C687] block mb-1">
-                  📝 Descripción de la Venta (se verá en la lista de ventas y en caja)
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="Ej: Camiseta blanca talla M y short negro / Cliente abonó para guardar prenda / Entregado en mostrador"
-                  value={ventaManualNotas}
-                  onChange={(e) => setVentaManualNotas(e.target.value)}
-                  className="w-full bg-[#1A1816] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D] resize-none text-xs"
-                />
-              </div>
+                  <div>
+                    <label className="font-extrabold text-[#E6C687] block mb-1">
+                      📝 Descripción de la Venta (se verá en la lista de ventas y en caja)
+                    </label>
+                    <textarea
+                      rows={2}
+                      placeholder="Ej: Camiseta blanca talla M y short negro / Cliente abonó para guardar prenda / Entregado en mostrador"
+                      value={ventaManualNotas}
+                      onChange={(e) => setVentaManualNotas(e.target.value)}
+                      className="w-full bg-[#1A1816] text-white placeholder-[#6A6358] px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D] resize-none text-xs"
+                    />
+                  </div>
 
-              <div className="pt-2 flex items-center justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setIsModalVentaManualOpen(false)}
-                  className="px-4 py-2.5 rounded-xl text-[#A69F93] hover:text-white font-bold transition-colors cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={submittingVentaManual}
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer transition-colors"
-                >
-                  <Receipt className="w-3.5 h-3.5" />
-                  <span>{submittingVentaManual ? 'Registrando...' : 'GUARDAR VENTA MANUAL'}</span>
-                </button>
-              </div>
+                  <div className="pt-2 flex items-center justify-end gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsModalVentaManualOpen(false)}
+                      className="px-4 py-2.5 rounded-xl text-[#A69F93] hover:text-white font-bold transition-colors cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={submittingVentaManual}
+                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer transition-colors"
+                    >
+                      <Receipt className="w-3.5 h-3.5" />
+                      <span>{submittingVentaManual ? 'Registrando...' : 'GUARDAR VENTA MANUAL'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </form>
           </div>
         </div>
@@ -8855,22 +9473,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       })()}
 
       {/* Modals for creating/editing */}
-      <ModalNuevoProducto
-        isOpen={isModalProductoOpen}
-        onClose={() => setIsModalProductoOpen(false)}
-        categorias={categorias}
-        productoToEdit={productoToEdit}
-        onProductoSaved={reloadAllData}
-      />
+      {isModalProductoOpen && (
+        <ModalNuevoProducto
+          isOpen={isModalProductoOpen}
+          onClose={() => setIsModalProductoOpen(false)}
+          categorias={categorias}
+          productoToEdit={productoToEdit}
+          onProductoSaved={reloadAllData}
+        />
+      )}
 
-      <ModalNuevaCategoria
-        isOpen={isModalCategoriaOpen}
-        onClose={() => setIsModalCategoriaOpen(false)}
-        categoriaToEdit={categoriaToEdit}
-        onCategoriaSaved={reloadAllData}
-      />
+      {isModalCategoriaOpen && (
+        <ModalNuevaCategoria
+          isOpen={isModalCategoriaOpen}
+          onClose={() => setIsModalCategoriaOpen(false)}
+          categoriaToEdit={categoriaToEdit}
+          onCategoriaSaved={reloadAllData}
+        />
+      )}
 
-      {currentUser && (
+      {currentUser && isModalUsuarioOpen && (
         <ModalNuevoUsuario
           isOpen={isModalUsuarioOpen}
           onClose={() => setIsModalUsuarioOpen(false)}
@@ -8889,17 +9511,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         />
       )}
 
-      <ModalSqlAuth
-        isOpen={isModalSqlAuthOpen}
-        onClose={() => setIsModalSqlAuthOpen(false)}
-      />
+      {isModalSqlAuthOpen && (
+        <ModalSqlAuth
+          isOpen={isModalSqlAuthOpen}
+          onClose={() => setIsModalSqlAuthOpen(false)}
+        />
+      )}
 
-      <ModalStockTallasRapido
-        isOpen={Boolean(productoAjustarTallas)}
-        producto={productoAjustarTallas}
-        onClose={() => setProductoAjustarTallas(null)}
-        onSaved={reloadAllData}
-      />
+      {Boolean(productoAjustarTallas) && (
+        <ModalStockTallasRapido
+          isOpen={Boolean(productoAjustarTallas)}
+          producto={productoAjustarTallas}
+          onClose={() => setProductoAjustarTallas(null)}
+          onSaved={reloadAllData}
+        />
+      )}
 
       {/* Modal Zoom / Lightbox de Foto de Producto */}
       {zoomedProductImage && (
@@ -9040,11 +9666,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       {/* Prendas del pedido con fotos clickeables para zoom */}
                       <div className="space-y-1.5">
                         {p.items?.map((it, idx) => {
-                          const prodImg = it.imagen_url || productos.find((prod) => prod.id === (it.producto_id || it.id))?.imagen_url;
+                          const prodImg = (it.imagen_url && it.imagen_url.trim()) || productos.find((prod) => prod.id === (it.producto_id || it.id))?.imagen_url?.trim() || null;
                           return (
                             <div key={idx} className="flex items-center justify-between gap-2.5 bg-[#13110F] p-2 rounded-xl border border-[#26221E] text-xs">
                               <div className="flex items-center gap-2.5 min-w-0">
-                                {prodImg && (
+                                {prodImg ? (
                                   <img
                                     src={prodImg}
                                     alt={it.nombre}
@@ -9052,7 +9678,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     className="w-10 h-12 object-cover rounded-lg bg-black border border-[#2D2822] cursor-pointer hover:opacity-80 transition-opacity shrink-0"
                                     title="Click para ampliar foto"
                                   />
-                                )}
+                                ) : null}
                                 <div className="min-w-0">
                                   <span className="font-bold text-white block truncate">{it.nombre}</span>
                                   <span className="text-[10px] text-[#A69F93]">

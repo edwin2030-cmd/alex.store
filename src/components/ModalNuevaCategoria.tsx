@@ -16,8 +16,6 @@ export const ModalNuevaCategoria: React.FC<ModalNuevaCategoriaProps> = ({
   categoriaToEdit,
   onCategoriaSaved,
 }) => {
-  if (!isOpen) return null;
-
   const isEditing = Boolean(categoriaToEdit);
 
   const [nombre, setNombre] = useState(categoriaToEdit?.nombre || '');
@@ -103,6 +101,8 @@ export const ModalNuevaCategoria: React.FC<ModalNuevaCategoriaProps> = ({
     onClose();
   };
 
+  if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-fade-in">
       <div className="relative w-full max-w-lg bg-[#13110F] rounded-3xl shadow-2xl shadow-black/80 border border-[#26221E] overflow-hidden my-3 sm:my-6 max-h-[90dvh] flex flex-col text-white">
@@ -161,7 +161,7 @@ export const ModalNuevaCategoria: React.FC<ModalNuevaCategoriaProps> = ({
             </label>
             <div className="flex items-center gap-4">
               <div className="w-20 h-20 rounded-2xl border-2 border-dashed border-[#38332B] bg-[#1A1816] flex items-center justify-center overflow-hidden shrink-0">
-                {imagenUrl ? (
+                {imagenUrl && typeof imagenUrl === 'string' && imagenUrl.trim().length > 0 ? (
                   <img src={imagenUrl} alt="" className="w-full h-full object-cover" />
                 ) : (
                   <ImageIcon className="w-8 h-8 text-[#787168]" />

@@ -41,8 +41,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   onOrderCompleted,
   initialMethod = 'transferencia',
 }) => {
-  if (!isOpen) return null;
-
   const getItemUnitPrice = (item: ItemCarrito): number => {
     return Number(item.precioUnitario) || Number(item.varianteSeleccionada?.precio) || Number(item.producto.precio) || 0;
   };
@@ -518,6 +516,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     window.location.href = waUrl;
   };
 
+  if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-md">
       {/* Centering wrapper that allows natural top-to-bottom scroll without clipping inputs */}
@@ -752,12 +752,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
 
                 {/* Previsualización del Comprobante */}
-                {(comprobantePreview || reciboOficial.comprobante_url) && (
+                {((comprobantePreview && comprobantePreview.trim().length > 0) || (reciboOficial.comprobante_url && reciboOficial.comprobante_url.trim().length > 0)) && (
                   <div className="space-y-2">
                     <div className="p-4 rounded-2xl bg-white border border-[#EAE5DC] flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <img
-                          src={comprobantePreview || reciboOficial.comprobante_url || ''}
+                          src={(comprobantePreview || reciboOficial.comprobante_url)!}
                           alt="Comprobante"
                           className="w-14 h-14 object-cover rounded-xl border border-[#D5CEC2] shadow-sm cursor-pointer"
                           onClick={() => setIsZoomingImage(true)}
@@ -1500,14 +1500,22 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                             ? `Talla: ${it.tallaSeleccionada}`
                             : 'Estándar');
 
+                        const itImg = (it.producto.imagen_url && it.producto.imagen_url.trim()) || (it.producto.imagenes && it.producto.imagenes[0] && it.producto.imagenes[0].trim()) || null;
+
                         return (
                           <div key={idx} className="pt-2 first:pt-0 flex items-center justify-between gap-3 text-xs">
                             <div className="flex items-center gap-2.5 min-w-0">
-                              <img
-                                src={it.producto.imagen_url || (it.producto.imagenes && it.producto.imagenes[0]) || ''}
-                                alt={it.producto.nombre}
-                                className="w-10 h-12 object-cover rounded-lg bg-[#FAF8F5] border border-[#EAE5DC] shrink-0"
-                              />
+                              {itImg ? (
+                                <img
+                                  src={itImg}
+                                  alt={it.producto.nombre}
+                                  className="w-10 h-12 object-cover rounded-lg bg-[#FAF8F5] border border-[#EAE5DC] shrink-0"
+                                />
+                              ) : (
+                                <div className="w-10 h-12 rounded-lg bg-[#FAF8F5] border border-[#EAE5DC] flex items-center justify-center text-[#7A7368] text-[8px] font-bold shrink-0">
+                                  Sin foto
+                                </div>
+                              )}
                               <div className="min-w-0">
                                 <h4 className="font-extrabold text-[#1A1918] truncate block">
                                   {it.producto.nombre}

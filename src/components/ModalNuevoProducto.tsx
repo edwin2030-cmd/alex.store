@@ -27,6 +27,29 @@ interface ModalNuevoProductoProps {
   onProductoSaved: () => void;
 }
 
+const TALLA_GROUPS: Record<'letras' | 'ninos' | 'calzado_us' | 'calzado_eu' | 'pantalones', { tallas: string[]; label: string }> = {
+  letras: {
+    label: 'Tallas de Adulto (Letras)',
+    tallas: ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Única'],
+  },
+  ninos: {
+    label: 'Tallas de Niños y Juvenil (Números)',
+    tallas: ['2', '4', '6', '8', '10', '12', '14', '16'],
+  },
+  calzado_us: {
+    label: 'Calzado & Guayos Talla US (Números)',
+    tallas: ['5', '5.5', '6', '6.5', '7', '7.5', '8', '8.5', '9', '9.5', '10', '10.5', '11', '12'],
+  },
+  calzado_eu: {
+    label: 'Calzado & Guayos Talla EU / CO / PA (Números)',
+    tallas: ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45'],
+  },
+  pantalones: {
+    label: 'Shorts & Pantalones Deportivos (Números)',
+    tallas: ['26', '28', '30', '32', '34', '36', '38', '40'],
+  },
+};
+
 export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
   isOpen,
   onClose,
@@ -34,8 +57,6 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
   productoToEdit,
   onProductoSaved,
 }) => {
-  if (!isOpen) return null;
-
   const isEditing = Boolean(productoToEdit);
 
   // Datos base
@@ -520,6 +541,11 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
     onClose();
   };
 
+  const isSelectedCatArreglo = isArregloFutbol(categorias.find((c) => c.id === categoriaId), null, categorias);
+  const activeTallaGroup = TALLA_GROUPS[tallaCategoryTab];
+
+  if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-fade-in">
       <div className="relative w-full max-w-3xl bg-[#13110F] text-white rounded-3xl shadow-2xl shadow-black/80 border border-[#26221E] overflow-hidden my-3 sm:my-6 max-h-[90dvh] flex flex-col">
@@ -551,10 +577,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-4 sm:p-8 space-y-5 sm:space-y-6 flex-1 overflow-y-auto">
           {/* Row 1: Categoría & Precio Base */}
-          {(() => {
-            const isSelectedCatArreglo = isArregloFutbol(categorias.find((c) => c.id === categoriaId), null, categorias);
-            return (
-              <div className="space-y-3">
+          <div className="space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D] block mb-1.5">
@@ -627,8 +650,6 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
                   </div>
                 )}
               </div>
-            );
-          })()}
 
           {/* Toggle Activo */}
           <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[#FAF8F5] border border-[#EBE6DD]">
@@ -759,68 +780,40 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
                 </div>
 
                 {/* Botones de tallas rápidas según la pestaña activa */}
-                {(() => {
-                  const groups: Record<typeof tallaCategoryTab, { tallas: string[]; label: string }> = {
-                    letras: {
-                      label: 'Tallas de Adulto (Letras)',
-                      tallas: ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Única'],
-                    },
-                    ninos: {
-                      label: 'Tallas de Niños y Juvenil (Números)',
-                      tallas: ['2', '4', '6', '8', '10', '12', '14', '16'],
-                    },
-                    calzado_us: {
-                      label: 'Calzado & Guayos Talla US (Números)',
-                      tallas: ['5', '5.5', '6', '6.5', '7', '7.5', '8', '8.5', '9', '9.5', '10', '10.5', '11', '12'],
-                    },
-                    calzado_eu: {
-                      label: 'Calzado & Guayos Talla EU / CO / PA (Números)',
-                      tallas: ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45'],
-                    },
-                    pantalones: {
-                      label: 'Shorts & Pantalones Deportivos (Números)',
-                      tallas: ['26', '28', '30', '32', '34', '36', '38', '40'],
-                    },
-                  };
+                <div className="p-2.5 rounded-xl bg-[#FAF8F5] border border-[#E5DFD5] space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
+                    <span className="text-[10px] font-extrabold uppercase text-[#7A7368]">
+                      {activeTallaGroup.label}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleAddGroupTallas(activeTallaGroup.tallas)}
+                      className="text-[10px] font-bold text-[#C59A4D] hover:underline cursor-pointer"
+                    >
+                      + Agregar todas ({activeTallaGroup.tallas.length})
+                    </button>
+                  </div>
 
-                  const activeGroup = groups[tallaCategoryTab];
-                  return (
-                    <div className="p-2.5 rounded-xl bg-[#FAF8F5] border border-[#E5DFD5] space-y-2">
-                      <div className="flex items-center justify-between flex-wrap gap-1">
-                        <span className="text-[10px] font-extrabold uppercase text-[#7A7368]">
-                          {activeGroup.label}
-                        </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {activeTallaGroup.tallas.map((t) => {
+                      const exists = tallas.includes(t);
+                      return (
                         <button
+                          key={t}
                           type="button"
-                          onClick={() => handleAddGroupTallas(activeGroup.tallas)}
-                          className="text-[10px] font-bold text-[#C59A4D] hover:underline cursor-pointer"
+                          onClick={() => handleToggleTalla(t)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                            exists
+                              ? 'bg-[#141312] text-[#E6C687] border border-[#141312] shadow-sm ring-1 ring-[#E6C687]/40'
+                              : 'bg-white text-[#2C2720] border border-[#DDD7CC] hover:border-[#141312] hover:bg-slate-50'
+                          }`}
                         >
-                          + Agregar todas ({activeGroup.tallas.length})
+                          {exists ? `✓ ${t}` : `+ ${t}`}
                         </button>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {activeGroup.tallas.map((t) => {
-                          const exists = tallas.includes(t);
-                          return (
-                            <button
-                              key={t}
-                              type="button"
-                              onClick={() => handleToggleTalla(t)}
-                              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                                exists
-                                  ? 'bg-[#141312] text-[#E6C687] border border-[#141312] shadow-sm ring-1 ring-[#E6C687]/40'
-                                  : 'bg-white text-[#2C2720] border border-[#DDD7CC] hover:border-[#141312] hover:bg-slate-50'
-                              }`}
-                            >
-                              {exists ? `✓ ${t}` : `+ ${t}`}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
               {/* Input manual para escribir CUALQUIER talla por número o letra (soporta comas) */}
@@ -1455,7 +1448,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
                     key={slotIdx}
                     className="relative aspect-[3/4] rounded-2xl border-2 border-dashed border-[#DDD7CC] bg-[#FAF8F5] flex flex-col items-center justify-center p-2 text-center overflow-hidden"
                   >
-                    {img ? (
+                    {img && typeof img === 'string' && img.trim().length > 0 ? (
                       <>
                         <img src={img} alt="" className="w-full h-full object-cover rounded-xl" />
                         <button

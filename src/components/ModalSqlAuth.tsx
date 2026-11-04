@@ -7,9 +7,9 @@ interface ModalSqlAuthProps {
 }
 
 export const ModalSqlAuth: React.FC<ModalSqlAuthProps> = ({ isOpen, onClose }) => {
-  if (!isOpen) return null;
-
   const [copied, setCopied] = useState(false);
+
+  if (!isOpen) return null;
 
   const sqlCode = `-- ==============================================================================
 -- ALEXSTORE: CREACIÓN DE USUARIOS EN SUPABASE AUTHENTICATION (DUEÑO Y CAJERO)

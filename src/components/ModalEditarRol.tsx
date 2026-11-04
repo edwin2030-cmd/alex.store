@@ -18,16 +18,23 @@ export const ModalEditarRol: React.FC<ModalEditarRolProps> = ({
   currentUser,
   onUserUpdated,
 }) => {
-  if (!isOpen || !targetUser) return null;
-
-  const [nombre, setNombre] = useState(targetUser.nombre);
-  const [rol, setRol] = useState<UserRole>(targetUser.rol);
-  const [activo, setActivo] = useState(targetUser.activo);
+  const [nombre, setNombre] = useState(targetUser?.nombre || '');
+  const [rol, setRol] = useState<UserRole>(targetUser?.rol || 'cajero');
+  const [activo, setActivo] = useState(targetUser?.activo ?? true);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  React.useEffect(() => {
+    if (targetUser) {
+      setNombre(targetUser.nombre || '');
+      setRol(targetUser.rol || 'cajero');
+      setActivo(targetUser.activo ?? true);
+    }
+  }, [targetUser]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!targetUser) return;
     setLoading(true);
     setErrorMsg(null);
 
@@ -71,6 +78,8 @@ export const ModalEditarRol: React.FC<ModalEditarRolProps> = ({
       setLoading(false);
     }
   };
+
+  if (!isOpen || !targetUser) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-md">

@@ -16,8 +16,6 @@ export const ModalNuevoUsuario: React.FC<ModalNuevoUsuarioProps> = ({
   currentUser,
   onUserCreated,
 }) => {
-  if (!isOpen) return null;
-
   const [nombre, setNombre] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -95,6 +93,8 @@ export const ModalNuevoUsuario: React.FC<ModalNuevoUsuarioProps> = ({
       setLoading(false);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-md">

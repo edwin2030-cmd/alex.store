@@ -408,43 +408,51 @@ export default function App() {
       </main>
 
       {/* Product Detail Modal */}
-      <ProductDetailModal
-        producto={selectedProduct}
-        onClose={() => setSelectedProduct(null)}
-        onAddToCart={handleAddToCart}
-        categorias={categorias}
-      />
+      {selectedProduct && (
+        <ProductDetailModal
+          producto={selectedProduct}
+          onClose={() => setSelectedProduct(null)}
+          onAddToCart={handleAddToCart}
+          categorias={categorias}
+        />
+      )}
 
       {/* Cart Drawer */}
-      <CartDrawer
-        isOpen={isCartOpen}
-        onClose={() => setIsCartOpen(false)}
-        items={cartItems}
-        onUpdateCantidad={handleUpdateCantidad}
-        onRemoveItem={handleRemoveItem}
-        onClearCart={handleClearCart}
-        onProceedToCheckout={(method) => {
-          if (method) setCheckoutMethod(method);
-          setIsCartOpen(false);
-          setIsCheckoutOpen(true);
-        }}
-      />
+      {isCartOpen && (
+        <CartDrawer
+          isOpen={isCartOpen}
+          onClose={() => setIsCartOpen(false)}
+          items={cartItems}
+          onUpdateCantidad={handleUpdateCantidad}
+          onRemoveItem={handleRemoveItem}
+          onClearCart={handleClearCart}
+          onProceedToCheckout={(method) => {
+            if (method) setCheckoutMethod(method);
+            setIsCartOpen(false);
+            setIsCheckoutOpen(true);
+          }}
+        />
+      )}
 
       {/* Checkout Modal */}
-      <CheckoutModal
-        isOpen={isCheckoutOpen}
-        onClose={() => setIsCheckoutOpen(false)}
-        items={cartItems}
-        onOrderCompleted={handleClearCart}
-        initialMethod={checkoutMethod}
-      />
+      {isCheckoutOpen && (
+        <CheckoutModal
+          isOpen={isCheckoutOpen}
+          onClose={() => setIsCheckoutOpen(false)}
+          items={cartItems}
+          onOrderCompleted={handleClearCart}
+          initialMethod={checkoutMethod}
+        />
+      )}
 
       {/* Admin Login Modal (Triggered by 10 fast clicks on logo) */}
-      <AdminLoginModal
-        isOpen={isAdminLoginOpen}
-        onClose={() => setIsAdminLoginOpen(false)}
-        onLoginSuccess={handleLoginSuccess}
-      />
+      {isAdminLoginOpen && (
+        <AdminLoginModal
+          isOpen={isAdminLoginOpen}
+          onClose={() => setIsAdminLoginOpen(false)}
+          onLoginSuccess={handleLoginSuccess}
+        />
+      )}
 
       {/* Toast Notification (Image 4 bottom) */}
       {toastMessage && (

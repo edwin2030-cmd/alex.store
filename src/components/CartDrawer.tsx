@@ -21,13 +21,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onClearCart,
   onProceedToCheckout,
 }) => {
-  if (!isOpen) return null;
-
   const itemPrice = (item: ItemCarrito) =>
     Number(item.precioUnitario) || Number(item.varianteSeleccionada?.precio) || Number(item.producto.precio) || 0;
 
   const totalArticulos = items.reduce((acc, curr) => acc + curr.cantidad, 0);
   const total = items.reduce((acc, curr) => acc + itemPrice(curr) * curr.cantidad, 0);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-black/60 backdrop-blur-sm animate-fade-in">
@@ -104,11 +104,20 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       key={`${item.producto.id}-${index}-${item.varianteSeleccionada?.id || item.tallaSeleccionada || ''}`}
                       className="p-3 sm:p-3.5 rounded-2xl border border-[#EAE5DC] bg-white flex items-center justify-between gap-3 shadow-xs"
                     >
-                      <img
-                        src={item.producto.imagen_url || (item.producto.imagenes && item.producto.imagenes[0]) || ''}
-                        alt={item.producto.nombre}
-                        className="w-14 h-16 sm:w-16 sm:h-18 object-cover rounded-xl bg-[#F7F5F0] border border-[#EAE5DC] shrink-0"
-                      />
+                      {(() => {
+                        const itemImg = (item.producto.imagen_url && item.producto.imagen_url.trim()) || (item.producto.imagenes && item.producto.imagenes[0] && item.producto.imagenes[0].trim()) || null;
+                        return itemImg ? (
+                          <img
+                            src={itemImg}
+                            alt={item.producto.nombre}
+                            className="w-14 h-16 sm:w-16 sm:h-18 object-cover rounded-xl bg-[#F7F5F0] border border-[#EAE5DC] shrink-0"
+                          />
+                        ) : (
+                          <div className="w-14 h-16 sm:w-16 sm:h-18 rounded-xl bg-[#F7F5F0] border border-[#EAE5DC] flex items-center justify-center text-[#7A7368] text-[9px] font-bold shrink-0">
+                            Sin foto
+                          </div>
+                        );
+                      })()}
 
                       <div className="flex-1 min-w-0">
                         <h4 className="font-extrabold text-xs sm:text-sm text-[#1A1918] truncate">

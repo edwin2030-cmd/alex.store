@@ -17,8 +17,6 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   onClose,
   onLoginSuccess,
 }) => {
-  if (!isOpen) return null;
-
   // Modo de ingreso: 'dueno' o 'trabajador'
   const [activeTab, setActiveTab] = useState<'dueno' | 'trabajador'>('dueno');
 
@@ -203,6 +201,8 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
       setLoading(false);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/90 backdrop-blur-md">

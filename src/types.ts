@@ -162,7 +162,7 @@ export interface Venta {
   cajero_nombre?: string | null;
   registrado_por?: string | null;
   items: any[];
-  tipo: 'web' | 'manual';
+  tipo: 'web' | 'manual' | 'pedido_especial';
   notas?: string | null;
   descripcion?: string | null;
   creado_en?: string;

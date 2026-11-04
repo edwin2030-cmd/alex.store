@@ -16,8 +16,6 @@ export const ModalStockTallasRapido: React.FC<ModalStockTallasRapidoProps> = ({
   onClose,
   onSaved,
 }) => {
-  if (!isOpen || !producto) return null;
-
   // Mapa local de tallas y cantidades
   const [tallasStock, setTallasStock] = useState<Record<string, number>>({});
   const [nuevaTallaInput, setNuevaTallaInput] = useState('');
@@ -99,6 +97,7 @@ export const ModalStockTallasRapido: React.FC<ModalStockTallasRapidoProps> = ({
 
   const handleGuardar = async () => {
     setGuardando(true);
+    if (!producto) return;
     try {
       const res = await actualizarStockPorTallas(
         producto.id,
@@ -120,6 +119,10 @@ export const ModalStockTallasRapido: React.FC<ModalStockTallasRapidoProps> = ({
       setGuardando(false);
     }
   };
+
+  const prodImg = (producto?.imagen_url && producto.imagen_url.trim()) || (producto?.imagenes && producto.imagenes[0] && producto.imagenes[0].trim()) || null;
+
+  if (!isOpen || !producto) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 animate-fade-in">
@@ -151,11 +154,17 @@ export const ModalStockTallasRapido: React.FC<ModalStockTallasRapidoProps> = ({
         {/* Producto info pill */}
         <div className="px-5 py-3 bg-[#181614] border-b border-[#26221E] flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <img
-              src={producto.imagen_url || (producto.imagenes && producto.imagenes[0]) || ''}
-              alt=""
-              className="w-10 h-12 object-cover rounded-xl bg-black border border-[#332E27] shrink-0"
-            />
+            {prodImg ? (
+              <img
+                src={prodImg}
+                alt={producto.nombre}
+                className="w-10 h-12 object-cover rounded-xl bg-black border border-[#332E27] shrink-0"
+              />
+            ) : (
+              <div className="w-10 h-12 rounded-xl bg-[#26221E] border border-[#332E27] flex items-center justify-center text-[#7A7368] text-[9px] font-bold shrink-0">
+                Sin foto
+              </div>
+            )}
             <div className="min-w-0">
               <span className="font-black text-xs text-white block truncate">
                 {producto.nombre}

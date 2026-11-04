@@ -1529,7 +1529,7 @@ export async function crearVentaManual(venta: {
   cajero_nombre?: string;
   registrado_por?: string;
   items: any[];
-  tipo?: 'web' | 'manual';
+  tipo?: 'web' | 'manual' | 'pedido_especial';
   notas?: string;
   descripcion?: string;
 }): Promise<{ success: boolean; data?: Venta; error?: string }> {
@@ -1687,9 +1687,10 @@ export async function crearVentaManual(venta: {
       }
     } catch {}
 
-    // 5. Descontar automáticamente el stock del inventario y producto por cada artículo vendido
-    if (venta.items && Array.isArray(venta.items) && venta.items.length > 0) {
+    // 5. Descontar automáticamente el stock del inventario y producto por cada artículo vendido (solo productos regulares del catálogo)
+    if (venta.tipo !== 'pedido_especial' && venta.items && Array.isArray(venta.items) && venta.items.length > 0) {
       for (const item of venta.items) {
+        if (item.is_especial || item.es_pedido_especial) continue;
         const prodId = item.producto_id || item.id;
         const cant = Number(item.cantidad) || 1;
         if (prodId) {
