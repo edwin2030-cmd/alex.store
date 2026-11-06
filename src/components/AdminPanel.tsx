@@ -543,9 +543,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const stockBajoCount = productos.filter((p) => (p.stock ?? 0) > 0 && (p.stock ?? 0) < 5).length;
   const agotadosCount = productos.filter((p) => (p.stock ?? 0) <= 0).length;
 
-  const ingresosTotales = ventas.reduce((acc, v) => acc + (v.total || 0), 0);
+  const ingresosTotales = ventas.reduce(
+    (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
+    0
+  );
   const totalVentasGanado = useMemo(() => {
-    return ventas.reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+    return ventas.reduce(
+      (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
+      0
+    );
   }, [ventas]);
   const totalGastosMonto = useMemo(() => {
     return gastos.reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
@@ -794,7 +800,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       // Si la venta no viene de un pedido ya contado
       if (!v.pedido_id) {
         map[phoneKey].totalPedidos += 1;
-        map[phoneKey].totalGastado += Number(v.total) || 0;
+        map[phoneKey].totalGastado += Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0;
       }
 
       if (v.creado_en && (!map[phoneKey].ultimoPedidoFecha || new Date(v.creado_en) > new Date(map[phoneKey].ultimoPedidoFecha!))) {
@@ -3009,7 +3015,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 });
 
                 const totalMontoFiltrado = ventasFiltradasPorPeriodo.reduce(
-                  (acc, v) => acc + (Number(v.total) || 0),
+                  (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
+                  0
+                );
+                const totalSaldoPendienteFiltrado = ventasFiltradasPorPeriodo.reduce(
+                  (acc, v) => acc + (Number(v.saldo_pendiente) || 0),
                   0
                 );
 
@@ -3207,7 +3217,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         {/* Indicador de ventas filtradas */}
                         <span className="px-2.5 py-1 rounded-xl bg-[#1C1A17] border border-[#332E27] text-[11px] font-bold text-slate-300">
                           {ventasFiltradasPorPeriodo.length} venta(s)
-                          {userRole !== 'cajero' && ` • $${totalMontoFiltrado.toFixed(2)} USD`}
+                          {userRole !== 'cajero' && (
+                            <>
+                              <span className="text-emerald-400 ml-1">• Cobrado: ${totalMontoFiltrado.toFixed(2)}</span>
+                              {totalSaldoPendienteFiltrado > 0 && (
+                                <span className="text-amber-400 ml-1.5">• Debe: ${totalSaldoPendienteFiltrado.toFixed(2)}</span>
+                              )}
+                            </>
+                          )}
                         </span>
                       </div>
 
@@ -3456,12 +3473,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                       </span>
                                     ) : (
                                       <div className="flex items-baseline gap-2 flex-wrap">
-                                        <span className="text-xs text-[#A69F93]">Total:</span>
-                                        <span className="text-base font-black text-white">${Number(v.total).toFixed(2)}</span>
-                                        {hasSaldo && (
-                                          <span className="text-[10px] font-extrabold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-800/80">
-                                            Debe: ${Number(v.saldo_pendiente || 0).toFixed(2)}
-                                          </span>
+                                        {hasSaldo ? (
+                                          <>
+                                            <span className="text-xs text-[#A69F93]">Cobrado:</span>
+                                            <span className="text-base font-black text-emerald-400">
+                                              ${Number(v.monto_abonado || 0).toFixed(2)}
+                                            </span>
+                                            <span className="text-[10px] text-[#A69F93]">
+                                              (Total: ${Number(v.total).toFixed(2)})
+                                            </span>
+                                            <span className="text-[10px] font-extrabold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-800/80">
+                                              Debe: ${Number(v.saldo_pendiente || 0).toFixed(2)}
+                                            </span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <span className="text-xs text-[#A69F93]">Total:</span>
+                                            <span className="text-base font-black text-white">${Number(v.total).toFixed(2)}</span>
+                                          </>
                                         )}
                                       </div>
                                     )}
@@ -3656,12 +3685,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     </span>
                                   ) : (
                                     <div>
-                                      <span className="font-black text-sm text-white block">
-                                        ${Number(v.total).toFixed(2)}
-                                      </span>
-                                      {hasSaldo && (
-                                        <span className="text-[10px] text-emerald-400 font-bold block">
-                                          Abonó: ${Number(v.monto_abonado || 0).toFixed(2)}
+                                      {hasSaldo ? (
+                                        <>
+                                          <span className="font-black text-sm text-emerald-400 block" title="Dinero cobrado al momento">
+                                            ${Number(v.monto_abonado || 0).toFixed(2)} <span className="text-[10px] font-normal text-emerald-300/80">(Abono)</span>
+                                          </span>
+                                          <span className="text-[10px] text-[#A69F93] block">
+                                            Total: ${Number(v.total).toFixed(2)}
+                                          </span>
+                                          <span className="text-[10px] text-amber-400 font-extrabold block">
+                                            Debe: ${Number(v.saldo_pendiente || 0).toFixed(2)}
+                                          </span>
+                                        </>
+                                      ) : (
+                                        <span className="font-black text-sm text-white block">
+                                          ${Number(v.total).toFixed(2)}
                                         </span>
                                       )}
                                     </div>
@@ -3873,8 +3911,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
                     0
                   );
-                  const totalVentasYappy = ventasYappyTurno.reduce((acc, v) => acc + (Number(v.total) || 0), 0);
-                  const totalVentasTransf = ventasTransfTurno.reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+                  const totalVentasYappy = ventasYappyTurno.reduce(
+                    (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
+                    0
+                  );
+                  const totalVentasTransf = ventasTransfTurno.reduce(
+                    (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
+                    0
+                  );
                   const totalGastos = gastosTurno.reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
                   const totalPedidosWeb = pedidosAprobadosTurno.reduce((acc, p) => acc + (Number(p.total) || 0), 0);
 
@@ -4093,9 +4137,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                       )}
                                     </div>
                                   </div>
-                                  <span className="font-black text-emerald-400 text-sm shrink-0 self-end sm:self-center">
-                                    +${cobro.toFixed(2)}
-                                  </span>
+                                  <div className="text-right shrink-0 self-end sm:self-center">
+                                    <span className="font-black text-emerald-400 text-sm block">
+                                      +${cobro.toFixed(2)}
+                                    </span>
+                                    {v.saldo_pendiente && Number(v.saldo_pendiente) > 0 ? (
+                                      <span className="text-[9px] text-amber-400 font-extrabold block">
+                                        Debe: ${Number(v.saldo_pendiente).toFixed(2)}
+                                      </span>
+                                    ) : null}
+                                  </div>
                                 </div>
                               );
                             })}
@@ -4359,8 +4410,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   cajaReportePeriodo === 'dia' ? matchDia(g.creado_en || g.fecha) : matchSemana(g.creado_en || g.fecha)
                 );
 
-                // Cálculos de Dinero
-                const totalVentasMonto = ventasFiltradas.reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+                // Cálculos de Dinero (Dinero real ingresado)
+                const totalVentasMonto = ventasFiltradas.reduce(
+                  (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
+                  0
+                );
+                const totalSaldoPendienteReporte = ventasFiltradas.reduce(
+                  (acc, v) => acc + (Number(v.saldo_pendiente) || 0),
+                  0
+                );
                 const efectivoMonto = ventasFiltradas
                   .filter((v) => v.metodo_pago === 'efectivo' || v.metodo_pago === 'abono' || v.metodo_pago === 'contra_entrega')
                   .reduce((acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0), 0);
@@ -4852,9 +4910,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                         ? '🏦 Transferencia'
                                         : v.metodo_pago}
                                     </span>
-                                    <span className="text-base font-black text-emerald-400">
-                                      ${Number(v.total).toFixed(2)}
-                                    </span>
+                                    {v.saldo_pendiente && Number(v.saldo_pendiente) > 0 ? (
+                                      <div className="text-right">
+                                        <span className="text-base font-black text-emerald-400 block">
+                                          +${(Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0).toFixed(2)} <span className="text-[10px] text-emerald-300/80 font-normal">(Abono)</span>
+                                        </span>
+                                        <span className="text-[10px] text-amber-400 font-bold block">
+                                          Debe: ${Number(v.saldo_pendiente).toFixed(2)} • Total: ${Number(v.total).toFixed(2)}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <span className="text-base font-black text-emerald-400">
+                                        +${Number(v.total).toFixed(2)}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
 
@@ -9278,7 +9347,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     </span>
                                   </div>
                                 </div>
-                                <span className="font-black text-emerald-400 text-xs shrink-0">+${cobro.toFixed(2)}</span>
+                                <div className="text-right shrink-0">
+                                  <span className="font-black text-emerald-400 text-xs block">+${cobro.toFixed(2)}</span>
+                                  {v.saldo_pendiente && Number(v.saldo_pendiente) > 0 ? (
+                                    <span className="text-[9px] text-amber-400 font-bold block">Debe: ${Number(v.saldo_pendiente).toFixed(2)}</span>
+                                  ) : null}
+                                </div>
                               </div>
 
                               {/* Prendas de la venta con foto y zoom */}
