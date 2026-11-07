@@ -160,9 +160,8 @@ export default function App() {
     opcionesSeleccionadas?: Record<string, string>,
     varianteSeleccionada?: any
   ) => {
-    // Si el producto pertenece a la categoría de Arreglo de fútbol, no se permite agregar a la bolsa
     if (isArregloFutbol(undefined, producto, categorias)) {
-      setToastMessage('Los arreglos de fútbol no se piden en la bolsa; se coordinan directamente por WhatsApp.');
+      setToastMessage('Los arreglos y servicios no se piden en la bolsa; se coordinan directamente por WhatsApp.');
       setTimeout(() => setToastMessage(null), 3500);
       return;
     }

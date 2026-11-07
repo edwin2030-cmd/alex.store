@@ -292,7 +292,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-50 to-[#F0FAF4] border border-emerald-300 text-emerald-950 space-y-1">
                     <div className="flex items-center gap-1.5 font-black text-xs uppercase tracking-wider text-emerald-800">
                       <MessageCircle className="w-4 h-4 fill-current text-emerald-600" />
-                      <span>Servicio de Arreglo de Fútbol</span>
+                      <span>Servicio / Arreglo por WhatsApp</span>
                     </div>
                     <p className="text-xs font-bold text-emerald-700">
                       Precio a consultar vía WhatsApp (Cotización personalizada según trabajo)

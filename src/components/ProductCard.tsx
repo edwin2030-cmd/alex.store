@@ -68,7 +68,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           <div className="absolute top-2.5 left-2.5 z-10 pointer-events-none">
             <span className="px-2.5 py-1 rounded-full bg-emerald-600 text-white text-[9px] font-black uppercase tracking-wider shadow-md flex items-center gap-1 backdrop-blur-xs">
               <MessageCircle className="w-2.5 h-2.5 fill-current" />
-              <span>Arreglo de fútbol</span>
+              <span>Arreglo / WhatsApp</span>
             </span>
           </div>
         )}
@@ -188,7 +188,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 title="Hacer arreglo por WhatsApp"
               >
                 <MessageCircle className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-current shrink-0" />
-                <span className="whitespace-nowrap">Arreglo</span>
+                <span className="whitespace-nowrap">Pedir Arreglo</span>
               </button>
             </>
           ) : (

@@ -23,6 +23,10 @@ export const isArregloFutbol = (
   producto?: Producto | null,
   categoriasList: Categoria[] = []
 ): boolean => {
+  if (producto?.tipo === 'arreglo') {
+    return true;
+  }
+
   const textsToCheck: string[] = [];
 
   if (typeof categoriaOrNombre === 'string') {

@@ -59,6 +59,12 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
 }) => {
   const isEditing = Boolean(productoToEdit);
 
+  // Tipo de publicación: 'producto' para catálogo con precio o 'arreglo' para WhatsApp sin precio
+  const [tipo, setTipo] = useState<'producto' | 'arreglo'>(
+    productoToEdit?.tipo ||
+    (isArregloFutbol(undefined, productoToEdit, categorias) ? 'arreglo' : 'producto')
+  );
+
   // Datos base
   const [nombre, setNombre] = useState(productoToEdit?.nombre || '');
   const [categoriaId, setCategoriaId] = useState(productoToEdit?.categoria_id || (categorias[0]?.id || ''));
@@ -107,6 +113,10 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
     lastLoadedIdRef.current = currentEditingId;
 
     if (productoToEdit) {
+      setTipo(
+        productoToEdit.tipo ||
+        (isArregloFutbol(undefined, productoToEdit, categorias) ? 'arreglo' : 'producto')
+      );
       setNombre(productoToEdit.nombre || '');
       setCategoriaId(productoToEdit.categoria_id || (categorias[0]?.id || ''));
       setPrecio(String(productoToEdit.precio ?? 50));
@@ -483,31 +493,37 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
   // ==========================================
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const isArreglo = tipo === 'arreglo';
+
     if (!nombre.trim()) {
-      alert('Ingresa el nombre del producto.');
+      alert(isArreglo ? 'Ingresa el nombre del arreglo.' : 'Ingresa el nombre del producto.');
       return;
     }
 
     setIsSubmitting(true);
-    const numPrecio = parseFloat(precio) || 0;
-    const numCosto = parseFloat(costo) || 0;
-    const numStockMin = parseInt(stockMinimo, 10) || 3;
-    const cleanTallas = tallas.map(String).map((s) => s.trim()).filter(Boolean);
+    const numPrecio = isArreglo ? 0 : (parseFloat(precio) || 0);
+    const numCosto = isArreglo ? 0 : (parseFloat(costo) || 0);
+    const numStockMin = isArreglo ? 0 : (parseInt(stockMinimo, 10) || 3);
+    const cleanTallas = isArreglo ? [] : tallas.map(String).map((s) => s.trim()).filter(Boolean);
     const cleanTallasStock: Record<string, number> = {};
-    cleanTallas.forEach((t) => {
-      cleanTallasStock[t] = tallasStock[t] !== undefined ? Number(tallasStock[t]) : 0;
-    });
+    if (!isArreglo) {
+      cleanTallas.forEach((t) => {
+        cleanTallasStock[t] = tallasStock[t] !== undefined ? Number(tallasStock[t]) : 0;
+      });
+    }
 
-    const finalStock =
-      cleanTallas.length > 0
-        ? cleanTallas.reduce((acc, t) => acc + (cleanTallasStock[t] || 0), 0)
-        : tieneVariantes && variantes.length > 0
-        ? stockTotalVariantes
-        : parseInt(cantidad, 10) || 0;
+    const finalStock = isArreglo
+      ? 999
+      : cleanTallas.length > 0
+      ? cleanTallas.reduce((acc, t) => acc + (cleanTallasStock[t] || 0), 0)
+      : tieneVariantes && variantes.length > 0
+      ? stockTotalVariantes
+      : parseInt(cantidad, 10) || 0;
     const mainImageUrl = imagenes[0] || null;
 
     const payload = {
       nombre: nombre.trim(),
+      tipo,
       descripcion: descripcion.trim() || undefined,
       precio: numPrecio,
       costo: numCosto,
@@ -515,13 +531,13 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
       imagen_url: mainImageUrl || undefined,
       imagenes,
       activo,
-      sku: skuGeneral.trim() || undefined,
+      sku: isArreglo ? undefined : (skuGeneral.trim() || undefined),
       tallas: cleanTallas,
-      colores,
+      colores: isArreglo ? [] : colores,
       tallas_stock: cleanTallasStock,
-      tiene_variantes: tieneVariantes || cleanTallas.length > 0 || colores.length > 0,
-      atributos: tieneVariantes ? atributos : [],
-      variantes: tieneVariantes ? variantes : [],
+      tiene_variantes: isArreglo ? false : (tieneVariantes || cleanTallas.length > 0 || colores.length > 0),
+      atributos: isArreglo ? [] : (tieneVariantes ? atributos : []),
+      variantes: isArreglo ? [] : (tieneVariantes ? variantes : []),
     };
 
     if (isEditing && productoToEdit) {
@@ -559,10 +575,14 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
               </span>
             </div>
             <h2 className="text-xl sm:text-2xl font-extrabold text-white font-heading leading-tight">
-              {isEditing ? 'Editar Producto & Variantes' : 'Nuevo Producto & Variantes'}
+              {isEditing
+                ? (tipo === 'arreglo' ? 'Editar Arreglo (WhatsApp)' : 'Editar Producto & Variantes')
+                : (tipo === 'arreglo' ? 'Nuevo Arreglo (WhatsApp)' : 'Nuevo Producto & Variantes')}
             </h2>
             <p className="text-xs sm:text-sm text-[#A69F93] mt-1">
-              Configura detalles, fotos, precios, atributos y combinaciones con control individual de existencias y SKU.
+              {tipo === 'arreglo'
+                ? 'Publica servicios o arreglos para pedidos y cotización directa por WhatsApp, sin precio fijo.'
+                : 'Configura detalles, fotos, precios, atributos y combinaciones con control individual de existencias y SKU.'}
             </p>
           </div>
 
@@ -576,80 +596,140 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-4 sm:p-8 space-y-5 sm:space-y-6 flex-1 overflow-y-auto">
-          {/* Row 1: Categoría & Precio Base */}
+          {/* Selector de Tipo: Producto vs Arreglo */}
+          <div className="bg-[#1A1816] p-3 sm:p-4 rounded-2xl border border-[#2D2822] space-y-2.5">
+            <label className="text-[11px] font-black uppercase tracking-wider text-[#E6C687] block">
+              TIPO DE PUBLICACIÓN *
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setTipo('producto')}
+                className={`p-3.5 rounded-2xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
+                  tipo === 'producto'
+                    ? 'bg-[#C59A4D]/15 border-[#C59A4D] text-white shadow-sm ring-1 ring-[#C59A4D]'
+                    : 'bg-[#13110F] border-[#2D2822] text-[#A69F93] hover:border-[#3E3830]'
+                }`}
+              >
+                <div className={`p-2.5 rounded-xl text-xl shrink-0 ${tipo === 'producto' ? 'bg-[#C59A4D] text-black font-black' : 'bg-[#221F1C] text-slate-300'}`}>
+                  🛍️
+                </div>
+                <div>
+                  <strong className="text-xs sm:text-sm font-bold block text-white">Producto para Venta</strong>
+                  <span className="text-[11px] text-[#A69F93] block leading-snug mt-0.5">
+                    Prenda o artículo con precio fijo, tallas e inventario para venta directa en tienda.
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setTipo('arreglo');
+                  setPrecio('0');
+                }}
+                className={`p-3.5 rounded-2xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
+                  tipo === 'arreglo'
+                    ? 'bg-emerald-950/60 border-emerald-500 text-white shadow-sm ring-1 ring-emerald-500'
+                    : 'bg-[#13110F] border-[#2D2822] text-[#A69F93] hover:border-[#3E3830]'
+                }`}
+              >
+                <div className={`p-2.5 rounded-xl text-xl shrink-0 ${tipo === 'arreglo' ? 'bg-emerald-500 text-black font-black' : 'bg-[#221F1C] text-slate-300'}`}>
+                  ✂️
+                </div>
+                <div>
+                  <strong className="text-xs sm:text-sm font-bold block text-white">Arreglo / Costura (WhatsApp)</strong>
+                  <span className="text-[11px] text-emerald-400 block leading-snug mt-0.5">
+                    Sin precio. Solo foto, nombre y descripción. Pedidos y cotizaciones por WhatsApp.
+                  </span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Row 1: Categoría & Precio Base según Tipo */}
           <div className="space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D] block mb-1.5">
-                      CATEGORÍA *
-                    </label>
-                    <select
-                      value={categoriaId}
-                      onChange={(e) => setCategoriaId(e.target.value)}
-                      className="w-full bg-white text-xs sm:text-sm text-[#1A1918] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
-                    >
-                      {categorias.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.nombre}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+            {tipo === 'arreglo' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D] block mb-1.5">
+                    CATEGORÍA *
+                  </label>
+                  <select
+                    value={categoriaId}
+                    onChange={(e) => setCategoriaId(e.target.value)}
+                    className="w-full bg-white text-xs sm:text-sm text-[#1A1918] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                  >
+                    {categorias.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D]">
-                        PRECIO BASE ($) *
-                      </label>
-                      {isSelectedCatArreglo && (
-                        <span className="text-[9px] font-black text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 uppercase">
-                          Oculto en tienda
-                        </span>
-                      )}
-                    </div>
-                    <div className="relative">
-                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[#8C8375]">$</span>
-                      <input
-                        type="number"
-                        required
-                        step="0.01"
-                        min="0"
-                        value={precio}
-                        onChange={(e) => setPrecio(e.target.value)}
-                        placeholder="50"
-                        className="w-full bg-white text-xs sm:text-sm text-[#1A1918] pl-8 pr-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
-                      />
-                    </div>
-                  </div>
+                <div className="p-3.5 rounded-2xl bg-emerald-950/40 border border-emerald-800/80 text-emerald-300 text-xs flex items-center gap-2.5">
+                  <MessageCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <span className="text-[11px] leading-relaxed">
+                    <strong>Sin precio en tienda:</strong> Los clientes verán la foto, el nombre y el botón verde <strong className="text-emerald-200">«Pedir Arreglo por WhatsApp»</strong> para coordinar la cotización contigo.
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D] block mb-1.5">
+                    CATEGORÍA *
+                  </label>
+                  <select
+                    value={categoriaId}
+                    onChange={(e) => setCategoriaId(e.target.value)}
+                    className="w-full bg-white text-xs sm:text-sm text-[#1A1918] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
+                  >
+                    {categorias.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-                  <div>
-                    <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D] block mb-1.5">
-                      SKU / CÓDIGO BASE
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D]">
+                      PRECIO BASE ($) *
                     </label>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[#8C8375]">$</span>
                     <input
-                      type="text"
-                      value={skuGeneral}
-                      onChange={(e) => setSkuGeneral(e.target.value)}
-                      placeholder="Ej: ALX-CAM-01"
-                      className="w-full bg-white text-xs sm:text-sm text-[#1A1918] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] font-mono"
+                      type="number"
+                      required
+                      step="0.01"
+                      min="0"
+                      value={precio}
+                      onChange={(e) => setPrecio(e.target.value)}
+                      placeholder="50"
+                      className="w-full bg-white text-xs sm:text-sm text-[#1A1918] pl-8 pr-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
                     />
                   </div>
                 </div>
 
-                {isSelectedCatArreglo && (
-                  <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-300 text-xs text-emerald-950 flex items-start gap-2.5 animate-fade-in">
-                    <MessageCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-black uppercase tracking-wider text-[10px] text-emerald-800 block">
-                        CATEGORÍA ESPECIAL: ARREGLO DE FÚTBOL
-                      </span>
-                      <p className="text-[11px] text-emerald-800 leading-relaxed mt-0.5">
-                        Los artículos que coloques en esta categoría <strong>no mostrarán precio en la tienda</strong> ni se podrán agregar a la bolsa de compras. Los clientes verán el botón <strong>«Hacer Arreglo por WhatsApp»</strong> que genera automáticamente un mensaje tipo recibo con el enlace directo de la imagen de este producto.
-                      </p>
-                    </div>
-                  </div>
-                )}
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D] block mb-1.5">
+                    SKU / CÓDIGO BASE
+                  </label>
+                  <input
+                    type="text"
+                    value={skuGeneral}
+                    onChange={(e) => setSkuGeneral(e.target.value)}
+                    placeholder="Ej: ALX-CAM-01"
+                    className="w-full bg-white text-xs sm:text-sm text-[#1A1918] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D] font-mono"
+                  />
+                </div>
               </div>
+            )}
+          </div>
 
           {/* Toggle Activo */}
           <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[#FAF8F5] border border-[#EBE6DD]">
@@ -677,15 +757,19 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
             </button>
           </div>
 
-          {/* Nombre del Producto */}
+          {/* Nombre del Producto o Arreglo */}
           <div>
             <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D] block mb-1.5">
-              NOMBRE DEL PRODUCTO *
+              {tipo === 'arreglo' ? 'NOMBRE DEL ARREGLO / SERVICIO *' : 'NOMBRE DEL PRODUCTO *'}
             </label>
             <input
               type="text"
               required
-              placeholder="Ej: Camisa Premium Slim Fit, Calzado Deportivo, Gorra Edición Especial..."
+              placeholder={
+                tipo === 'arreglo'
+                  ? 'Ej: Ajuste de Bastilla, Parche Especial de Campeón, Estampado de Nombre y Número, Costura Deportiva...'
+                  : 'Ej: Camisa Premium Slim Fit, Calzado Deportivo, Gorra Edición Especial...'
+              }
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
               className="w-full bg-white text-xs sm:text-sm text-[#1A1918] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
@@ -695,11 +779,15 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
           {/* Descripción Detallada */}
           <div>
             <label className="text-[11px] font-black uppercase tracking-wider text-[#5A554D] block mb-1.5">
-              DESCRIPCIÓN DETALLADA
+              {tipo === 'arreglo' ? 'DETALLES O INDICACIONES DEL ARREGLO' : 'DESCRIPCIÓN DETALLADA'}
             </label>
             <textarea
               rows={3}
-              placeholder="Describe los detalles de confección, materiales, estilo, especificaciones o recomendaciones de uso..."
+              placeholder={
+                tipo === 'arreglo'
+                  ? 'Describe el tipo de trabajo, materiales, recomendaciones, tiempos de entrega aproximados o detalles que el cliente debe saber...'
+                  : 'Describe los detalles de confección, materiales, estilo, especificaciones o recomendaciones de uso...'
+              }
               value={descripcion}
               onChange={(e) => setDescripcion(e.target.value)}
               className="w-full bg-white text-xs sm:text-sm text-[#1A1918] px-3.5 py-2.5 rounded-xl border border-[#E5DFD5] focus:outline-none focus:border-[#C59A4D]"
@@ -707,9 +795,12 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
           </div>
 
           {/* ======================================================== */}
-          {/* OPCIONES MANUALES: TALLAS Y COLORES PARA EL CLIENTE      */}
+          {/* OPCIONES MANUALES, TALLAS E INVENTARIO (SOLO PRODUCTOS)   */}
           {/* ======================================================== */}
-          <div className="p-4 sm:p-5 rounded-3xl bg-[#FAF9F6] border-2 border-[#E5DFD5] space-y-4">
+          {tipo !== 'arreglo' && (
+            <>
+              {/* Opciones manuales: Tallas y Colores */}
+              <div className="p-4 sm:p-5 rounded-3xl bg-[#FAF9F6] border-2 border-[#E5DFD5] space-y-4">
             <div className="flex items-center gap-2.5 pb-2 border-b border-[#EBE5DB]">
               <div className="w-8 h-8 rounded-xl bg-[#141312] text-[#E6C687] flex items-center justify-center font-bold shrink-0">
                 <Tag className="w-4 h-4" />
@@ -1412,16 +1503,20 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
               </div>
             )}
           </div>
+        </>
+      )}
 
-          {/* Fotos del Producto (0 de 4) */}
+          {/* Fotos del Producto o Arreglo (0 de 4) */}
           <div className="space-y-3 pt-1">
             <div className="flex items-center justify-between">
               <div>
                 <span className="text-xs font-black uppercase tracking-wider text-[#1A1918] block">
-                  FOTOS DEL PRODUCTO ({imagenes.length} DE 4)
+                  {tipo === 'arreglo' ? 'FOTOS / MUESTRAS DEL ARREGLO' : 'FOTOS DEL PRODUCTO'} ({imagenes.length} DE 4)
                 </span>
                 <p className="text-[11px] text-[#7A7368]">
-                  Almacenadas en Supabase Storage. La primera imagen será la portada principal.
+                  {tipo === 'arreglo'
+                    ? 'Sube fotos de muestras, trabajos previos o el modelo del arreglo para que los clientes lo vean en el catálogo.'
+                    : 'Almacenadas en Supabase Storage. La primera imagen será la portada principal.'}
                 </p>
               </div>
 
@@ -1542,8 +1637,8 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
               {isSubmitting
                 ? 'Guardando...'
                 : isEditing
-                ? 'Actualizar Producto & Variantes'
-                : 'Crear Producto & Variantes'}
+                ? (tipo === 'arreglo' ? 'Actualizar Arreglo' : 'Actualizar Producto & Variantes')
+                : (tipo === 'arreglo' ? 'Crear y Publicar Arreglo' : 'Crear Producto & Variantes')}
             </button>
           </div>
         </form>

@@ -31,6 +31,7 @@ export interface Producto {
   id: string;
   nombre: string;
   descripcion?: string | null;
+  tipo?: 'producto' | 'arreglo'; // 'producto' para catálogo con precio y venta, 'arreglo' para servicios pedidos por WhatsApp sin precio
   precio: number;
   costo?: number;
   categoria_id?: string | null;

@@ -155,6 +155,16 @@ export async function getProductos(): Promise<Producto[]> {
         cleanDescripcion = cleanDescripcion.replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '').trim();
       }
 
+      // Extraer tipo ('producto' | 'arreglo')
+      let tipo: 'producto' | 'arreglo' = (p as any).tipo === 'arreglo' ? 'arreglo' : 'producto';
+      if (typeof cleanDescripcion === 'string') {
+        const tipoMatch = cleanDescripcion.match(/<!--ALEX_TIPO:(producto|arreglo)-->/);
+        if (tipoMatch && tipoMatch[1]) {
+          tipo = tipoMatch[1] as 'producto' | 'arreglo';
+        }
+        cleanDescripcion = cleanDescripcion.replace(/<!--ALEX_TIPO:[\s\S]*?-->/g, '').trim();
+      }
+
       // 2. Extraer de columna nativa si existe y no vino en descripción
       if (Object.keys(tallas_stock).length === 0 && p.tallas_stock && typeof p.tallas_stock === 'object' && Object.keys(p.tallas_stock).length > 0) {
         tallas_stock = { ...p.tallas_stock };
@@ -236,6 +246,7 @@ export async function getProductos(): Promise<Producto[]> {
 
       return {
         ...p,
+        tipo,
         descripcion: cleanDescripcion || null,
         tallas,
         colores,
@@ -261,6 +272,7 @@ export async function crearProducto(
     id?: string;
     nombre: string;
     descripcion?: string;
+    tipo?: 'producto' | 'arreglo';
     precio: number;
     costo?: number;
     categoria_id?: string;
@@ -281,6 +293,8 @@ export async function crearProducto(
   try {
     const prodId = producto.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
     
+    const tipo = producto.tipo || 'producto';
+
     // Cálculo de tallas y variantes con stock individual por talla
     const tallas = producto.tallas || (producto.tallas_stock ? Object.keys(producto.tallas_stock) : []);
     const tallasStock = producto.tallas_stock || {};
@@ -300,34 +314,41 @@ export async function crearProducto(
       }));
     }
 
-    let cleanDesc = (producto.descripcion || '').replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '').trim();
+    let cleanDesc = (producto.descripcion || '')
+      .replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '')
+      .replace(/<!--ALEX_TIPO:[\s\S]*?-->/g, '')
+      .trim();
     let finalDescripcion = cleanDesc;
+    if (tipo === 'arreglo') {
+      finalDescripcion = finalDescripcion ? `${finalDescripcion}\n<!--ALEX_TIPO:arreglo-->` : `<!--ALEX_TIPO:arreglo-->`;
+    }
     if (tallasStock && Object.keys(tallasStock).length > 0) {
-      finalDescripcion = cleanDesc ? `${cleanDesc}\n<!--ALEX_TALLAS_STOCK:${JSON.stringify(tallasStock)}-->` : `<!--ALEX_TALLAS_STOCK:${JSON.stringify(tallasStock)}-->`;
+      finalDescripcion = finalDescripcion ? `${finalDescripcion}\n<!--ALEX_TALLAS_STOCK:${JSON.stringify(tallasStock)}-->` : `<!--ALEX_TALLAS_STOCK:${JSON.stringify(tallasStock)}-->`;
     }
 
     const insertPayload: any = {
       id: prodId,
       nombre: producto.nombre.trim(),
+      tipo,
       descripcion: finalDescripcion || null,
-      precio: Number(producto.precio) || 0,
+      precio: tipo === 'arreglo' ? 0 : (Number(producto.precio) || 0),
       costo: Number(producto.costo) || 0,
       categoria_id: producto.categoria_id && producto.categoria_id.trim() ? producto.categoria_id.trim() : null,
       imagen_url: producto.imagen_url || (producto.imagenes && producto.imagenes[0]) || null,
       imagenes: producto.imagenes || [],
       activo: producto.activo ?? true,
       sku: producto.sku || null,
-      stock: finalStock,
-      tallas: tallas,
+      stock: tipo === 'arreglo' ? 999 : finalStock,
+      tallas: tipo === 'arreglo' ? [] : tallas,
       colores: producto.colores || [],
-      tallas_stock: tallasStock,
-      tiene_variantes: Boolean(producto.tiene_variantes || tallas.length > 0 || (producto.colores && producto.colores.length > 0)),
-      atributos: producto.atributos || [],
-      variantes: variantesToSave,
+      tallas_stock: tipo === 'arreglo' ? {} : tallasStock,
+      tiene_variantes: tipo === 'arreglo' ? false : Boolean(producto.tiene_variantes || tallas.length > 0 || (producto.colores && producto.colores.length > 0)),
+      atributos: tipo === 'arreglo' ? [] : (producto.atributos || []),
+      variantes: tipo === 'arreglo' ? [] : variantesToSave,
     };
 
     // Resilient insert con eliminación automática de columnas no existentes en la BD
-    const optionalCols = ['costo', 'sku', 'tallas', 'colores', 'tallas_stock', 'atributos', 'variantes', 'tiene_variantes', 'imagenes', 'stock'];
+    const optionalCols = ['tipo', 'costo', 'sku', 'tallas', 'colores', 'tallas_stock', 'atributos', 'variantes', 'tiene_variantes', 'imagenes', 'stock'];
     let res = await supabase.from('productos').insert([insertPayload]).select();
     
     // Si la BD reporta que alguna columna opcional no existe, eliminarla y reintentar
@@ -401,6 +422,7 @@ export async function actualizarProducto(
   producto: {
     nombre: string;
     descripcion?: string;
+    tipo?: 'producto' | 'arreglo';
     precio: number;
     costo?: number;
     categoria_id?: string;
@@ -419,6 +441,8 @@ export async function actualizarProducto(
   stockMinimo?: number
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    const tipo = producto.tipo || 'producto';
+
     // Tallas que el usuario quiere guardar (respetando eliminaciones)
     const tallas = Array.isArray(producto.tallas)
       ? producto.tallas.map(String).map((s) => s.trim()).filter(Boolean)
@@ -453,29 +477,36 @@ export async function actualizarProducto(
       localStorage.setItem('alexstore_tallas_stock_' + id, JSON.stringify(tallasStock));
     } catch {}
 
-    let cleanDesc = (producto.descripcion || '').replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '').trim();
+    let cleanDesc = (producto.descripcion || '')
+      .replace(/<!--ALEX_TALLAS_STOCK:[\s\S]*?-->/g, '')
+      .replace(/<!--ALEX_TIPO:[\s\S]*?-->/g, '')
+      .trim();
     let finalDescripcion = cleanDesc;
+    if (tipo === 'arreglo') {
+      finalDescripcion = finalDescripcion ? `${finalDescripcion}\n<!--ALEX_TIPO:arreglo-->` : `<!--ALEX_TIPO:arreglo-->`;
+    }
     if (tallasStock && Object.keys(tallasStock).length > 0) {
       finalDescripcion = cleanDesc ? `${cleanDesc}\n<!--ALEX_TALLAS_STOCK:${JSON.stringify(tallasStock)}-->` : `<!--ALEX_TALLAS_STOCK:${JSON.stringify(tallasStock)}-->`;
     }
 
     const updatePayload: Record<string, any> = {
       nombre: producto.nombre.trim(),
+      tipo,
       descripcion: finalDescripcion || null,
-      precio: Number(producto.precio) || 0,
+      precio: tipo === 'arreglo' ? 0 : (Number(producto.precio) || 0),
       costo: Number(producto.costo) || 0,
       categoria_id: producto.categoria_id && producto.categoria_id.trim() ? producto.categoria_id.trim() : null,
       imagen_url: producto.imagen_url || (producto.imagenes && producto.imagenes[0]) || null,
       imagenes: producto.imagenes || [],
       activo: producto.activo,
       sku: producto.sku || null,
-      stock: finalStock,
-      tallas: tallas,
+      stock: tipo === 'arreglo' ? 999 : finalStock,
+      tallas: tipo === 'arreglo' ? [] : tallas,
       colores: producto.colores || [],
-      tallas_stock: tallasStock,
-      tiene_variantes: Boolean(producto.tiene_variantes || tallas.length > 0 || (producto.colores && producto.colores.length > 0)),
-      atributos: producto.atributos || [],
-      variantes: variantesToSave,
+      tallas_stock: tipo === 'arreglo' ? {} : tallasStock,
+      tiene_variantes: tipo === 'arreglo' ? false : Boolean(producto.tiene_variantes || tallas.length > 0 || (producto.colores && producto.colores.length > 0)),
+      atributos: tipo === 'arreglo' ? [] : (producto.atributos || []),
+      variantes: tipo === 'arreglo' ? [] : variantesToSave,
     };
 
     const updateRes = await safeUpdateProducto(id, updatePayload);
@@ -530,6 +561,7 @@ export async function safeUpdateProducto(
   delete currentPayload.updated_at;
 
   const potentialOptionalCols = [
+    'tipo',
     'tallas_stock',
     'variantes',
     'tiene_variantes',

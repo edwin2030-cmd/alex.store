@@ -560,6 +560,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     return totalVentasGanado - totalGastosMonto;
   }, [totalVentasGanado, totalGastosMonto]);
 
+  // Métricas del Día Actual (Hoy)
+  const fechaHoyStr = new Date().toISOString().split('T')[0];
+  const ventasHoyList = useMemo(() => {
+    return ventas.filter((v) => {
+      if (!v.creado_en) return false;
+      return (
+        v.creado_en.startsWith(fechaHoyStr) ||
+        new Date(v.creado_en).toLocaleDateString('en-CA') === fechaHoyStr
+      );
+    });
+  }, [ventas, fechaHoyStr]);
+
+  const totalCobradoHoy = useMemo(() => {
+    return ventasHoyList.reduce(
+      (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
+      0
+    );
+  }, [ventasHoyList]);
+
+  const totalSaldoPendienteHoy = useMemo(() => {
+    return ventasHoyList.reduce(
+      (acc, v) => acc + (Number(v.saldo_pendiente) || 0),
+      0
+    );
+  }, [ventasHoyList]);
+
   // Métricas de Espacio de Almacenamiento & Base de Datos (Supabase Free Tier Quota)
   const metricasEspacio = useMemo(() => {
     const totalFotosProductos = productos.reduce(
@@ -2942,28 +2968,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
-                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">INGRESOS TOTALES</span>
-                    <span className="text-2xl sm:text-3xl font-black text-white block my-2">${ingresosTotales.toFixed(2)}</span>
-                    <span className="text-[11px] font-bold text-emerald-400">Acumulado histórico</span>
+                  <div className="bg-gradient-to-br from-[#181614] to-[#12100E] rounded-3xl p-5 border-2 border-emerald-500/40 shadow-lg relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 block">
+                        TOTAL COBRADO HOY
+                      </span>
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Actualizado en tiempo real" />
+                    </div>
+                    <span className="text-2xl sm:text-3xl font-black text-white block my-1.5 tracking-tight">
+                      ${totalCobradoHoy.toFixed(2)}
+                    </span>
+                    <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
+                      <span>✓ {ventasHoyList.length} venta(s) hoy</span>
+                      {totalSaldoPendienteHoy > 0 && (
+                        <span className="text-amber-400 font-semibold">• Debe: ${totalSaldoPendienteHoy.toFixed(2)}</span>
+                      )}
+                    </span>
                   </div>
 
                   <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
-                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">VENTAS ESTE MES</span>
-                    <span className="text-2xl sm:text-3xl font-black text-white block my-2">${ingresosTotales.toFixed(2)}</span>
-                    <span className="text-[11px] text-[#A69F93]">{ventas.length} transacciones</span>
+                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">INGRESOS TOTALES</span>
+                    <span className="text-2xl sm:text-3xl font-black text-white block my-1.5">${ingresosTotales.toFixed(2)}</span>
+                    <span className="text-[11px] font-bold text-[#E6C687]">Acumulado en caja</span>
                   </div>
 
                   <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
                     <span className="text-[10px] font-black uppercase text-[#A69F93] block">TOTAL TRANSACCIONES</span>
-                    <span className="text-2xl sm:text-3xl font-black text-white block my-2">{ventas.length}</span>
-                    <span className="text-[11px] text-[#A69F93]">Web + Manuales</span>
+                    <span className="text-2xl sm:text-3xl font-black text-white block my-1.5">{ventas.length}</span>
+                    <span className="text-[11px] text-[#A69F93]">Web + Mostrador</span>
                   </div>
 
                   <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
                     <span className="text-[10px] font-black uppercase text-[#A69F93] block">TICKET PROMEDIO</span>
-                    <span className="text-2xl sm:text-3xl font-black text-[#E6C687] block my-2">
-                      ${ventas.length > 0 ? Math.round(ingresosTotales / ventas.length) : 0}
+                    <span className="text-2xl sm:text-3xl font-black text-[#E6C687] block my-1.5">
+                      ${ventas.length > 0 ? (ingresosTotales / ventas.length).toFixed(2) : '0.00'}
                     </span>
                     <span className="text-[11px] text-[#A69F93]">Por cada venta</span>
                   </div>
@@ -3118,7 +3157,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           {(
                             [
                               { id: 'todos', label: 'Todas' },
-                              { id: 'hoy', label: 'Por Día' },
+                              { id: 'hoy', label: '📅 Hoy / Por Día' },
                               { id: 'semana', label: 'Por Semana' },
                               { id: 'mes', label: 'Por Mes' },
                               { id: 'ano', label: 'Por Año' },
