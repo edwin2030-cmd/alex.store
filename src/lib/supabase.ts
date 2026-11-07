@@ -86,8 +86,49 @@ export async function actualizarCategoria(
   }
 }
 
+// ==========================================
+// AYUDA PARA BORRAR: revisa la respuesta real de Supabase
+// ==========================================
+
+// Sin sesión, Supabase no deja borrar pero tampoco da error; por eso se revisa antes de borrar.
+async function exigirSesionParaBorrar(): Promise<string | null> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (!data?.session) {
+      return 'Tu sesión del panel venció. Cierra sesión, vuelve a entrar e inténtalo de nuevo. No se borró nada.';
+    }
+    return null;
+  } catch {
+    return 'No se pudo comprobar la sesión con Supabase. No se borró nada.';
+  }
+}
+
+// Devuelve el mensaje de error de un borrado. Ignora tablas antiguas que ya no existen y
+// los id guardados solo en este navegador (sin formato uuid no pueden estar en Supabase).
+function errorDeBorrado(res: any): string | null {
+  const e = res?.error;
+  if (!e) return null;
+  const code = String(e.code || '');
+  const msg = String(e.message || '');
+  if (code === 'PGRST205' || code === '42P01' || /could not find the table|does not exist/i.test(msg)) return null;
+  if (code === '22P02') return null;
+  return msg || 'Supabase rechazó el borrado.';
+}
+
+// Junta los errores de varios borrados en un solo mensaje (null si todo salió bien).
+function primerErrorDeBorrado(...resultados: any[]): string | null {
+  for (const r of resultados) {
+    const e = errorDeBorrado(r);
+    if (e) return e;
+  }
+  return null;
+}
+
 export async function eliminarCategoria(id: string): Promise<{ success: boolean; error?: string }> {
   try {
+    const sinSesion = await exigirSesionParaBorrar();
+    if (sinSesion) return { success: false, error: sinSesion };
+
     const { error } = await supabase
       .from('categorias')
       .delete()
@@ -734,6 +775,9 @@ export async function actualizarStockPorTallas(
 
 export async function eliminarProducto(id: string): Promise<{ success: boolean; error?: string }> {
   try {
+    const sinSesion = await exigirSesionParaBorrar();
+    if (sinSesion) return { success: false, error: sinSesion };
+
     // 1. Obtener producto para borrar sus fotos del Supabase Storage
     try {
       const { data: prod } = await supabase.from('productos').select('*').eq('id', id).maybeSingle();
@@ -1094,6 +1138,9 @@ export async function eliminarArchivoStorage(urlOrPath: string, bucketDefault = 
 
 export async function eliminarPedido(idOrCodigo: string): Promise<{ success: boolean; error?: string }> {
   try {
+    const sinSesion = await exigirSesionParaBorrar();
+    if (sinSesion) return { success: false, error: sinSesion };
+
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCodigo);
     // 1. Obtener pedido para borrar su comprobante de pago de Supabase Storage
     try {
@@ -1117,10 +1164,10 @@ export async function eliminarPedido(idOrCodigo: string): Promise<{ success: boo
     }
 
     // 2. Eliminar fila de la tabla pedidos
-    if (isUuid) {
-      await supabase.from('pedidos').delete().eq('id', idOrCodigo);
-    }
-    await supabase.from('pedidos').delete().eq('codigo', idOrCodigo);
+    const rId = isUuid ? await supabase.from('pedidos').delete().eq('id', idOrCodigo) : null;
+    const rCodigo = await supabase.from('pedidos').delete().eq('codigo', idOrCodigo);
+    const fallo = primerErrorDeBorrado(rId, rCodigo);
+    if (fallo) return { success: false, error: 'No se pudo eliminar el pedido en Supabase: ' + fallo };
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -1129,6 +1176,9 @@ export async function eliminarPedido(idOrCodigo: string): Promise<{ success: boo
 
 export async function eliminarTodosLosPedidos(): Promise<{ success: boolean; error?: string }> {
   try {
+    const sinSesion = await exigirSesionParaBorrar();
+    if (sinSesion) return { success: false, error: sinSesion };
+
     // 1. Obtener todos los comprobantes para borrarlos del Storage
     try {
       const { data: todos } = await supabase.from('pedidos').select('comprobante_url, comprobante_path');
@@ -1143,7 +1193,10 @@ export async function eliminarTodosLosPedidos(): Promise<{ success: boolean; err
     }
 
     // 2. Eliminar todos los pedidos
-    await supabase.from('pedidos').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    const fallo = errorDeBorrado(
+      await supabase.from('pedidos').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    );
+    if (fallo) return { success: false, error: 'No se pudieron eliminar los pedidos en Supabase: ' + fallo };
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err?.message };
@@ -1841,28 +1894,20 @@ export async function liquidarSaldoVenta(
 }
 
 export async function eliminarVenta(idOrCodigo: string): Promise<{ success: boolean; error?: string }> {
-  try {
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCodigo);
-    const query = supabase.from('ventas').delete();
-    if (isUuid) {
-      await query.eq('id', idOrCodigo);
-    } else {
-      await query.eq('codigo', idOrCodigo);
-    }
-  } catch (err) {
-    console.warn('Aviso eliminando venta de Supabase:', err);
-  }
+  const sinSesion = await exigirSesionParaBorrar();
+  if (sinSesion) return { success: false, error: sinSesion };
 
-  // Eliminar también de pedidos si fue almacenada allí
   try {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCodigo);
-    const query = supabase.from('pedidos').delete();
-    if (isUuid) {
-      await query.eq('id', idOrCodigo);
-    } else {
-      await query.eq('codigo', idOrCodigo);
-    }
-  } catch (err) {}
+    const campo = isUuid ? 'id' : 'codigo';
+    const rVenta = await supabase.from('ventas').delete().eq(campo, idOrCodigo);
+    // Eliminar también de pedidos si fue almacenada allí
+    const rPedido = await supabase.from('pedidos').delete().eq(campo, idOrCodigo);
+    const fallo = primerErrorDeBorrado(rVenta, rPedido);
+    if (fallo) return { success: false, error: 'No se pudo eliminar la venta en Supabase: ' + fallo };
+  } catch (err: any) {
+    return { success: false, error: 'No se pudo eliminar la venta en Supabase: ' + (err?.message || 'error de conexión') };
+  }
 
   try {
     const local = localStorage.getItem(STORAGE_KEY_VENTAS);
@@ -1885,14 +1930,17 @@ export async function eliminarVenta(idOrCodigo: string): Promise<{ success: bool
 }
 
 export async function eliminarTodasLasVentas(): Promise<{ success: boolean; error?: string }> {
+  const sinSesion = await exigirSesionParaBorrar();
+  if (sinSesion) return { success: false, error: sinSesion };
+
   try {
-    await supabase.from('ventas').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-  } catch (err) {
-    console.warn('Aviso eliminando todas las ventas en Supabase:', err);
+    const rVentas = await supabase.from('ventas').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    const rPedidos = await supabase.from('pedidos').delete().ilike('codigo', 'VNT-%');
+    const fallo = primerErrorDeBorrado(rVentas, rPedidos);
+    if (fallo) return { success: false, error: 'No se pudieron eliminar las ventas en Supabase: ' + fallo };
+  } catch (err: any) {
+    return { success: false, error: 'No se pudieron eliminar las ventas en Supabase: ' + (err?.message || 'error de conexión') };
   }
-  try {
-    await supabase.from('pedidos').delete().ilike('codigo', 'VNT-%');
-  } catch {}
   try {
     localStorage.removeItem(STORAGE_KEY_VENTAS);
   } catch {}
@@ -1908,16 +1956,21 @@ export async function eliminarTodasLasVentas(): Promise<{ success: boolean; erro
 
 export async function eliminarVentasPorIds(ids: string[]): Promise<{ success: boolean; error?: string }> {
   if (!ids || ids.length === 0) return { success: true };
+  const sinSesion = await exigirSesionParaBorrar();
+  if (sinSesion) return { success: false, error: sinSesion };
+
   try {
-    await supabase.from('ventas').delete().in('id', ids);
-    await supabase.from('ventas').delete().in('codigo', ids);
-  } catch (err) {
-    console.warn('Aviso eliminando ventas filtradas en Supabase:', err);
+    // Los id son uuid; los que no lo son se buscan solo por código (evita errores de formato)
+    const uuids = ids.filter((x) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x));
+    const r1 = uuids.length ? await supabase.from('ventas').delete().in('id', uuids) : null;
+    const r2 = await supabase.from('ventas').delete().in('codigo', ids);
+    const r3 = uuids.length ? await supabase.from('pedidos').delete().in('id', uuids) : null;
+    const r4 = await supabase.from('pedidos').delete().in('codigo', ids);
+    const fallo = primerErrorDeBorrado(r1, r2, r3, r4);
+    if (fallo) return { success: false, error: 'No se pudieron eliminar las ventas en Supabase: ' + fallo };
+  } catch (err: any) {
+    return { success: false, error: 'No se pudieron eliminar las ventas en Supabase: ' + (err?.message || 'error de conexión') };
   }
-  try {
-    await supabase.from('pedidos').delete().in('id', ids);
-    await supabase.from('pedidos').delete().in('codigo', ids);
-  } catch {}
   try {
     const local = localStorage.getItem(STORAGE_KEY_VENTAS);
     if (local) {
@@ -1937,16 +1990,21 @@ export async function eliminarVentasPorIds(ids: string[]): Promise<{ success: bo
 }
 
 export async function eliminarCliente(telefonoONombre: string): Promise<{ success: boolean; error?: string }> {
+  const sinSesion = await exigirSesionParaBorrar();
+  if (sinSesion) return { success: false, error: sinSesion };
+
   try {
     const cleanPhone = telefonoONombre.replace(/\D/g, '');
     let filter = `cliente_nombre.eq.${telefonoONombre}`;
     if (cleanPhone.length >= 6) {
       filter = `cliente_telefono.ilike.%${cleanPhone}%,cliente_nombre.eq.${telefonoONombre}`;
     }
-    await supabase.from('pedidos').delete().or(filter);
-    await supabase.from('ventas').delete().or(filter);
-  } catch (e) {
-    console.warn('Aviso eliminando cliente en Supabase:', e);
+    const rPedidos = await supabase.from('pedidos').delete().or(filter);
+    const rVentas = await supabase.from('ventas').delete().or(filter);
+    const fallo = primerErrorDeBorrado(rPedidos, rVentas);
+    if (fallo) return { success: false, error: 'No se pudo eliminar el cliente en Supabase: ' + fallo };
+  } catch (e: any) {
+    return { success: false, error: 'No se pudo eliminar el cliente en Supabase: ' + (e?.message || 'error de conexión') };
   }
 
   // Limpiar también de ventas locales asociadas al cliente
@@ -2204,15 +2262,18 @@ export async function crearGasto(gasto: {
 }
 
 export async function eliminarGasto(id: string): Promise<{ success: boolean; error?: string }> {
+  const sinSesion = await exigirSesionParaBorrar();
+  if (sinSesion) return { success: false, error: sinSesion };
+
   try {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-    if (isUuid) {
-      await supabase.from('gastos').delete().eq('id', id);
-    } else {
-      await supabase.from('gastos').delete().eq('concepto', id);
-    }
-  } catch (err) {
-    console.warn('Aviso eliminando de Supabase:', err);
+    const r = isUuid
+      ? await supabase.from('gastos').delete().eq('id', id)
+      : await supabase.from('gastos').delete().eq('concepto', id);
+    const fallo = errorDeBorrado(r);
+    if (fallo) return { success: false, error: 'No se pudo eliminar el gasto en Supabase: ' + fallo };
+  } catch (err: any) {
+    return { success: false, error: 'No se pudo eliminar el gasto en Supabase: ' + (err?.message || 'error de conexión') };
   }
 
   try {
@@ -2229,10 +2290,16 @@ export async function eliminarGasto(id: string): Promise<{ success: boolean; err
 }
 
 export async function eliminarTodosLosGastos(): Promise<{ success: boolean; error?: string }> {
+  const sinSesion = await exigirSesionParaBorrar();
+  if (sinSesion) return { success: false, error: sinSesion };
+
   try {
-    await supabase.from('gastos').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-  } catch (err) {
-    console.warn('Aviso eliminando todos los gastos de Supabase:', err);
+    const fallo = errorDeBorrado(
+      await supabase.from('gastos').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    );
+    if (fallo) return { success: false, error: 'No se pudieron eliminar los gastos en Supabase: ' + fallo };
+  } catch (err: any) {
+    return { success: false, error: 'No se pudieron eliminar los gastos en Supabase: ' + (err?.message || 'error de conexión') };
   }
   try {
     localStorage.removeItem(STORAGE_KEY_GASTOS);
@@ -2242,10 +2309,16 @@ export async function eliminarTodosLosGastos(): Promise<{ success: boolean; erro
 
 export async function eliminarGastosPorIds(ids: string[]): Promise<{ success: boolean; error?: string }> {
   if (!ids || ids.length === 0) return { success: true };
+  const sinSesion = await exigirSesionParaBorrar();
+  if (sinSesion) return { success: false, error: sinSesion };
+
   try {
-    await supabase.from('gastos').delete().in('id', ids);
-  } catch (err) {
-    console.warn('Aviso eliminando gastos filtrados en Supabase:', err);
+    // Solo los id con formato uuid existen en Supabase (los demás son gastos guardados solo en este navegador)
+    const uuids = ids.filter((x) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x));
+    const fallo = uuids.length ? errorDeBorrado(await supabase.from('gastos').delete().in('id', uuids)) : null;
+    if (fallo) return { success: false, error: 'No se pudieron eliminar los gastos en Supabase: ' + fallo };
+  } catch (err: any) {
+    return { success: false, error: 'No se pudieron eliminar los gastos en Supabase: ' + (err?.message || 'error de conexión') };
   }
   try {
     const local = localStorage.getItem(STORAGE_KEY_GASTOS);
@@ -2597,19 +2670,18 @@ export async function cerrarCaja(params: {
 
 export async function eliminarRegistroCaja(id: string): Promise<{ success: boolean; error?: string }> {
   try {
+    const sinSesion = await exigirSesionParaBorrar();
+    if (sinSesion) return { success: false, error: sinSesion };
+
     // 1. Eliminar de Supabase en registros_caja
-    try {
-      const { error } = await supabase.from('registros_caja').delete().eq('id', id);
-      if (error) console.warn('Aviso Supabase delete registros_caja:', error.message);
-    } catch (e) {}
+    const rRegistros = await supabase.from('registros_caja').delete().eq('id', id);
 
     // 2. Eliminar de caja_sesiones y sesiones_caja por compatibilidad
-    try {
-      await supabase.from('caja_sesiones').delete().eq('id', id);
-    } catch (e) {}
-    try {
-      await supabase.from('sesiones_caja').delete().eq('id', id);
-    } catch (e) {}
+    const rSesiones = await supabase.from('caja_sesiones').delete().eq('id', id);
+    const rSesionesViejas = await supabase.from('sesiones_caja').delete().eq('id', id);
+
+    const fallo = primerErrorDeBorrado(rRegistros, rSesiones, rSesionesViejas);
+    if (fallo) return { success: false, error: 'No se pudo eliminar el registro de caja en Supabase: ' + fallo };
 
     // 3. Eliminar de almacenamiento local (historial)
     try {
@@ -2641,16 +2713,16 @@ export async function eliminarRegistroCaja(id: string): Promise<{ success: boole
 
 export async function vaciarHistorialCaja(): Promise<{ success: boolean; error?: string }> {
   try {
+    const sinSesion = await exigirSesionParaBorrar();
+    if (sinSesion) return { success: false, error: sinSesion };
+
     // 1. Eliminar registros en Supabase
-    try {
-      await supabase.from('registros_caja').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    } catch (e) {}
-    try {
-      await supabase.from('caja_sesiones').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    } catch (e) {}
-    try {
-      await supabase.from('sesiones_caja').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    } catch (e) {}
+    const rRegistros = await supabase.from('registros_caja').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    const rSesiones = await supabase.from('caja_sesiones').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    const rSesionesViejas = await supabase.from('sesiones_caja').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+
+    const fallo = primerErrorDeBorrado(rRegistros, rSesiones, rSesionesViejas);
+    if (fallo) return { success: false, error: 'No se pudo vaciar el historial de caja en Supabase: ' + fallo };
 
     // 2. Limpiar historial local dejando solo la caja activa si la hay
     try {
@@ -2960,13 +3032,18 @@ export async function cambiarRolUsuario(
 }
 
 export async function eliminarUsuarioPanel(userId: string): Promise<{ success: boolean; error?: string }> {
+  const sinSesion = await exigirSesionParaBorrar();
+  if (sinSesion) return { success: false, error: sinSesion };
+
   try {
-    await Promise.all([
+    const resultados = await Promise.all([
       supabase.from('usuarios').delete().eq('id', userId),
       supabase.from('perfiles_usuarios').delete().eq('id', userId),
     ]);
-  } catch (err) {
-    console.warn("Aviso eliminando usuario en Supabase:", err);
+    const fallo = primerErrorDeBorrado(...resultados);
+    if (fallo) return { success: false, error: 'No se pudo eliminar el usuario en Supabase: ' + fallo };
+  } catch (err: any) {
+    return { success: false, error: 'No se pudo eliminar el usuario en Supabase: ' + (err?.message || 'error de conexión') };
   }
 
   try {
@@ -3196,10 +3273,14 @@ export async function getMovimientosTrabajadores(limit = 150): Promise<Movimient
  * Elimina un registro de movimiento individual
  */
 export async function eliminarMovimiento(id: string): Promise<{ success: boolean; error?: string }> {
+  const sinSesion = await exigirSesionParaBorrar();
+  if (sinSesion) return { success: false, error: sinSesion };
+
   try {
-    await supabase.from('movimientos_trabajadores').delete().eq('id', id);
-  } catch (e) {
-    console.warn('Error en supabase delete movimiento:', e);
+    const fallo = errorDeBorrado(await supabase.from('movimientos_trabajadores').delete().eq('id', id));
+    if (fallo) return { success: false, error: 'No se pudo eliminar el movimiento en Supabase: ' + fallo };
+  } catch (e: any) {
+    return { success: false, error: 'No se pudo eliminar el movimiento en Supabase: ' + (e?.message || 'error de conexión') };
   }
 
   try {
@@ -3220,10 +3301,16 @@ export async function eliminarMovimiento(id: string): Promise<{ success: boolean
  * Limpia el historial completo de movimientos (solo Dueño)
  */
 export async function limpiarHistorialMovimientos(): Promise<{ success: boolean; error?: string }> {
+  const sinSesion = await exigirSesionParaBorrar();
+  if (sinSesion) return { success: false, error: sinSesion };
+
   try {
-    await supabase.from('movimientos_trabajadores').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-  } catch (e) {
-    console.warn('Error en supabase delete all movimientos:', e);
+    const fallo = errorDeBorrado(
+      await supabase.from('movimientos_trabajadores').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    );
+    if (fallo) return { success: false, error: 'No se pudo vaciar el historial de movimientos en Supabase: ' + fallo };
+  } catch (e: any) {
+    return { success: false, error: 'No se pudo vaciar el historial de movimientos en Supabase: ' + (e?.message || 'error de conexión') };
   }
 
   try {

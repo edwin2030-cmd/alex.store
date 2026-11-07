@@ -967,14 +967,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Handlers
   const handleDeleteProducto = async (id: string, nombre: string) => {
     if (confirm(`¿Estás seguro de eliminar "${nombre}" de Supabase?`)) {
-      await eliminarProducto(id);
+      const res = await eliminarProducto(id);
+      if (!res.success) alert(res.error || 'No se pudo eliminar el producto en Supabase.');
       await reloadAllData();
     }
   };
 
   const handleDeleteCategoria = async (id: string, nombre: string) => {
     if (confirm(`¿Estás seguro de eliminar la categoría "${nombre}"?`)) {
-      await eliminarCategoria(id);
+      const res = await eliminarCategoria(id);
+      if (!res.success) alert(res.error || 'No se pudo eliminar la categoría en Supabase.');
       await reloadAllData();
     }
   };
@@ -983,7 +985,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     if (!confirm('⚠️ ¿Estás seguro de que deseas ELIMINAR TODOS los pedidos de Supabase? Esta acción no se puede deshacer.')) return;
     setLoading(true);
     try {
-      await eliminarTodosLosPedidos();
+      const res = await eliminarTodosLosPedidos();
+      if (!res.success) throw new Error(res.error || 'Supabase no confirmó el borrado.');
       await reloadAllData();
       setUserFeedback({ type: 'success', msg: '✅ Todos los pedidos han sido eliminados de Supabase.' });
       setTimeout(() => setUserFeedback(null), 4000);
@@ -998,7 +1001,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     if (!confirm('⚠️ ¿Estás seguro de que deseas ELIMINAR TODAS las ventas registradas de Supabase?')) return;
     setLoading(true);
     try {
-      await eliminarTodasLasVentas();
+      const res = await eliminarTodasLasVentas();
+      if (!res.success) throw new Error(res.error || 'Supabase no confirmó el borrado.');
       await reloadAllData();
       setUserFeedback({ type: 'success', msg: '✅ Todas las ventas han sido eliminadas de Supabase.' });
       setTimeout(() => setUserFeedback(null), 4000);
@@ -1015,7 +1019,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setLoading(true);
     try {
       const ids = ventasABorrar.map((v) => v.id || v.codigo);
-      await eliminarVentasPorIds(ids);
+      const res = await eliminarVentasPorIds(ids);
+      if (!res.success) throw new Error(res.error || 'Supabase no confirmó el borrado.');
       await reloadAllData();
       setUserFeedback({ type: 'success', msg: `✅ Se eliminaron ${ventasABorrar.length} ventas de Supabase.` });
       setTimeout(() => setUserFeedback(null), 4000);
@@ -1030,7 +1035,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     if (!confirm('⚠️ ¿Estás seguro de que deseas ELIMINAR TODOS los gastos registrados de Supabase?')) return;
     setLoading(true);
     try {
-      await eliminarTodosLosGastos();
+      const res = await eliminarTodosLosGastos();
+      if (!res.success) throw new Error(res.error || 'Supabase no confirmó el borrado.');
       await reloadAllData();
       setUserFeedback({ type: 'success', msg: '✅ Todos los gastos han sido eliminados de Supabase.' });
       setTimeout(() => setUserFeedback(null), 4000);
@@ -1047,7 +1053,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setLoading(true);
     try {
       const ids = gastosABorrar.map((g) => g.id || '').filter(Boolean);
-      await eliminarGastosPorIds(ids);
+      const res = await eliminarGastosPorIds(ids);
+      if (!res.success) throw new Error(res.error || 'Supabase no confirmó el borrado.');
       await reloadAllData();
       setUserFeedback({ type: 'success', msg: `✅ Se eliminaron ${gastosABorrar.length} gastos de Supabase.` });
       setTimeout(() => setUserFeedback(null), 4000);
@@ -2137,13 +2144,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleEliminarMovimientoRegistro = async (id: string) => {
     if (!confirm('¿Estás seguro de eliminar este registro de auditoría?')) return;
-    await eliminarMovimiento(id);
+    const res = await eliminarMovimiento(id);
+    if (!res.success) {
+      alert(res.error || 'No se pudo eliminar el movimiento en Supabase.');
+      return;
+    }
     setMovimientos((prev) => prev.filter((m) => m.id !== id));
   };
 
   const handleLimpiarHistorialMovimientosRegistro = async () => {
     if (!confirm('¿Estás seguro de vaciar todo el historial de movimientos de los trabajadores? Esta acción no se puede deshacer.')) return;
-    await limpiarHistorialMovimientos();
+    const res = await limpiarHistorialMovimientos();
+    if (!res.success) {
+      alert(res.error || 'No se pudo vaciar el historial de movimientos en Supabase.');
+      return;
+    }
     setMovimientos([]);
     setUserFeedback({
       type: 'success',
@@ -7000,9 +7015,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             </td>
 
                             <td className="py-4 px-6">
-                              <span className="inline-flex items-center gap-1 font-bold text-emerald-400">
-                                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                                Activa
+                              <span className={`inline-flex items-center gap-1 font-bold ${cat.activa !== false ? 'text-emerald-400' : 'text-[#A69F93]'}`}>
+                                <span className={`w-2 h-2 rounded-full ${cat.activa !== false ? 'bg-emerald-400' : 'bg-[#6A6358]'}`} />
+                                {cat.activa !== false ? 'Activa' : 'Inactiva'}
                               </span>
                             </td>
 
