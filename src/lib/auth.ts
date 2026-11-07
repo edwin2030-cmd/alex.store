@@ -66,35 +66,22 @@ export function canModifyUser(actorRole: UserRole, targetUser: UsuarioPanel): bo
  * Obtiene el perfil del usuario actual desde Supabase o almacenamiento local seguro
  */
 export async function getPerfilUsuario(userId: string, email: string): Promise<UsuarioPanel | null> {
-  const activeSavedRole = localStorage.getItem('alexstore_active_role');
-  
-  // 1. Revisar perfil almacenado previamente para respetar el rol Dueño
-  let previousSaved: UsuarioPanel | null = null;
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY_USER_PROFILE);
-    if (saved) {
-      previousSaved = JSON.parse(saved);
-    }
-  } catch {}
-
+  // El rol sale SOLO de la tabla perfiles_usuarios en Supabase. Nada guardado en el navegador
+  // ni el texto del correo puede dar permisos de Dueño.
   try {
     const { data, error } = await supabase
       .from('perfiles_usuarios')
       .select('*')
-      .eq('email', email)
+      .or(`id.eq.${userId},email.eq.${(email || '').toLowerCase()}`)
+      .limit(1)
       .maybeSingle();
 
     if (!error && data) {
-      // Si la sesión anterior era Dueño y no se ha cambiado explícitamente, mantener Dueño
-      const finalRole: UserRole = (previousSaved?.rol === 'dueno' || activeSavedRole === 'dueno')
-        ? 'dueno'
-        : (data.rol as UserRole);
-
       const perfil: UsuarioPanel = {
         id: data.id || userId,
         email: data.email,
         nombre: data.nombre,
-        rol: finalRole,
+        rol: data.rol as UserRole,
         activo: data.activo ?? true,
         creado_en: data.creado_en,
         actualizado_en: data.actualizado_en,
@@ -103,42 +90,13 @@ export async function getPerfilUsuario(userId: string, email: string): Promise<U
         ultimo_acceso: data.ultimo_acceso,
       };
       localStorage.setItem(STORAGE_KEY_USER_PROFILE, JSON.stringify(perfil));
-      localStorage.setItem('alexstore_active_role', finalRole);
+      localStorage.setItem('alexstore_active_role', perfil.rol);
       return perfil;
     }
   } catch (err) {
     console.warn('Aviso consultando perfiles_usuarios en Supabase:', err);
   }
-
-  // 2. Fallback a perfil almacenado previamente
-  if (previousSaved && previousSaved.email === email) {
-    if (activeSavedRole === 'dueno') {
-      previousSaved.rol = 'dueno';
-    }
-    return previousSaved;
-  }
-
-  // 3. Si no existe perfil en la tabla pero el email coincide con el dueño base o es el primer usuario
-  const esDuenoInicial =
-    email.includes('admin') ||
-    email.includes('alex') ||
-    email.includes('dueno') ||
-    email.includes('pedro') ||
-    activeSavedRole === 'dueno';
-
-  const perfilDefault: UsuarioPanel = {
-    id: userId || 'usr_' + Date.now(),
-    email,
-    nombre: email.split('@')[0].toUpperCase(),
-    rol: esDuenoInicial ? 'dueno' : 'cajero',
-    activo: true,
-    creado_en: new Date().toISOString(),
-    creado_por: 'Sistema',
-  };
-
-  localStorage.setItem(STORAGE_KEY_USER_PROFILE, JSON.stringify(perfilDefault));
-  localStorage.setItem('alexstore_active_role', perfilDefault.rol);
-  return perfilDefault;
+  return null;
 }
 
 /**
