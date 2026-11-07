@@ -174,7 +174,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const cleanExt = ext === 'png' || ext === 'webp' ? ext : 'jpg';
     const fileName = `comprobante_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${cleanExt}`;
     const filePath = `recibos/${fileName}`;
-    const publicUrl = `https://hbfhuwsizuhdqhyojmzk.supabase.co/storage/v1/object/public/comprobantes/${filePath}`;
+    const publicUrl = `https://unvqhdetppbtpkanaklo.supabase.co/storage/v1/object/public/comprobantes/${filePath}`;
     setComprobantePublicUrl(publicUrl);
     setComprobantePath(filePath);
     setIsUploadingProof(true);

@@ -2,8 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import { CATEGORIAS_INICIALES } from '../data/initialData';
 import { Categoria, Producto, Pedido, Venta, Gasto, UsuarioPanel, RolUsuario, EstadoPedido, MovimientoTrabajador, RegistroCaja } from '../types';
 
-export const SUPABASE_URL = "https://hbfhuwsizuhdqhyojmzk.supabase.co";
-export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhiZmh1d3NpenVoZHFoeW9qbXprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNzUyMzIsImV4cCI6MjEwNzY1MTIzMn0.Oa1a4o14nRXnMaLHp_6NKSe9avx8ADwPd6ezlx7I53E";
+export const SUPABASE_URL = "https://unvqhdetppbtpkanaklo.supabase.co";
+export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVudnFoZGV0cHBidHBrYW5ha2xvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQwOTIxMjMsImV4cCI6MjEwOTY2ODEyM30.-Rhu1skC6gk6h2VmK1co-iuyubtgEJl3X4KzE6w0u_g";
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -3090,7 +3090,7 @@ export async function subirFotoStorage(
     const fileName =
       fileNameOverride || `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${cleanExt}`;
     const filePath = bucket === 'comprobantes' ? `recibos/${fileName}` : `productos/${fileName}`;
-    const publicUrl = `https://hbfhuwsizuhdqhyojmzk.supabase.co/storage/v1/object/public/${bucket}/${filePath}`;
+    const publicUrl = `https://unvqhdetppbtpkanaklo.supabase.co/storage/v1/object/public/${bucket}/${filePath}`;
     const mimeType =
       file.type && (file.type.startsWith('image/') || file.type === 'application/pdf')
         ? file.type
@@ -3099,7 +3099,7 @@ export async function subirFotoStorage(
         : 'image/jpeg';
 
     // 2. Direct REST upload using SUPABASE_ANON_KEY (garantiza persistencia inmediata)
-    const uploadEndpoint = `https://hbfhuwsizuhdqhyojmzk.supabase.co/storage/v1/object/${bucket}/${filePath}`;
+    const uploadEndpoint = `https://unvqhdetppbtpkanaklo.supabase.co/storage/v1/object/${bucket}/${filePath}`;
     try {
       const res = await fetch(uploadEndpoint, {
         method: 'POST',
