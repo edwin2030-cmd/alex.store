@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, Download, Shield, KeyRound, Database, ExternalLink } from 'lucide-react';
+import { X, Copy, Check, Download, Shield, KeyRound, Database, ExternalLink, Trash2 } from 'lucide-react';
 
 interface ModalSqlAuthProps {
   isOpen: boolean;
@@ -8,6 +8,7 @@ interface ModalSqlAuthProps {
 
 export const ModalSqlAuth: React.FC<ModalSqlAuthProps> = ({ isOpen, onClose }) => {
   const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState<'eliminar' | 'auth'>('eliminar');
 
   if (!isOpen) return null;
 
@@ -443,18 +444,97 @@ DROP POLICY IF EXISTS "Permitir borrar permanente storage" ON storage.objects;
 CREATE POLICY "Permitir borrar permanente storage" ON storage.objects FOR DELETE TO public USING (bucket_id IN ('productos', 'comprobantes'));
 `;
 
+  const sqlPermisosEliminar = `-- ==============================================================================
+-- ALEXSTORE: PERMISOS COMPLETOS DE ELIMINACIÓN (DELETE) Y LIMPIEZA EN SUPABASE
+-- ==============================================================================
+-- 1. TABLA Y POLÍTICAS DE 'DELETE' EN REGISTROS DE CAJA Y ARQUEOS
+CREATE TABLE IF NOT EXISTS public.registros_caja (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  estado TEXT NOT NULL DEFAULT 'abierta' CHECK (estado IN ('abierta', 'cerrada')),
+  monto_inicial NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+  monto_final_real NUMERIC(10,2),
+  monto_esperado NUMERIC(10,2),
+  diferencia NUMERIC(10,2),
+  fecha_apertura TIMESTAMPTZ NOT NULL DEFAULT now(),
+  fecha_cierre TIMESTAMPTZ,
+  abierto_por TEXT NOT NULL,
+  cerrado_por TEXT,
+  usuario_id UUID,
+  notas TEXT,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.registros_caja ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Permitir DELETE a registros_caja" ON public.registros_caja;
+CREATE POLICY "Permitir DELETE a registros_caja" ON public.registros_caja FOR DELETE USING (true);
+DROP POLICY IF EXISTS "Acceso total a registros_caja" ON public.registros_caja;
+CREATE POLICY "Acceso total a registros_caja" ON public.registros_caja FOR ALL USING (true) WITH CHECK (true);
+
+-- 2. POLÍTICAS DE ELIMINACIÓN PARA VENTAS Y FACTURACIÓN
+ALTER TABLE IF EXISTS public.ventas ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Permitir DELETE a ventas" ON public.ventas;
+CREATE POLICY "Permitir DELETE a ventas" ON public.ventas FOR DELETE USING (true);
+DROP POLICY IF EXISTS "Acceso total a ventas" ON public.ventas;
+CREATE POLICY "Acceso total a ventas" ON public.ventas FOR ALL USING (true) WITH CHECK (true);
+
+-- 3. POLÍTICAS DE ELIMINACIÓN PARA PEDIDOS
+ALTER TABLE IF EXISTS public.pedidos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Permitir DELETE a pedidos" ON public.pedidos;
+CREATE POLICY "Permitir DELETE a pedidos" ON public.pedidos FOR DELETE USING (true);
+DROP POLICY IF EXISTS "Acceso total a pedidos" ON public.pedidos;
+CREATE POLICY "Acceso total a pedidos" ON public.pedidos FOR ALL USING (true) WITH CHECK (true);
+
+-- 4. POLÍTICAS DE ELIMINACIÓN PARA GASTOS
+ALTER TABLE IF EXISTS public.gastos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Permitir DELETE a gastos" ON public.gastos;
+CREATE POLICY "Permitir DELETE a gastos" ON public.gastos FOR DELETE USING (true);
+DROP POLICY IF EXISTS "Acceso total a gastos" ON public.gastos;
+CREATE POLICY "Acceso total a gastos" ON public.gastos FOR ALL USING (true) WITH CHECK (true);
+
+-- 5. POLÍTICAS DE ELIMINACIÓN PARA PRODUCTOS, INVENTARIO Y CATEGORÍAS (EN CASCADA)
+ALTER TABLE IF EXISTS public.productos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Permitir DELETE a productos" ON public.productos;
+CREATE POLICY "Permitir DELETE a productos" ON public.productos FOR DELETE USING (true);
+DROP POLICY IF EXISTS "Acceso total a productos" ON public.productos;
+CREATE POLICY "Acceso total a productos" ON public.productos FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE IF EXISTS public.detalles_productos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Permitir DELETE a detalles_productos" ON public.detalles_productos;
+CREATE POLICY "Permitir DELETE a detalles_productos" ON public.detalles_productos FOR DELETE USING (true);
+
+ALTER TABLE IF EXISTS public.inventario ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Permitir DELETE a inventario" ON public.inventario;
+CREATE POLICY "Permitir DELETE a inventario" ON public.inventario FOR DELETE USING (true);
+
+ALTER TABLE IF EXISTS public.categorias ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Permitir DELETE a categorias" ON public.categorias;
+CREATE POLICY "Permitir DELETE a categorias" ON public.categorias FOR DELETE USING (true);
+DROP POLICY IF EXISTS "Acceso total a categorias" ON public.categorias;
+CREATE POLICY "Acceso total a categorias" ON public.categorias FOR ALL USING (true) WITH CHECK (true);
+
+-- 6. POLÍTICAS PARA AUDITORÍA Y MOVIMIENTOS
+ALTER TABLE IF EXISTS public.movimientos_trabajadores ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Permitir DELETE a movimientos_trabajadores" ON public.movimientos_trabajadores;
+CREATE POLICY "Permitir DELETE a movimientos_trabajadores" ON public.movimientos_trabajadores FOR DELETE USING (true);
+DROP POLICY IF EXISTS "Acceso total a movimientos_trabajadores" ON public.movimientos_trabajadores;
+CREATE POLICY "Acceso total a movimientos_trabajadores" ON public.movimientos_trabajadores FOR ALL USING (true) WITH CHECK (true);
+`;
+
+  const activeSql = activeTab === 'eliminar' ? sqlPermisosEliminar : sqlCode;
+  const activeFileName = activeTab === 'eliminar' ? 'supabase-permisos-eliminar.sql' : 'supabase-usuarios-auth.sql';
+
   const handleCopy = () => {
-    navigator.clipboard.writeText(sqlCode);
+    navigator.clipboard.writeText(activeSql);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };
 
   const handleDownload = () => {
-    const blob = new Blob([sqlCode], { type: 'text/sql' });
+    const blob = new Blob([activeSql], { type: 'text/sql' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'supabase-usuarios-auth.sql';
+    a.download = activeFileName;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -467,14 +547,14 @@ CREATE POLICY "Permitir borrar permanente storage" ON storage.objects FOR DELETE
           <div className="flex items-start justify-between pb-4 border-b border-[#26221E]">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-[#C59A4D]/20 text-[#C59A4D] flex items-center justify-center border border-[#C59A4D]/30">
-                <KeyRound className="w-5 h-5" />
+                <Database className="w-5 h-5" />
               </div>
               <div>
                 <h3 className="font-black text-lg text-white font-heading">
-                  SQL: Autenticación de Dueño y Cajero en Supabase
+                  Scripts SQL para Supabase (AlexStore)
                 </h3>
                 <span className="text-xs text-[#A69F93]">
-                  Crea usuarios en <code className="text-[#E6C687] font-mono">auth.users</code> con correo, contraseña y roles automáticos
+                  Ejecuta estos scripts en el SQL Editor de tu panel de Supabase para activar permisos y usuarios
                 </span>
               </div>
             </div>
@@ -487,32 +567,84 @@ CREATE POLICY "Permitir borrar permanente storage" ON storage.objects FOR DELETE
             </button>
           </div>
 
-          {/* Quick instructions */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-            <div className="p-4 rounded-2xl bg-[#1C1A17] border border-[#2E2822] space-y-1.5">
-              <span className="font-extrabold text-[#C59A4D] flex items-center gap-1.5">
-                👑 1. USUARIO DUEÑO (ACCESO TOTAL)
-              </span>
-              <p className="text-[#A69F93] leading-relaxed">
-                Tiene acceso a todo el panel: <strong>Dashboard con Ganancia Neta</strong>, <strong>Gastos</strong>, <strong>Ventas</strong>, <strong>Pedidos</strong>, <strong>Inventario</strong>, <strong>Clientes</strong>, <strong>Categorías</strong> y <strong>Usuarios</strong>.
-              </p>
-              <div className="text-[11px] font-mono bg-[#11100F] p-2 rounded-xl border border-[#26221E] text-[#E6C687]">
-                dueno@alexstore.com / DuenoPassword2025!
-              </div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-[#1C1A17] border border-[#2E2822] space-y-1.5">
-              <span className="font-extrabold text-emerald-400 flex items-center gap-1.5">
-                💼 2. USUARIO CAJERO (OPERATIVO)
-              </span>
-              <p className="text-[#A69F93] leading-relaxed">
-                Solo puede ver: <strong>Productos</strong>, <strong>Inventario</strong>, <strong>Pedidos</strong>, <strong>Clientes</strong> y <strong>Categorías</strong>. No tiene acceso a gastos ni al dashboard financiero.
-              </p>
-              <div className="text-[11px] font-mono bg-[#11100F] p-2 rounded-xl border border-[#26221E] text-emerald-300">
-                cajero@alexstore.com / CajeroPassword2025!
-              </div>
-            </div>
+          {/* Selector de Pestañas de Scripts SQL */}
+          <div className="flex items-center gap-2 p-1 bg-[#0D0C0B] rounded-2xl border border-[#26221E]">
+            <button
+              type="button"
+              onClick={() => setActiveTab('eliminar')}
+              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                activeTab === 'eliminar'
+                  ? 'bg-rose-950/70 text-rose-300 border border-rose-800/80 shadow-md'
+                  : 'text-[#A69F93] hover:text-white'
+              }`}
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>1. Permisos DELETE & Caja en Supabase</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('auth')}
+              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                activeTab === 'auth'
+                  ? 'bg-amber-950/70 text-[#E6C687] border border-amber-800/80 shadow-md'
+                  : 'text-[#A69F93] hover:text-white'
+              }`}
+            >
+              <KeyRound className="w-3.5 h-3.5 text-[#C59A4D]" />
+              <span>2. Usuarios & Roles Auth</span>
+            </button>
           </div>
+
+          {/* Context Explanations based on tab */}
+          {activeTab === 'eliminar' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="p-4 rounded-2xl bg-[#1C1A17] border border-[#2E2822] space-y-1.5">
+                <span className="font-extrabold text-rose-400 flex items-center gap-1.5">
+                  <Trash2 className="w-4 h-4" />
+                  ELIMINACIÓN DE REGISTROS DE CAJA Y ARQUEOS
+                </span>
+                <p className="text-[#A69F93] leading-relaxed">
+                  Permite borrar turnos de caja en <code className="text-[#E6C687]">public.registros_caja</code> de forma inmediata cuando tú o tus trabajadores los eliminen en el panel.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-[#1C1A17] border border-[#2E2822] space-y-1.5">
+                <span className="font-extrabold text-emerald-400 flex items-center gap-1.5">
+                  <Shield className="w-4 h-4" />
+                  PERMISOS DELETE EN VENTAS, PEDIDOS Y GASTOS
+                </span>
+                <p className="text-[#A69F93] leading-relaxed">
+                  Configura las políticas RLS para que al presionar el botón de eliminar, la fila se borre permanentemente en Supabase sin bloqueos.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="p-4 rounded-2xl bg-[#1C1A17] border border-[#2E2822] space-y-1.5">
+                <span className="font-extrabold text-[#C59A4D] flex items-center gap-1.5">
+                  👑 1. USUARIO DUEÑO (ACCESO TOTAL)
+                </span>
+                <p className="text-[#A69F93] leading-relaxed">
+                  Tiene acceso a todo el panel: <strong>Dashboard con Ganancia Neta</strong>, <strong>Gastos</strong>, <strong>Ventas</strong>, <strong>Pedidos</strong>, <strong>Inventario</strong>, <strong>Clientes</strong>, <strong>Categorías</strong> y <strong>Usuarios</strong>.
+                </p>
+                <div className="text-[11px] font-mono bg-[#11100F] p-2 rounded-xl border border-[#26221E] text-[#E6C687]">
+                  dueno@alexstore.com / DuenoPassword2025!
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-[#1C1A17] border border-[#2E2822] space-y-1.5">
+                <span className="font-extrabold text-emerald-400 flex items-center gap-1.5">
+                  💼 2. USUARIO CAJERO (OPERATIVO)
+                </span>
+                <p className="text-[#A69F93] leading-relaxed">
+                  Solo puede ver: <strong>Productos</strong>, <strong>Inventario</strong>, <strong>Pedidos</strong>, <strong>Clientes</strong> y <strong>Categorías</strong>. No tiene acceso a gastos ni al dashboard financiero.
+                </p>
+                <div className="text-[11px] font-mono bg-[#11100F] p-2 rounded-xl border border-[#26221E] text-emerald-300">
+                  cajero@alexstore.com / CajeroPassword2025!
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Code Viewer Container */}
           <div className="relative">
@@ -548,7 +680,7 @@ CREATE POLICY "Permitir borrar permanente storage" ON storage.objects FOR DELETE
             </div>
 
             <div className="relative bg-[#0D0C0B] rounded-2xl p-4 border border-[#26221E] max-h-72 overflow-y-auto font-mono text-[11px] text-[#D8D2C4] leading-relaxed select-all">
-              <pre className="whitespace-pre">{sqlCode}</pre>
+              <pre className="whitespace-pre">{activeSql}</pre>
             </div>
           </div>
 

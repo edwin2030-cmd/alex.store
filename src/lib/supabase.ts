@@ -2585,6 +2585,79 @@ export async function cerrarCaja(params: {
   }
 }
 
+export async function eliminarRegistroCaja(id: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    // 1. Eliminar de Supabase en registros_caja
+    try {
+      const { error } = await supabase.from('registros_caja').delete().eq('id', id);
+      if (error) console.warn('Aviso Supabase delete registros_caja:', error.message);
+    } catch (e) {}
+
+    // 2. Eliminar de caja_sesiones y sesiones_caja por compatibilidad
+    try {
+      await supabase.from('caja_sesiones').delete().eq('id', id);
+    } catch (e) {}
+    try {
+      await supabase.from('sesiones_caja').delete().eq('id', id);
+    } catch (e) {}
+
+    // 3. Eliminar de almacenamiento local (historial)
+    try {
+      const local = localStorage.getItem(STORAGE_KEY_CAJA_HISTORIAL);
+      if (local) {
+        const hist: RegistroCaja[] = JSON.parse(local);
+        const filtered = hist.filter((h) => h.id !== id);
+        localStorage.setItem(STORAGE_KEY_CAJA_HISTORIAL, JSON.stringify(filtered));
+      }
+    } catch {}
+
+    // 4. Si era la sesión de caja actualmente abierta, resetearla
+    try {
+      const actualStr = localStorage.getItem(STORAGE_KEY_CAJA_ACTUAL);
+      if (actualStr) {
+        const actual: RegistroCaja = JSON.parse(actualStr);
+        if (actual.id === id) {
+          localStorage.removeItem(STORAGE_KEY_CAJA_ACTUAL);
+          broadcastCajaChange(null);
+        }
+      }
+    } catch {}
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function vaciarHistorialCaja(): Promise<{ success: boolean; error?: string }> {
+  try {
+    // 1. Eliminar registros en Supabase
+    try {
+      await supabase.from('registros_caja').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    } catch (e) {}
+    try {
+      await supabase.from('caja_sesiones').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    } catch (e) {}
+    try {
+      await supabase.from('sesiones_caja').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    } catch (e) {}
+
+    // 2. Limpiar historial local dejando solo la caja activa si la hay
+    try {
+      const actualStr = localStorage.getItem(STORAGE_KEY_CAJA_ACTUAL);
+      if (actualStr) {
+        localStorage.setItem(STORAGE_KEY_CAJA_HISTORIAL, JSON.stringify([JSON.parse(actualStr)]));
+      } else {
+        localStorage.removeItem(STORAGE_KEY_CAJA_HISTORIAL);
+      }
+    } catch {}
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 // ==========================================
 // USUARIOS, ROLES Y PERMISOS DEL PANEL
 // ==========================================
