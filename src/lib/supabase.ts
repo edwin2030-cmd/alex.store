@@ -908,6 +908,16 @@ export async function crearPedido(pedido: Pedido): Promise<{ success: boolean; d
       creado_en: new Date().toISOString(),
     };
 
+    // Función segura: el cliente crea su pedido sin tener acceso a la tabla de pedidos.
+    try {
+      const { data: filaSegura, error: errSeguro } = await supabase.rpc('crear_pedido_publico', { p: payload });
+      if (!errSeguro && filaSegura) {
+        return { success: true, data: filaSegura };
+      }
+    } catch {
+      // Si la función no existe todavía, se usa el método anterior.
+    }
+
     const { data, error } = await supabase.from('pedidos').insert([payload]).select();
 
     if (error) {
