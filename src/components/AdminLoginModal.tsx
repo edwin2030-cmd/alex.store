@@ -82,46 +82,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
         console.warn('Supabase Auth error:', authError.message);
 
         if (authError.message.includes('Invalid login credentials')) {
-          // Si el usuario aún no existe en auth.users pero existe en perfiles_usuarios
-          const userList = await getUsuariosList();
-          const matchedProfile = userList.find((u) => u.email.toLowerCase() === cleanEmail);
-
-          if (matchedProfile) {
-            if (!matchedProfile.activo) {
-              setErrorMsg('Esta cuenta ha sido desactivada por el dueño. Contacta al administrador.');
-              setLoading(false);
-              return;
-            }
-
-            // Validar restricción de rol según pestaña
-            if (activeTab === 'dueno' && matchedProfile.rol === 'cajero') {
-              setErrorMsg('Esta cuenta pertenece al rol de Trabajador. Por favor selecciona la pestaña "2. TRABAJADOR".');
-              setLoading(false);
-              return;
-            }
-
-            const perfilFinal: UsuarioPanel = {
-              ...matchedProfile,
-              nombre: activeTab === 'trabajador' ? cleanNombre : matchedProfile.nombre,
-            };
-
-            // Registrar movimiento de auditoría
-            await registrarMovimiento({
-              usuario_id: perfilFinal.id,
-              usuario_nombre: perfilFinal.nombre,
-              usuario_email: perfilFinal.email,
-              rol: perfilFinal.rol,
-              accion: activeTab === 'trabajador' ? 'Inicio de Turno / Sesión' : 'Inicio de Sesión (Dueño)',
-              modulo: 'auth',
-              detalles: activeTab === 'trabajador'
-                ? `Trabajador "${cleanNombre}" inició sesión para su turno de trabajo con correo ${cleanEmail}.`
-                : `Dueño "${perfilFinal.nombre}" inició sesión en el panel de control.`,
-            });
-
-            onLoginSuccess(perfilFinal);
-            return;
-          }
-
+          // La contraseña siempre la verifica Supabase: si no coincide, no se entra.
           setErrorMsg('Credenciales inválidas. Verifica tu correo y contraseña registrados en Supabase.');
           setLoading(false);
           return;
@@ -148,26 +109,22 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
       const targetRol: UserRole = activeTab === 'dueno' ? 'dueno' : 'cajero';
       const targetNombre = activeTab === 'trabajador' ? cleanNombre : (perfil?.nombre || cleanEmail.split('@')[0]);
 
-      // Si el correo fue creado en Supabase Authentication y aún no está asignado o se ingresa como Dueño:
-      if (!perfil || perfil.rol !== targetRol) {
-        // Guardar automáticamente en perfiles_usuarios con el rol elegido
-        const saveRes = await guardarRolUsuarioAuth(cleanEmail, targetRol, targetNombre);
-        if (saveRes.data) {
-          perfil = saveRes.data;
-        }
-      }
-
+      // El rol lo asigna el Dueño desde el panel: nadie puede cambiárselo eligiendo otra pestaña.
       if (!perfil) {
-        perfil = {
-          id: authUser?.id || 'usr_' + Date.now(),
-          email: cleanEmail,
-          nombre: targetNombre,
-          rol: targetRol,
-          activo: true,
-          creado_en: new Date().toISOString(),
-          creado_por: 'Supabase Authentication',
-        };
+        await supabase.auth.signOut();
+        setErrorMsg('Tu usuario todavía no tiene acceso al panel. Pídele al Dueño que te dé permiso.');
+        setLoading(false);
+        return;
       }
+      if (perfil.rol !== targetRol) {
+        await supabase.auth.signOut();
+        setErrorMsg(perfil.rol === 'dueno'
+          ? 'Esta cuenta pertenece al Dueño. Por favor selecciona la pestaña "1. DUEÑO".'
+          : 'Esta cuenta pertenece al rol de Trabajador. Por favor selecciona la pestaña "2. TRABAJADOR".');
+        setLoading(false);
+        return;
+      }
+      void targetNombre;
 
       if (!perfil.activo) {
         setErrorMsg('Esta cuenta ha sido desactivada. Contacta al Dueño de la tienda.');

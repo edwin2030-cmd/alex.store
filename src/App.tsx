@@ -20,9 +20,10 @@ import { isArregloFutbol } from './lib/arregloFutbol';
 export default function App() {
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
-  const [currentUser, setCurrentUser] = useState<UsuarioPanel | null>(() => {
-    return getSavedUserProfile();
-  });
+  // El usuario del panel sale siempre de una sesión real de Supabase (se restaura más abajo),
+  // nunca de un perfil guardado en el navegador.
+  const [currentUser, setCurrentUser] = useState<UsuarioPanel | null>(null);
+  void getSavedUserProfile;
 
   const [currentView, setCurrentView] = useState<'catalogo' | 'colecciones'>('catalogo');
   const [categorias, setCategorias] = useState<Categoria[]>(CATEGORIAS_INICIALES);
@@ -96,12 +97,9 @@ export default function App() {
           setCurrentUser(perfil);
         }
       } else if (event === 'SIGNED_OUT') {
-        const saved = getSavedUserProfile();
-        // Solo cerrar sesión si no hay un perfil activo guardado como Dueño
-        if (!saved || saved.rol !== 'dueno') {
-          setCurrentUser(null);
-          setIsAdminMode(false);
-        }
+        // Al cerrar la sesión de Supabase se cierra el panel para todos los roles.
+        setCurrentUser(null);
+        setIsAdminMode(false);
       }
     });
 
@@ -240,14 +238,26 @@ export default function App() {
     setCurrentView('catalogo');
   };
 
-  const handleOpenAdmin = () => {
-    const saved = getSavedUserProfile();
-    if ((currentUser && currentUser.activo) || (saved && saved.activo)) {
-      if (!currentUser && saved) {
-        setCurrentUser(saved);
-      }
+  const handleOpenAdmin = async () => {
+    if (currentUser && currentUser.activo) {
       setIsAdminMode(true);
-    } else {
+      return;
+    }
+    // Un perfil guardado en el navegador no basta: se confirma la sesión con Supabase.
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.email) {
+        const perfil = await getPerfilUsuario(session.user.id, session.user.email);
+        if (perfil && perfil.activo) {
+          setCurrentUser(perfil);
+          setIsAdminMode(true);
+          return;
+        }
+      }
+    } catch {
+      // Sin sesión válida: se pide iniciar sesión.
+    }
+    {
       setIsAdminLoginOpen(true);
     }
   };
