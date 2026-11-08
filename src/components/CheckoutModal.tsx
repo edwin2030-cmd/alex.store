@@ -71,6 +71,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // UI helpers
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [aceptaTerminos, setAceptaTerminos] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [reciboOficial, setReciboOficial] = useState<Pedido | null>(null);
 
@@ -378,6 +379,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       setValidationError(
         '📸 Por favor selecciona o sube la foto del comprobante de tu pago para poder generar y enviar el link a WhatsApp.'
       );
+      return;
+    }
+
+    if (!aceptaTerminos) {
+      setValidationError('Para enviar tu pedido debes marcar la casilla de que leíste y aceptas los Términos y Condiciones y la Política de Privacidad.');
       return;
     }
 
@@ -1618,6 +1624,24 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   </div>
                 </div>
               </div>
+
+              {/* Aceptación de Términos (Ley 51 de 2008) */}
+              <label className="flex items-start gap-3 p-3.5 rounded-xl bg-[#F7F4EF] border border-[#EAE5DC] text-xs text-[#5C564D] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={aceptaTerminos}
+                  onChange={(e) => {
+                    setAceptaTerminos(e.target.checked);
+                    if (e.target.checked) setValidationError(null);
+                  }}
+                  className="mt-0.5 w-4 h-4 accent-emerald-600 shrink-0 cursor-pointer"
+                />
+                <span>
+                  He leído y acepto los{' '}
+                  <a href="#terminos" className="text-[#C59A4D] font-bold underline">Términos y Condiciones</a> y la{' '}
+                  <a href="#privacidad" className="text-[#C59A4D] font-bold underline">Política de Privacidad</a>, y autorizo el uso de mis datos para procesar y entregar mi pedido.
+                </span>
+              </label>
 
               {/* Error de validación visible junto al botón */}
               {validationError && (

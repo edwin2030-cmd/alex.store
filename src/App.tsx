@@ -13,6 +13,7 @@ import { CheckoutModal } from './components/CheckoutModal';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { AdminPanel } from './components/AdminPanel';
 import { Footer } from './components/Footer';
+import { LegalModal } from './components/LegalModal';
 import { CATEGORIAS_INICIALES } from './data/initialData';
 import { Check, X, ArrowUpDown, PackageOpen, Plus } from 'lucide-react';
 import { isArregloFutbol } from './lib/arregloFutbol';
@@ -488,6 +489,9 @@ export default function App() {
         onWhatsAppContact={handleWhatsAppContact}
         onOpenAdminLogin={handleOpenAdmin}
       />
+
+      {/* Términos y Privacidad (se abren con #terminos y #privacidad) */}
+      <LegalModal />
     </div>
   );
 }

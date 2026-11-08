@@ -84,7 +84,13 @@ export const Footer: React.FC<FooterProps> = ({ onWhatsAppContact, onOpenAdminLo
 
         <div className="mt-12 pt-6 border-t border-[#F0EAE1] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#9C9488]">
           <p>© {new Date().getFullYear()} AlexStore. Todos los derechos reservados.</p>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <a href="#terminos" className="text-[#7A7368] hover:text-[#C59A4D] font-medium underline underline-offset-2">
+              Términos y Condiciones
+            </a>
+            <a href="#privacidad" className="text-[#7A7368] hover:text-[#C59A4D] font-medium underline underline-offset-2">
+              Política de Privacidad
+            </a>
             <span className="flex items-center gap-1">
               Catálogo digital oficial • Conectado a Supabase
             </span>
