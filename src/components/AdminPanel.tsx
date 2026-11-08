@@ -56,6 +56,7 @@ import {
   CAJA_SYNC_BROADCAST,
 } from '../lib/supabase';
 import { isArregloFutbol } from '../lib/arregloFutbol';
+import { firmarComprobantes } from '../lib/comprobantes';
 import {
   ROLE_PERMISSIONS,
   canAccessSection,
@@ -1370,10 +1371,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       const res = await subirFotoStorage(file, 'comprobantes', `recibo_${order.codigo}_${Date.now()}.jpg`);
       if (res.url) {
         await vincularComprobanteAPedido(order.id || '', res.url, res.path);
+        // La carpeta es privada: en pantalla se muestra con enlace temporal firmado
+        const [urlVisible] = await firmarComprobantes([res.url]);
         setPedidos((prev) =>
           prev.map((p) =>
             (p.id === order.id || p.codigo === order.codigo)
-              ? { ...p, comprobante_url: res.url, comprobante_path: res.path, estado_pago: 'pendiente_revision' }
+              ? { ...p, comprobante_url: urlVisible || res.url, comprobante_path: res.path, estado_pago: 'pendiente_revision' }
               : p
           )
         );

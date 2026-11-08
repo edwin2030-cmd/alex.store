@@ -25,6 +25,7 @@ import {
   Package
 } from 'lucide-react';
 import { crearPedido, subirFotoStorage } from '../lib/supabase';
+import { nombreComprobanteNuevo, pedirEnlaceTemporal } from '../lib/comprobantes';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -173,7 +174,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const rawExt = file.name?.split('.').pop() || 'jpg';
     const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
     const cleanExt = ext === 'png' || ext === 'webp' ? ext : 'jpg';
-    const fileName = `comprobante_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${cleanExt}`;
+    // Nombre con parte aleatoria: el enlace de la foto no se puede adivinar (la carpeta es privada)
+    const fileName = nombreComprobanteNuevo(cleanExt);
     const filePath = `recibos/${fileName}`;
     const publicUrl = `https://unvqhdetppbtpkanaklo.supabase.co/storage/v1/object/public/comprobantes/${filePath}`;
     setComprobantePublicUrl(publicUrl);
@@ -195,10 +197,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           setComprobantePublicUrl(res.url);
           return res.url;
         }
-        return publicUrl;
+        // No se subió: se reintenta al enviar el pedido
+        setComprobantePublicUrl(null);
+        return null;
       } catch (e) {
         console.warn('Error subiendo imagen:', e);
-        return publicUrl;
+        setComprobantePublicUrl(null);
+        return null;
       } finally {
         setIsUploadingProof(false);
       }
@@ -420,9 +425,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     if (pendingUploadRef.current) {
       try {
         const finishedUrl = await pendingUploadRef.current;
-        if (finishedUrl) {
-          uploadedUrl = finishedUrl;
-        }
+        // Si la subida falló, no usar la dirección prevista (el archivo no existe): se reintenta abajo
+        uploadedUrl = finishedUrl || undefined;
       } catch (err) {
         console.warn('Error esperando uploadTask:', err);
       }
@@ -443,7 +447,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         setIsUploadingProof(true);
         try {
           const compressed = await compressImage(fileToUpload);
-          const uploadRes = await subirFotoStorage(compressed, 'comprobantes');
+          const uploadRes = await subirFotoStorage(compressed, 'comprobantes', nombreComprobanteNuevo('jpg'));
           if (uploadRes.url && uploadRes.url.startsWith('http')) {
             uploadedUrl = uploadRes.url;
             setComprobantePublicUrl(uploadRes.url);
@@ -495,7 +499,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         };
       }),
       notas: `${nota.trim() ? nota.trim() + ' | ' : ''}Método: ${detalleMetodo}`,
-      comprobante_url: uploadedUrl || comprobantePublicUrl || undefined,
+      comprobante_url: uploadedUrl || undefined,
       comprobante_path: comprobantePath || undefined,
       creado_en: now.toISOString(),
     };
@@ -503,19 +507,23 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     // 2. Guardar en Supabase
     await crearPedido(nuevoPedido);
 
-    // 3. Construir el mensaje de WhatsApp que incluye el link directo al comprobante
+    // 3. La carpeta de comprobantes es privada: se pide un enlace temporal (30 días) a la foto para WhatsApp
+    const enlaceFoto = uploadedUrl ? await pedirEnlaceTemporal(uploadedUrl) : null;
+
+    // 4. Construir el mensaje de WhatsApp que incluye el link directo al comprobante
     const whatsappMessage = buildExtensiveWhatsAppMessage(
       nuevoPedido,
       detalleMetodo,
       fechaEmision,
-      uploadedUrl || comprobantePublicUrl || undefined
+      enlaceFoto || undefined
     );
     const targetPhone = '50766212802';
     const waUrl = `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessage)}`;
 
     // 4. Redirección directa e inmediata a WhatsApp (sin pestañas intermedias ni menús molestos de compartir)
     setIsSubmitting(false);
-    setReciboOficial(nuevoPedido);
+    // En el recibo del cliente, el enlace de la foto es el temporal (el de la base de datos no abre sin sesión)
+    setReciboOficial({ ...nuevoPedido, comprobante_url: enlaceFoto || undefined });
     onOrderCompleted();
 
     // Redirigir de una vez al chat oficial de WhatsApp
@@ -1389,36 +1397,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       {isUploadingProof ? (
                         <div className="flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold animate-pulse">
                           <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
-                          <span>Subiendo foto a la nube y generando link público...</span>
+                          <span>Subiendo foto del comprobante...</span>
                         </div>
                       ) : comprobantePublicUrl ? (
                         <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <span className="font-extrabold text-emerald-950 flex items-center gap-1.5 text-[11px]">
-                              <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
-                              Enlace público listo para WhatsApp:
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleCopy(comprobantePublicUrl, 'comprobante_ready_link')}
-                              className="px-2 py-0.5 rounded-lg bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 font-bold text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
-                            >
-                              {copiedField === 'comprobante_ready_link' ? (
-                                <Check className="w-3 h-3 text-emerald-600" />
-                              ) : (
-                                <Copy className="w-3 h-3" />
-                              )}
-                              <span>Copiar</span>
-                            </button>
-                          </div>
-                          <a
-                            href={comprobantePublicUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-emerald-700 underline text-[11px] font-mono break-all block hover:text-emerald-900"
-                          >
-                            {comprobantePublicUrl}
-                          </a>
+                          <span className="font-extrabold text-emerald-950 flex items-center gap-1.5 text-[11px]">
+                            <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
+                            Foto del comprobante guardada de forma privada
+                          </span>
+                          <p className="text-emerald-700 text-[11px]">
+                            Al confirmar, el enlace seguro de la foto se enviará en el mensaje de WhatsApp.
+                          </p>
                         </div>
                       ) : null}
 

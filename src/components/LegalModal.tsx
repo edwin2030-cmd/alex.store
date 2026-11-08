@@ -205,7 +205,14 @@ const Privacidad: React.FC = () => (
       </p>
     </Seccion>
 
-    <Seccion titulo="7. Cambios a esta Política">
+    <Seccion titulo="7. Seguridad">
+      <p>
+        Las fotos de los comprobantes de pago se guardan en una carpeta privada que solo puede ver el personal de la
+        tienda. El enlace a la foto que se envía por WhatsApp es temporal.
+      </p>
+    </Seccion>
+
+    <Seccion titulo="8. Cambios a esta Política">
       <p>Podemos actualizar esta política. Última actualización: {LEGAL_ULTIMA_ACTUALIZACION}.</p>
     </Seccion>
   </div>

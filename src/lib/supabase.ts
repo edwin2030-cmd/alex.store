@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { CATEGORIAS_INICIALES } from '../data/initialData';
+import { firmarComprobantes } from './comprobantes';
 import { Categoria, Producto, Pedido, Venta, Gasto, UsuarioPanel, RolUsuario, EstadoPedido, MovimientoTrabajador, RegistroCaja } from '../types';
 
 export const SUPABASE_URL = "https://unvqhdetppbtpkanaklo.supabase.co";
@@ -872,7 +873,9 @@ export async function getPedidos(): Promise<Pedido[]> {
       .order('creado_en', { ascending: false });
 
     if (error || !data) return [];
-    return data;
+    // Los comprobantes están en una carpeta privada: el panel los ve con enlaces temporales firmados
+    const firmados = await firmarComprobantes(data.map((p: Pedido) => p.comprobante_url));
+    return data.map((p: Pedido, i: number) => ({ ...p, comprobante_url: firmados[i] ?? p.comprobante_url }));
   } catch {
     return [];
   }
@@ -3107,7 +3110,8 @@ export async function subirFotoStorage(
           apikey: SUPABASE_ANON_KEY,
           Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
           'Content-Type': mimeType,
-          'x-upsert': 'true',
+          // Los comprobantes nunca reemplazan un archivo existente (la carpeta es privada)
+          'x-upsert': bucket === 'comprobantes' ? 'false' : 'true',
         },
         body: file,
       });
@@ -3125,7 +3129,7 @@ export async function subirFotoStorage(
       .upload(filePath, file, {
         cacheControl: '3600',
         contentType: mimeType,
-        upsert: true,
+        upsert: bucket !== 'comprobantes',
       });
 
     if (!uploadError) {
@@ -3137,6 +3141,10 @@ export async function subirFotoStorage(
       };
     }
 
+    if (bucket === 'comprobantes') {
+      // No se subió: no devolver un enlace a un archivo que no existe
+      return { url: null, error: 'No se pudo subir la foto del comprobante. Revisa tu conexión e inténtalo de nuevo.' };
+    }
     return { url: publicUrl, path: filePath, fileName };
   } catch (err: any) {
     console.error("Error subiendo foto a Supabase Storage:", err);
