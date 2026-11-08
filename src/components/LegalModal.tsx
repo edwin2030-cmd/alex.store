@@ -63,8 +63,13 @@ const Terminos: React.FC = () => (
 
     <Seccion titulo="3. Productos y Fotos">
       <p>
-        Vendemos camisetas de fútbol, de selecciones y de la NBA de calidad 1:1. Los nombres y escudos de clubes,
+        Vendemos artículos deportivos: camisetas de fútbol, de selecciones, de la NBA, la NFL y béisbol, calzado de
+        fútbol y arreglos de fútbol por encargo, muchos de ellos de calidad 1:1. Los nombres y escudos de clubes,
         selecciones y ligas pertenecen a sus dueños; AlexStore no está afiliada a ellos.
+      </p>
+      <p>
+        Los arreglos de fútbol se piden por WhatsApp y se preparan por encargo; el detalle, el precio y la fecha de
+        entrega se acuerdan en el chat antes de pagar.
       </p>
       <p>
         Las fotos son de referencia y el color puede verse un poco distinto según la pantalla. Revise bien la talla
