@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { Search, ShoppingBag, SlidersHorizontal } from 'lucide-react';
 import { AlexStoreLogo } from './AlexStoreLogo';
 
@@ -23,39 +23,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAdminLogin,
   onToggleFilters,
 }) => {
-  const brandTapCountRef = useRef(0);
-  const brandTapTimeoutRef = useRef<any>(null);
 
   const handleBrandTextTap = () => {
-    if (!onOpenAdminLogin) {
-      onViewChange('catalogo');
-      return;
-    }
-
-    brandTapCountRef.current += 1;
-    if (brandTapTimeoutRef.current) {
-      clearTimeout(brandTapTimeoutRef.current);
-    }
-
-    if (window?.navigator?.vibrate) {
-      try { window.navigator.vibrate(20); } catch {}
-    }
-
-    if (brandTapCountRef.current >= 10) {
-      brandTapCountRef.current = 0;
-      if (window?.navigator?.vibrate) {
-        try { window.navigator.vibrate([40, 30, 60]); } catch {}
-      }
-      onOpenAdminLogin();
-    } else {
-      brandTapTimeoutRef.current = setTimeout(() => {
-        brandTapCountRef.current = 0;
-      }, 2500);
-
-      if (brandTapCountRef.current === 1) {
-        onViewChange('catalogo');
-      }
-    }
+    onViewChange('catalogo');
   };
   return (
     <header className="sticky top-0 z-40 bg-[#FAF8F5]/95 backdrop-blur-md border-b border-[#EAE5DC] w-full">

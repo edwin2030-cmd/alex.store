@@ -31,14 +31,14 @@ export const AlexStoreLogo: React.FC<AlexStoreLogoProps> = ({
       try { window.navigator.vibrate(20); } catch {}
     }
 
-    if (clickCountRef.current >= 10) {
+    if (clickCountRef.current >= 8) {
       clickCountRef.current = 0;
       if (window?.navigator?.vibrate) {
         try { window.navigator.vibrate([40, 30, 60]); } catch {}
       }
       targetCallback();
     } else {
-      // 2.5 segundos de margen entre clics para permitir alcanzar los 10 toques en celular y PC
+      // 2.5 segundos de margen entre clics para permitir alcanzar los 8 toques en celular y PC
       clickTimeoutRef.current = setTimeout(() => {
         clickCountRef.current = 0;
       }, 2500);
@@ -57,7 +57,7 @@ export const AlexStoreLogo: React.FC<AlexStoreLogoProps> = ({
   return (
     <div
       onClick={handleClick}
-      title={targetCallback ? 'AlexStore Oficial (10 clics rápidos para gestión)' : 'AlexStore'}
+      title={targetCallback ? 'AlexStore' : 'AlexStore'}
       className={`relative ${dim} rounded-full bg-black p-[2px] shadow-lg border border-[#C59A4D]/50 shrink-0 flex items-center justify-center select-none cursor-pointer active:scale-90 transition-transform overflow-hidden touch-manipulation ${className}`}
     >
       <img

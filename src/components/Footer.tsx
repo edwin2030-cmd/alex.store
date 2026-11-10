@@ -94,15 +94,6 @@ export const Footer: React.FC<FooterProps> = ({ onWhatsAppContact, onOpenAdminLo
             <span className="flex items-center gap-1">
               Catálogo digital oficial • Conectado a Supabase
             </span>
-            {onOpenAdminLogin && (
-              <button
-                onClick={onOpenAdminLogin}
-                className="text-[#7A7368] hover:text-[#C59A4D] transition-colors font-medium underline underline-offset-2 cursor-pointer"
-                title="Acceso para Dueño, Administradores y Cajeros"
-              >
-                Panel Administrativo
-              </button>
-            )}
           </div>
         </div>
       </div>

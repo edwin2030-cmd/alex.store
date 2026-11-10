@@ -15,7 +15,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { Footer } from './components/Footer';
 import { LegalModal } from './components/LegalModal';
 import { CATEGORIAS_INICIALES } from './data/initialData';
-import { Check, X, ArrowUpDown, PackageOpen, Plus } from 'lucide-react';
+import { Check, X, ArrowUpDown, PackageOpen } from 'lucide-react';
 import { isArregloFutbol } from './lib/arregloFutbol';
 
 export default function App() {
@@ -385,19 +385,6 @@ export default function App() {
                       El catálogo está en 0 para que agregues tus propios productos e inventario.
                     </p>
                   </div>
-
-                  <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
-                    <button
-                      onClick={() => setIsAdminLoginOpen(true)}
-                      className="w-full sm:w-auto px-6 py-3 rounded-full bg-[#141312] hover:bg-black text-[#F5E6BE] font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4 text-[#C59A4D]" />
-                      <span>Ingresar al Modo Administrador</span>
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-[#A69F93]">
-                    Tip: También puedes hacer <strong>5 clics rápidos en el logo</strong> de AlexStore para acceder.
-                  </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6">
