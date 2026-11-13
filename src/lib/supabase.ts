@@ -16,19 +16,49 @@ export async function getCategorias(): Promise<Categoria[]> {
     const { data, error } = await supabase
       .from('categorias')
       .select('*')
-      .order('nombre');
+      .order('creado_en', { ascending: true });
 
     if (error || !data || data.length === 0) {
       return CATEGORIAS_INICIALES;
     }
 
-    return data.map((item) => ({
-      ...item,
-      activa: item.activa ?? item.activo ?? true,
-    }));
+    // Orden elegido en el panel (columna orden); si falta, el orden en que se crearon.
+    return ordenarCategorias(
+      data.map((item) => ({
+        ...item,
+        activa: item.activa ?? item.activo ?? true,
+      }))
+    );
   } catch (err) {
     console.warn("Fallo cargando categorías de Supabase:", err);
     return CATEGORIAS_INICIALES;
+  }
+}
+
+export function ordenarCategorias<T extends { orden?: number | null }>(lista: T[]): T[] {
+  return lista
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => {
+      const oa = typeof a.c.orden === 'number' ? a.c.orden : 9999;
+      const ob = typeof b.c.orden === 'number' ? b.c.orden : 9999;
+      return oa !== ob ? oa - ob : a.i - b.i;
+    })
+    .map((x) => x.c);
+}
+
+// Guarda el nuevo orden de las categorías (lista de ids en el orden deseado).
+export async function guardarOrdenCategorias(ids: string[]): Promise<{ success: boolean; error?: string }> {
+  try {
+    const resultados = await Promise.all(
+      ids.map((id, i) => supabase.from('categorias').update({ orden: (i + 1) * 10 }).eq('id', id).select('id'))
+    );
+    const fallo = resultados.find((r) => r.error || !r.data || r.data.length === 0);
+    if (fallo) {
+      return { success: false, error: fallo.error?.message || 'Supabase no guardó el orden (revisa tu sesión).' };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Error al guardar el orden' };
   }
 }
 
@@ -1825,17 +1855,17 @@ export async function liquidarSaldoVenta(
       notas: (venta.notas ? venta.notas + ' • ' : '') + `Cobro completado / Liquidado por: ${liquidadoPor || 'Caja'}. (${new Date().toLocaleString('es-PA')})`,
     };
 
-    // 1. Actualizar en Supabase tabla 'ventas'
-    try {
+    // 1. Actualizar en Supabase tabla 'ventas' (si Supabase no lo guarda, se avisa en vez de decir "éxito")
+    {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCodigo);
       const q = supabase.from('ventas').update(updatePayload);
-      if (isUuid) {
-        await q.eq('id', idOrCodigo);
-      } else {
-        await q.eq('codigo', idOrCodigo);
+      const { data: filas, error: errVenta } = await (isUuid ? q.eq('id', idOrCodigo) : q.eq('codigo', idOrCodigo)).select('id');
+      if (errVenta) return { success: false, error: errVenta.message };
+      if (!filas || filas.length === 0) {
+        // La venta puede existir solo como pedido (ventas viejas); en ese caso se actualiza abajo.
+        const { data: ped } = await supabase.from('pedidos').select('id').eq('codigo', venta.codigo).maybeSingle();
+        if (!ped) return { success: false, error: 'Supabase no guardó el cobro. Revisa tu sesión e inténtalo de nuevo.' };
       }
-    } catch (e) {
-      console.warn('Aviso liquidando saldo en tabla ventas:', e);
     }
 
     // 2. Actualizar también en tabla 'pedidos' si existe registro allí

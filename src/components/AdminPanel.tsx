@@ -24,6 +24,7 @@ import {
   aprobarPedidoYDescontarStock,
   eliminarProducto,
   eliminarCategoria,
+  guardarOrdenCategorias,
   actualizarStockRapido,
   actualizarEstadoPedido,
   actualizarEstadoPagoPedido,
@@ -127,6 +128,8 @@ import {
   FileText,
   Award,
   ShoppingBag,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 
 interface AdminPanelProps {
@@ -183,6 +186,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   }, [currentUser]);
 
   const activeUser = panelUser || currentUser || getSavedUserProfile();
+
+  // Nombre que se guarda en Supabase como "registrado por / aceptado por". En el trabajador es el nombre
+  // que escribió al iniciar su turno (ver guardarNombreTurno en lib/auth).
+  const quienRegistra = (fallback: string): string => {
+    const u = currentUser || activeUser;
+    const nombre = (u?.nombre || '').trim();
+    const cuenta = u?.email ? u.email.split('@')[0] : '';
+    return nombre || cuenta || fallback;
+  };
   const savedActiveRole = (typeof localStorage !== 'undefined' ? localStorage.getItem('alexstore_active_role') : null) as UserRole | null;
   const userRole: UserRole = activeUser?.rol || savedActiveRole || 'dueno';
 
@@ -343,6 +355,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Filtros de fecha y período para Ventas
   const [ventasFiltroPeriodo, setVentasFiltroPeriodo] = useState<'todos' | 'hoy' | 'semana' | 'mes' | 'ano' | 'rango'>('todos');
+  // Filtro por tipo: todas, solo abonos con saldo por cobrar, o solo pedidos especiales
+  const [ventasFiltroTipo, setVentasFiltroTipo] = useState<'todas' | 'abonos' | 'especiales'>('todas');
   const [ventasFechaExacta, setVentasFechaExacta] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [ventasSemanaRef, setVentasSemanaRef] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [ventasMesExacto, setVentasMesExacto] = useState<string>(() => {
@@ -974,6 +988,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
+  // Sube o baja una categoría; la tienda muestra categorías y productos en este orden.
+  const [guardandoOrdenCategorias, setGuardandoOrdenCategorias] = useState(false);
+  const handleMoverCategoria = async (index: number, direccion: -1 | 1) => {
+    const destino = index + direccion;
+    if (guardandoOrdenCategorias || destino < 0 || destino >= categorias.length) return;
+    const anterior = categorias;
+    const nueva = [...categorias];
+    [nueva[index], nueva[destino]] = [nueva[destino], nueva[index]];
+    setCategorias(nueva.map((c, i) => ({ ...c, orden: (i + 1) * 10 })));
+    setGuardandoOrdenCategorias(true);
+    const res = await guardarOrdenCategorias(nueva.map((c) => c.id));
+    setGuardandoOrdenCategorias(false);
+    if (!res.success) {
+      setCategorias(anterior);
+      alert('No se pudo guardar el orden: ' + (res.error || 'error de Supabase'));
+    }
+  };
+
   const handleDeleteCategoria = async (id: string, nombre: string) => {
     if (confirm(`¿Estás seguro de eliminar la categoría "${nombre}"?`)) {
       const res = await eliminarCategoria(id);
@@ -1092,7 +1124,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const orderId = pedido.id || pedido.codigo;
     setOrderActionLoadingId(orderId);
     try {
-      const reviewer = currentUser?.nombre || currentUser?.email || 'Administrador';
+      const reviewer = quienRegistra('Administrador');
       const res = await aprobarPedidoYDescontarStock(orderId, pedido, reviewer);
       if (res.success) {
         // Descontar inventario localmente en tiempo real para respuesta inmediata en la UI
@@ -1225,7 +1257,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const orderId = pedido.id || pedido.codigo;
     setOrderActionLoadingId(orderId);
     try {
-      const reviewer = currentUser?.nombre || currentUser?.email || 'Administrador';
+      const reviewer = quienRegistra('Administrador');
       await actualizarEstadoPedido(orderId, 'rechazado');
       await actualizarEstadoPagoPedido(orderId, 'rechazado', reviewer);
       const now = new Date().toISOString();
@@ -1324,7 +1356,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const res = await actualizarEstadoPagoPedido(
       orderId,
       newProofStatus,
-      currentUser?.nombre || currentUser?.email
+      quienRegistra('Administrador')
     );
     if (res.success) {
       setPedidos((prev) =>
@@ -1530,7 +1562,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         monto: montoNum,
         categoria: nuevoGastoCategoria,
         notas: nuevoGastoNotas.trim() || undefined,
-        creado_por: currentUser?.nombre || currentUser?.email || 'Admin',
+        creado_por: quienRegistra('Admin'),
       });
       if (res.success && res.data) {
         const gastoCreado = res.data;
@@ -1658,7 +1690,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       return;
     }
 
-    const cajeroActual = currentUser?.nombre || currentUser?.email?.split('@')[0] || 'Cajero';
+    const cajeroActual = quienRegistra('Cajero');
 
     // ========================================================
     // CASO 1: PEDIDO ESPECIAL (Prendas que NO existen en el catálogo)
@@ -1811,7 +1843,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const cantNum = Math.max(1, parseInt(ventaManualCantidad) || 1);
     setSubmittingVentaManual(true);
     try {
-      const cajeroActual = currentUser?.nombre || currentUser?.email?.split('@')[0] || 'Cajero';
+      const cajeroActual = quienRegistra('Cajero');
       const selectedProd = productos.find((p) => p.id === ventaManualProductoId);
       let selectedVarTitulo = '';
       if (selectedProd && ventaManualVarianteId && Array.isArray(selectedProd.variantes)) {
@@ -2019,7 +2051,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     if (!confirm('¿Confirmas que el cliente ya recibió el producto y terminó de pagar el saldo pendiente?')) return;
     setLiquidandoVentaId(idOrCodigo);
     try {
-      const res = await liquidarSaldoVenta(idOrCodigo, currentUser?.nombre || 'Caja');
+      const res = await liquidarSaldoVenta(idOrCodigo, quienRegistra('Caja'));
       if (res.success && res.data) {
         setVentas((prev) => prev.map((v) => (v.id === idOrCodigo || v.codigo === idOrCodigo ? res.data! : v)));
         setUserFeedback({
@@ -2044,7 +2076,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     try {
       const res = await abrirCaja({
         monto_inicial: 0,
-        abierto_por: currentUser?.nombre || currentUser?.email || 'Administrador',
+        abierto_por: quienRegistra('Administrador'),
         usuario_id: currentUser?.id,
         notas: notasAperturaCaja.trim() || undefined,
       });
@@ -2100,7 +2132,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         monto_final_real: real,
         monto_esperado: esperado,
         diferencia,
-        cerrado_por: currentUser?.nombre || currentUser?.email || 'Administrador',
+        cerrado_por: quienRegistra('Administrador'),
         notas: notasCierreCaja.trim() || undefined,
       });
 
@@ -3245,7 +3277,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               {/* Filters bar & Period Selector */}
               {(() => {
+                const tieneSaldo = (v: Venta) => Boolean(v.saldo_pendiente && v.saldo_pendiente > 0 && v.estado_pago !== 'completo');
+                const totalAbonosPendientes = ventas.filter(tieneSaldo).length;
+                const totalPedidosEspeciales = ventas.filter((v) => v.tipo === 'pedido_especial').length;
                 const ventasFiltradasPorPeriodo = ventas.filter((v) => {
+                  if (ventasFiltroTipo === 'abonos' && !tieneSaldo(v)) return false;
+                  if (ventasFiltroTipo === 'especiales' && v.tipo !== 'pedido_especial') return false;
                   if (searchQuery.trim()) {
                     const q = searchQuery.toLowerCase();
                     const match =
@@ -3360,6 +3397,48 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               : '+ REGISTRAR VENTA MANUAL'}
                           </span>
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')) {
+                              alert('⚠️ LA CAJA ESTÁ CERRADA: Como trabajador, no puedes registrar ventas manuales mientras la caja esté cerrada. Pide al Dueño o Administrador que abra el turno de caja.');
+                              return;
+                            }
+                            setVentaManualCliente('');
+                            setVentaManualTelefono('');
+                            setVentaManualMonto('');
+                            setVentaManualMontoAbonado('');
+                            setVentaManualTipoAbono('mitad');
+                            setVentaManualProductoId('');
+                            setVentaManualNotas('');
+                            setVentaManualMetodo('efectivo');
+                            setVentaManualModo('especial');
+                            setPedidoEspecialNombre('');
+                            setPedidoEspecialPrecio('');
+                            setPedidoEspecialCantidad('1');
+                            setPedidoEspecialDetalle('');
+                            setPedidoEspecialColor('');
+                            setPedidoEspecialTipoCobro('completo');
+                            setIsModalVentaManualOpen(true);
+                          }}
+                          className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all ${
+                            userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')
+                              ? 'bg-[#26221E] text-rose-300 border border-rose-800/60 hover:bg-[#2F2924]'
+                              : 'bg-purple-600 hover:bg-purple-500 text-white'
+                          }`}
+                          title={
+                            userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')
+                              ? 'Caja cerrada: el trabajador no puede ingresar ventas hasta que se abra el turno'
+                              : 'Registrar un pedido especial (encargo que no está en la tienda), con pago completo o abono'
+                          }
+                        >
+                          <Sparkles className="w-4 h-4" />
+                          <span>
+                            {userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')
+                              ? '🔒 CAJA CERRADA'
+                              : '⭐ PEDIDO ESPECIAL / ABONO'}
+                          </span>
+                        </button>
                       </div>
                     </div>
 
@@ -3405,6 +3484,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                                 ventasFiltroPeriodo === tab.id
                                    ? 'bg-[#C59A4D] text-[#141312] font-black shadow-xs'
+                                  : 'text-[#A69F93] hover:text-white'
+                              }`}
+                            >
+                              {tab.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="flex items-center bg-[#1A1816] p-1 rounded-xl border border-[#2D2822] gap-1">
+                          {(
+                            [
+                              { id: 'todas', label: 'Todo tipo' },
+                              { id: 'abonos', label: `🤝 Abonos por cobrar (${totalAbonosPendientes})` },
+                              { id: 'especiales', label: `⭐ Pedidos especiales (${totalPedidosEspeciales})` },
+                            ] as const
+                          ).map((tab) => (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              onClick={() => setVentasFiltroTipo(tab.id)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                ventasFiltroTipo === tab.id
+                                  ? 'bg-[#C59A4D] text-[#141312] font-black shadow-xs'
                                   : 'text-[#A69F93] hover:text-white'
                               }`}
                             >
@@ -6955,7 +7057,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     Categorías Registradas ({categorias.length})
                   </h2>
                   <p className="text-xs text-[#A69F93] mt-0.5">
-                    Organiza los productos en public.categorias. En el catálogo público solo se verán las categorías activas.
+                    Organiza los productos en public.categorias. En el catálogo público solo se verán las categorías activas, en el orden de esta lista (usa las flechas para cambiarlo).
                   </p>
                 </div>
 
@@ -6995,7 +7097,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#221F1C]">
-                      {categorias.map((cat) => {
+                      {categorias.map((cat, catIndex) => {
                         const prodsCount = productos.filter((p) => p.categoria_id === cat.id).length;
 
                         return (
@@ -7026,6 +7128,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                             <td className="py-4 px-6 text-right">
                               <div className="inline-flex items-center gap-2">
+                                <button
+                                  onClick={() => handleMoverCategoria(catIndex, -1)}
+                                  disabled={catIndex === 0 || guardandoOrdenCategorias}
+                                  className="p-1.5 rounded-lg text-[#A69F93] hover:text-[#E6C687] hover:bg-[#1E1B18] transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
+                                  title="Subir (se verá antes en la tienda)"
+                                >
+                                  <ChevronUp className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleMoverCategoria(catIndex, 1)}
+                                  disabled={catIndex === categorias.length - 1 || guardandoOrdenCategorias}
+                                  className="p-1.5 rounded-lg text-[#A69F93] hover:text-[#E6C687] hover:bg-[#1E1B18] transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
+                                  title="Bajar (se verá después en la tienda)"
+                                >
+                                  <ChevronDown className="w-4 h-4" />
+                                </button>
                                 <button
                                   onClick={() => {
                                     setCategoriaToEdit(cat);

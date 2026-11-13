@@ -5,6 +5,7 @@ export interface Categoria {
   imagen_url?: string | null;
   activa: boolean;
   activo?: boolean;
+  orden?: number | null; // posición elegida en el panel (menor = primero)
   creado_en?: string;
   actualizado_en?: string;
 }

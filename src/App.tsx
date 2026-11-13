@@ -35,7 +35,7 @@ export default function App() {
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<string | null>(null);
-  const [orden, setOrden] = useState<'recientes' | 'precio-asc' | 'precio-desc'>('recientes');
+  const [orden, setOrden] = useState<'categorias' | 'recientes' | 'precio-asc' | 'precio-desc'>('categorias');
 
   // Drawers & Modals
   const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
@@ -109,9 +109,23 @@ export default function App() {
     };
   }, []);
 
+  // La tienda solo muestra categorías activas y productos que no estén ocultos en el panel.
+  const categoriasVisibles = useMemo(() => categorias.filter((c) => c.activa !== false), [categorias]);
+  const productosVisibles = useMemo(() => {
+    const inactivas = new Set(categorias.filter((c) => c.activa === false).map((c) => c.id));
+    return productos.filter((p) => p.activo !== false && !(p.categoria_id && inactivas.has(p.categoria_id)));
+  }, [productos, categorias]);
+
   // Filtered & Sorted products
   const filteredProductos = useMemo(() => {
-    return productos
+    // Posición de cada categoría según el orden elegido en el panel
+    const posCategoria: Record<string, number> = {};
+    categorias.forEach((c, i) => {
+      posCategoria[c.id] = i;
+    });
+    const pos = (p: Producto) => (p.categoria_id && posCategoria[p.categoria_id] !== undefined ? posCategoria[p.categoria_id] : 9999);
+
+    return productosVisibles
       .filter((p) => {
         // Category filter
         if (categoriaSeleccionada && p.categoria_id !== categoriaSeleccionada) {
@@ -131,9 +145,10 @@ export default function App() {
       .sort((a, b) => {
         if (orden === 'precio-asc') return a.precio - b.precio;
         if (orden === 'precio-desc') return b.precio - a.precio;
+        if (orden === 'categorias') return pos(a) - pos(b);
         return 0;
       });
-  }, [productos, categoriaSeleccionada, searchQuery, orden]);
+  }, [productosVisibles, categorias, categoriaSeleccionada, searchQuery, orden]);
 
   // Counts per category
   const countsPorCategoria = useMemo(() => {
@@ -142,14 +157,14 @@ export default function App() {
       counts[c.id] = 0;
     });
 
-    productos.forEach((p) => {
+    productosVisibles.forEach((p) => {
       if (p.categoria_id && counts[p.categoria_id] !== undefined) {
         counts[p.categoria_id]++;
       }
     });
 
     return counts;
-  }, [categorias, productos]);
+  }, [categorias, productosVisibles]);
 
   // Cart operations con soporte para variantes y opciones
   const handleAddToCart = (
@@ -322,7 +337,7 @@ export default function App() {
         {currentView === 'colecciones' ? (
           /* View 2: Colecciones AlexStore (Image 3) */
           <ColeccionesView
-            categorias={categorias}
+            categorias={categoriasVisibles}
             countsPorCategoria={countsPorCategoria}
             onSelectCollection={handleSelectCollection}
             onGoToCatalogo={() => {
@@ -338,11 +353,11 @@ export default function App() {
 
             {/* Category Filter Pills (Image 1) */}
             <CategoryFilter
-              categorias={categorias}
+              categorias={categoriasVisibles}
               categoriaSeleccionada={categoriaSeleccionada}
               onSelectCategoria={setCategoriaSeleccionada}
               countsPorCategoria={countsPorCategoria}
-              totalCount={productos.length}
+              totalCount={productosVisibles.length}
             />
 
             {/* Sub-bar: Mostrando X artículos & Ordenar por (Image 1) */}
@@ -359,6 +374,7 @@ export default function App() {
                   onChange={(e) => setOrden(e.target.value as any)}
                   className="bg-transparent font-extrabold text-xs text-[#1A1918] cursor-pointer focus:outline-none"
                 >
+                  <option value="categorias">Por categoría</option>
                   <option value="recientes">Más recientes</option>
                   <option value="precio-asc">Menor precio</option>
                   <option value="precio-desc">Mayor precio</option>

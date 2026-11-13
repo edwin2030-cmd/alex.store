@@ -62,6 +62,35 @@ export function canModifyUser(actorRole: UserRole, targetUser: UsuarioPanel): bo
   return true;
 }
 
+// Nombre que el trabajador escribe al iniciar su turno. Varias personas pueden usar la misma cuenta:
+// cada una pone su nombre al entrar y todo lo que registre queda con ese nombre (el rol y los permisos
+// siguen saliendo de Supabase; esto solo cambia el nombre que se muestra y se guarda).
+const STORAGE_KEY_NOMBRE_TURNO = 'alexstore_nombre_turno';
+
+export function guardarNombreTurno(email: string, nombre: string): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_NOMBRE_TURNO, JSON.stringify({ email: email.toLowerCase(), nombre }));
+  } catch {}
+}
+
+export function borrarNombreTurno(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY_NOMBRE_TURNO);
+  } catch {}
+}
+
+function nombreTurnoPara(email: string): string | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_NOMBRE_TURNO);
+    if (!raw) return null;
+    const t = JSON.parse(raw);
+    if (t && typeof t.nombre === 'string' && t.nombre.trim() && t.email === (email || '').toLowerCase()) {
+      return t.nombre.trim();
+    }
+  } catch {}
+  return null;
+}
+
 /**
  * Obtiene el perfil del usuario actual desde Supabase o almacenamiento local seguro
  */
@@ -89,6 +118,11 @@ export async function getPerfilUsuario(userId: string, email: string): Promise<U
         actualizado_por: data.actualizado_por,
         ultimo_acceso: data.ultimo_acceso,
       };
+      // Trabajador: usar el nombre que escribió al iniciar su turno
+      if (perfil.rol !== 'dueno') {
+        const nombreTurno = nombreTurnoPara(perfil.email);
+        if (nombreTurno) perfil.nombre = nombreTurno;
+      }
       localStorage.setItem(STORAGE_KEY_USER_PROFILE, JSON.stringify(perfil));
       localStorage.setItem('alexstore_active_role', perfil.rol);
       return perfil;
@@ -387,6 +421,7 @@ export async function cerrarSesion(): Promise<void> {
     console.warn('Aviso al cerrar sesión en Supabase:', err);
   }
   localStorage.removeItem(STORAGE_KEY_USER_PROFILE);
+  borrarNombreTurno();
 }
 
 /**

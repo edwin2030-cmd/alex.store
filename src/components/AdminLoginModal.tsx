@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { AlexStoreLogo } from './AlexStoreLogo';
 import { Mail, Lock, Eye, EyeOff, X, Shield, AlertCircle, UserCheck, KeyRound, User } from 'lucide-react';
 import { supabase, registrarMovimiento } from '../lib/supabase';
-import { getPerfilUsuario, getUsuariosList, guardarRolUsuarioAuth } from '../lib/auth';
+import { getPerfilUsuario, getUsuariosList, guardarRolUsuarioAuth, guardarNombreTurno, borrarNombreTurno } from '../lib/auth';
 import { UsuarioPanel, UserRole } from '../types';
 import { ModalSqlAuth } from './ModalSqlAuth';
 
@@ -69,6 +69,10 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
       setLoading(false);
       return;
     }
+
+    // Guardar el nombre del turno ANTES de entrar, para que el panel lo use desde el primer momento
+    if (activeTab === 'trabajador') guardarNombreTurno(cleanEmail, cleanNombre);
+    else borrarNombreTurno();
 
     try {
       // 2. Autenticación con Supabase Auth (Verificación de Correo y Contraseña)
