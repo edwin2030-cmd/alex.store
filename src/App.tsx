@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Categoria, Producto, ItemCarrito, UsuarioPanel } from './types';
-import { supabase, getCategorias, getProductos } from './lib/supabase';
+import { supabase, getCategorias, getProductos, getMasVendidos, compararOrdenProducto } from './lib/supabase';
 import { getSavedUserProfile, getPerfilUsuario, cerrarSesion } from './lib/auth';
 import { Header } from './components/Header';
 import { Banner } from './components/Banner';
@@ -35,7 +35,9 @@ export default function App() {
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<string | null>(null);
-  const [orden, setOrden] = useState<'categorias' | 'recientes' | 'precio-asc' | 'precio-desc'>('categorias');
+  const [orden, setOrden] = useState<'categorias' | 'mas-vendidos' | 'recientes' | 'precio-asc' | 'precio-desc'>('categorias');
+  // puesto de cada producto en "Lo más vendido" de su categoría
+  const [masVendidos, setMasVendidos] = useState<Record<string, number>>({});
 
   // Drawers & Modals
   const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
@@ -68,9 +70,10 @@ export default function App() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [cats, prods] = await Promise.all([getCategorias(), getProductos()]);
+      const [cats, prods, vendidos] = await Promise.all([getCategorias(), getProductos(), getMasVendidos()]);
       if (cats && cats.length > 0) setCategorias(cats);
       setProductos(prods || []);
+      setMasVendidos(vendidos || {});
     } catch (err) {
       console.warn("Aviso al consultar Supabase:", err);
     } finally {
@@ -145,10 +148,43 @@ export default function App() {
       .sort((a, b) => {
         if (orden === 'precio-asc') return a.precio - b.precio;
         if (orden === 'precio-desc') return b.precio - a.precio;
-        if (orden === 'categorias') return pos(a) - pos(b);
+        if (orden === 'mas-vendidos') {
+          const ra = a.destacado ? 0 : masVendidos[a.id] ?? 999;
+          const rb = b.destacado ? 0 : masVendidos[b.id] ?? 999;
+          if (ra !== rb) return ra - rb;
+          return pos(a) - pos(b) || compararOrdenProducto(a, b);
+        }
+        // Por categoría: orden de las categorías y, dentro de cada una, el orden elegido en el panel
+        if (orden === 'categorias') return pos(a) - pos(b) || compararOrdenProducto(a, b);
         return 0;
       });
-  }, [productosVisibles, categorias, categoriaSeleccionada, searchQuery, orden]);
+  }, [productosVisibles, categorias, categoriaSeleccionada, searchQuery, orden, masVendidos]);
+
+  // "Lo más vendido": primero los que el dueño fijó en el panel y luego los que más se venden.
+  const topDeCategoria = (catId: string) =>
+    productosVisibles
+      .filter((p) => p.categoria_id === catId && (p.destacado || masVendidos[p.id]))
+      .sort((a, b) => {
+        if (Boolean(a.destacado) !== Boolean(b.destacado)) return a.destacado ? -1 : 1;
+        if (a.destacado && b.destacado) return compararOrdenProducto(a, b);
+        return (masVendidos[a.id] ?? 999) - (masVendidos[b.id] ?? 999);
+      });
+  const seccionMasVendidos = useMemo(() => {
+    if (searchQuery.trim()) return [];
+    if (categoriaSeleccionada) return topDeCategoria(categoriaSeleccionada).slice(0, 4);
+    // Vista de todas: el número 1 de cada categoría
+    return categoriasVisibles
+      .map((c) => topDeCategoria(c.id)[0])
+      .filter((p): p is Producto => Boolean(p))
+      .slice(0, 8);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productosVisibles, categoriasVisibles, categoriaSeleccionada, searchQuery, masVendidos]);
+  // Puesto que se muestra en la etiqueta de cada tarjeta (solo los 3 primeros o los fijados)
+  const puestoVisible = (p: Producto): number | null => {
+    if (p.destacado) return masVendidos[p.id] === 1 ? 1 : 2;
+    const r = masVendidos[p.id];
+    return r && r <= 3 ? r : null;
+  };
 
   // Counts per category
   const countsPorCategoria = useMemo(() => {
@@ -375,12 +411,49 @@ export default function App() {
                   className="bg-transparent font-extrabold text-xs text-[#1A1918] cursor-pointer focus:outline-none"
                 >
                   <option value="categorias">Por categoría</option>
+                  <option value="mas-vendidos">Más vendidos</option>
                   <option value="recientes">Más recientes</option>
                   <option value="precio-asc">Menor precio</option>
                   <option value="precio-desc">Mayor precio</option>
                 </select>
               </div>
             </div>
+
+            {/* Lo más vendido (de la categoría elegida, o el n.º 1 de cada categoría) */}
+            {!isLoading && seccionMasVendidos.length > 0 && (
+              <section className="mx-3 sm:mx-6 lg:mx-8 mb-6 sm:mb-8 rounded-3xl bg-[#1A1918] p-3.5 sm:p-5 shadow-md" aria-label="Lo más vendido">
+                <div className="flex items-end justify-between gap-3 mb-3 sm:mb-4 px-0.5">
+                  <div>
+                    <p className="text-[10px] sm:text-xs font-black uppercase tracking-[0.18em] text-[#C59A4D]">🔥 Lo más vendido</p>
+                    <h2 className="text-base sm:text-xl font-extrabold text-white leading-tight">
+                      {categoriaSeleccionada
+                        ? categorias.find((c) => c.id === categoriaSeleccionada)?.nombre || 'Esta categoría'
+                        : 'El favorito de cada categoría'}
+                    </h2>
+                  </div>
+                  {orden !== 'mas-vendidos' && (
+                    <button
+                      onClick={() => setOrden('mas-vendidos')}
+                      className="shrink-0 text-[11px] sm:text-xs font-bold text-[#E6C687] underline underline-offset-4 cursor-pointer"
+                    >
+                      Ver todo por más vendidos
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 sm:gap-4">
+                  {seccionMasVendidos.map((producto) => (
+                    <ProductCard
+                      key={'mv-' + producto.id}
+                      producto={producto}
+                      onAddToCart={(p) => handleAddToCart(p, 1)}
+                      onOpenDetail={setSelectedProduct}
+                      categorias={categorias}
+                      masVendido={puestoVisible(producto) || 2}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
             {/* Product Grid */}
             <div className="mx-3 sm:mx-6 lg:mx-8">
@@ -411,6 +484,7 @@ export default function App() {
                       onAddToCart={(p) => handleAddToCart(p, 1)}
                       onOpenDetail={setSelectedProduct}
                       categorias={categorias}
+                      masVendido={puestoVisible(producto)}
                     />
                   ))}
                 </div>

@@ -62,6 +62,59 @@ export async function guardarOrdenCategorias(ids: string[]): Promise<{ success: 
   }
 }
 
+// "Lo más vendido": puesto de cada producto dentro de su categoría (1 = el que más se vende).
+// Viene de la función mas_vendidos() de Supabase, que solo da el puesto, no cuántas unidades.
+export async function getMasVendidos(): Promise<Record<string, number>> {
+  try {
+    const { data, error } = await supabase.rpc('mas_vendidos');
+    if (error || !Array.isArray(data)) return {};
+    const mapa: Record<string, number> = {};
+    data.forEach((r: any) => {
+      if (r?.producto_id) mapa[r.producto_id] = Number(r.puesto) || 99;
+    });
+    return mapa;
+  } catch {
+    return {};
+  }
+}
+
+// Guarda el orden de los productos de una categoría (lista de ids en el orden deseado).
+export async function guardarOrdenProductos(ids: string[]): Promise<{ success: boolean; error?: string }> {
+  try {
+    const resultados = await Promise.all(
+      ids.map((id, i) => supabase.from('productos').update({ orden: (i + 1) * 10 }).eq('id', id).select('id'))
+    );
+    const fallo = resultados.find((r) => r.error || !r.data || r.data.length === 0);
+    if (fallo) {
+      return { success: false, error: fallo.error?.message || 'Supabase no guardó el orden (revisa tu sesión).' };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Error al guardar el orden' };
+  }
+}
+
+// Fija o quita un producto de "Lo más vendido" de su categoría.
+export async function marcarDestacado(id: string, destacado: boolean): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { data, error } = await supabase.from('productos').update({ destacado }).eq('id', id).select('id');
+    if (error || !data || data.length === 0) {
+      return { success: false, error: error?.message || 'Supabase no guardó el cambio (revisa tu sesión).' };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Error al guardar' };
+  }
+}
+
+// Orden de los productos dentro de una categoría: primero el orden del panel, luego los más nuevos.
+export function compararOrdenProducto(a: { orden?: number | null; creado_en?: string }, b: { orden?: number | null; creado_en?: string }): number {
+  const oa = typeof a.orden === 'number' ? a.orden : 1e9;
+  const ob = typeof b.orden === 'number' ? b.orden : 1e9;
+  if (oa !== ob) return oa - ob;
+  return String(b.creado_en || '').localeCompare(String(a.creado_en || ''));
+}
+
 export async function crearCategoria(cat: {
   nombre: string;
   descripcion?: string;

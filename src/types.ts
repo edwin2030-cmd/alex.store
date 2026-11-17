@@ -53,6 +53,9 @@ export interface Producto {
   variantes?: VarianteProducto[];
   creado_en?: string;
   actualizado_en?: string;
+  // Orden dentro de su categoría elegido por el dueño (menor = primero) y fijado en "Lo más vendido"
+  orden?: number | null;
+  destacado?: boolean;
 }
 
 export interface DetallesProducto {

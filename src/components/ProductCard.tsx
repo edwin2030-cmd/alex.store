@@ -8,6 +8,8 @@ interface ProductCardProps {
   onAddToCart: (producto: Producto) => void;
   onOpenDetail: (producto: Producto) => void;
   categorias?: Categoria[];
+  // Muestra la etiqueta "Más vendido" (puesto en su categoría)
+  masVendido?: number | null;
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({
@@ -15,6 +17,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   onAddToCart,
   onOpenDetail,
   categorias = [],
+  masVendido = null,
 }) => {
   const isArreglo = isArregloFutbol(undefined, producto, categorias);
   const rawImages = (producto.imagenes && producto.imagenes.length > 0)
@@ -64,6 +67,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     >
       {/* Image container */}
       <div className="relative aspect-[4/5] bg-[#F7F5F0] overflow-hidden">
+        {masVendido ? (
+          <div className={`absolute ${isArreglo ? 'top-10' : 'top-2.5'} left-2.5 z-10 pointer-events-none`}>
+            <span className="px-2.5 py-1 rounded-full bg-[#1A1918] text-[#E6C687] text-[9px] font-black uppercase tracking-wider shadow-md">
+              🔥 {masVendido === 1 ? 'El más vendido' : 'Más vendido'}
+            </span>
+          </div>
+        ) : null}
         {isArreglo && (
           <div className="absolute top-2.5 left-2.5 z-10 pointer-events-none">
             <span className="px-2.5 py-1 rounded-full bg-emerald-600 text-white text-[9px] font-black uppercase tracking-wider shadow-md flex items-center gap-1 backdrop-blur-xs">

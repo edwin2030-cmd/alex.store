@@ -25,6 +25,10 @@ import {
   eliminarProducto,
   eliminarCategoria,
   guardarOrdenCategorias,
+  guardarOrdenProductos,
+  marcarDestacado,
+  getMasVendidos,
+  compararOrdenProducto,
   actualizarStockRapido,
   actualizarEstadoPedido,
   actualizarEstadoPagoPedido,
@@ -1003,6 +1007,46 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     if (!res.success) {
       setCategorias(anterior);
       alert('No se pudo guardar el orden: ' + (res.error || 'error de Supabase'));
+    }
+  };
+
+  // Orden de los productos dentro de una categoría y "Lo más vendido" (se ve en la tienda)
+  const [guardandoOrdenProductos, setGuardandoOrdenProductos] = useState(false);
+  const [verOrdenTienda, setVerOrdenTienda] = useState(true);
+  const [puestosVendidos, setPuestosVendidos] = useState<Record<string, number>>({});
+  useEffect(() => {
+    getMasVendidos().then(setPuestosVendidos);
+  }, [productos.length]);
+  const productosDeCategoriaOrdenados = useMemo(
+    () => productos.filter((p) => p.categoria_id === categoriaFilter).sort(compararOrdenProducto),
+    [productos, categoriaFilter]
+  );
+  const handleMoverProducto = async (index: number, direccion: -1 | 1 | 'arriba') => {
+    const lista = productosDeCategoriaOrdenados;
+    const destino = direccion === 'arriba' ? 0 : index + direccion;
+    if (guardandoOrdenProductos || destino < 0 || destino >= lista.length || destino === index) return;
+    const nueva = [...lista];
+    const [movido] = nueva.splice(index, 1);
+    nueva.splice(destino, 0, movido);
+    const anterior = productos;
+    const nuevoOrden: Record<string, number> = {};
+    nueva.forEach((p, i) => (nuevoOrden[p.id] = (i + 1) * 10));
+    setProductos(productos.map((p) => (nuevoOrden[p.id] !== undefined ? { ...p, orden: nuevoOrden[p.id] } : p)));
+    setGuardandoOrdenProductos(true);
+    const res = await guardarOrdenProductos(nueva.map((p) => p.id));
+    setGuardandoOrdenProductos(false);
+    if (!res.success) {
+      setProductos(anterior);
+      alert('No se pudo guardar el orden: ' + (res.error || 'error de Supabase'));
+    }
+  };
+  const handleDestacado = async (prod: Producto) => {
+    const nuevo = !prod.destacado;
+    setProductos(productos.map((p) => (p.id === prod.id ? { ...p, destacado: nuevo } : p)));
+    const res = await marcarDestacado(prod.id, nuevo);
+    if (!res.success) {
+      setProductos(productos.map((p) => (p.id === prod.id ? { ...p, destacado: !nuevo } : p)));
+      alert('No se pudo guardar: ' + (res.error || 'error de Supabase'));
     }
   };
 
@@ -6775,6 +6819,86 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <span>+ NUEVO PRODUCTO</span>
                 </button>
               </div>
+
+              {/* Orden en la tienda y "Lo más vendido" de la categoría elegida */}
+              {categoriaFilter === 'todas' ? (
+                <div className="bg-[#13110F] rounded-2xl border border-dashed border-[#38332B] px-4 py-3 text-xs text-[#A69F93]">
+                  <span className="text-[#E6C687] font-bold">🔥 Orden y “Lo más vendido”:</span> elige una categoría arriba para ordenar sus productos como quieras que salgan en la tienda y fijar cuáles aparecen en “Lo más vendido”.
+                </div>
+              ) : (
+                <div className="bg-[#13110F] rounded-2xl sm:rounded-3xl border border-[#26221E] shadow-md overflow-hidden">
+                  <button
+                    onClick={() => setVerOrdenTienda(!verOrdenTienda)}
+                    className="w-full flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 text-left cursor-pointer hover:bg-[#181614]"
+                  >
+                    <div>
+                      <p className="text-sm font-extrabold text-white">🔥 Orden en la tienda y “Lo más vendido”</p>
+                      <p className="text-[11px] text-[#A69F93] mt-0.5">
+                        Usa las flechas para elegir en qué orden salen. La ⭐ fija el producto en “Lo más vendido”; si no fijas ninguno, la tienda pone sola los que más se venden.
+                      </p>
+                    </div>
+                    {verOrdenTienda ? <ChevronUp className="w-4 h-4 text-[#E6C687] shrink-0" /> : <ChevronDown className="w-4 h-4 text-[#E6C687] shrink-0" />}
+                  </button>
+                  {verOrdenTienda && (
+                    <div className="divide-y divide-[#221F1C] border-t border-[#221F1C] max-h-[420px] overflow-y-auto">
+                      {productosDeCategoriaOrdenados.length === 0 && (
+                        <p className="px-5 py-4 text-xs text-[#A69F93]">Esta categoría no tiene productos.</p>
+                      )}
+                      {productosDeCategoriaOrdenados.map((prod, i) => {
+                        const img = getProductThumbnailUrl(prod);
+                        const puesto = puestosVendidos[prod.id];
+                        return (
+                          <div key={'ord-' + prod.id} className="flex items-center gap-2.5 sm:gap-3 px-3 sm:px-5 py-2">
+                            <span className="w-6 text-center text-[11px] font-black text-[#6A6358]">{i + 1}</span>
+                            {img ? (
+                              <img src={img} alt="" className="w-9 h-9 rounded-lg object-cover bg-[#1A1816] shrink-0" loading="lazy" />
+                            ) : (
+                              <div className="w-9 h-9 rounded-lg bg-[#1A1816] shrink-0" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-xs font-bold truncate ${prod.activo === false ? 'text-[#6A6358] line-through' : 'text-white'}`}>{prod.nombre}</p>
+                              <p className="text-[10px] text-[#8C8375]">
+                                {prod.activo === false ? 'Oculto en la tienda' : puesto ? `N.º ${puesto} en ventas de esta categoría` : 'Sin ventas todavía'}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => handleDestacado(prod)}
+                              className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${prod.destacado ? 'bg-[#C59A4D] text-black border-[#C59A4D]' : 'text-[#A69F93] border-[#38332B] hover:text-[#E6C687]'}`}
+                              title={prod.destacado ? 'Quitar de “Lo más vendido”' : 'Fijar en “Lo más vendido”'}
+                            >
+                              ⭐<span className="hidden sm:inline"> {prod.destacado ? 'Fijado' : 'Fijar'}</span>
+                            </button>
+                            <button
+                              onClick={() => handleMoverProducto(i, 'arriba')}
+                              disabled={i === 0 || guardandoOrdenProductos}
+                              className="hidden sm:block px-1.5 py-1 rounded-lg text-[10px] font-black text-[#A69F93] hover:text-[#E6C687] hover:bg-[#1E1B18] disabled:opacity-30 cursor-pointer disabled:cursor-default"
+                              title="Ponerlo de primero"
+                            >
+                              1.º
+                            </button>
+                            <button
+                              onClick={() => handleMoverProducto(i, -1)}
+                              disabled={i === 0 || guardandoOrdenProductos}
+                              className="p-1.5 rounded-lg text-[#A69F93] hover:text-[#E6C687] hover:bg-[#1E1B18] disabled:opacity-30 cursor-pointer disabled:cursor-default"
+                              title="Subir (se verá antes en la tienda)"
+                            >
+                              <ChevronUp className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleMoverProducto(i, 1)}
+                              disabled={i === productosDeCategoriaOrdenados.length - 1 || guardandoOrdenProductos}
+                              className="p-1.5 rounded-lg text-[#A69F93] hover:text-[#E6C687] hover:bg-[#1E1B18] disabled:opacity-30 cursor-pointer disabled:cursor-default"
+                              title="Bajar (se verá después en la tienda)"
+                            >
+                              <ChevronDown className="w-4 h-4" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Table & Mobile Cards */}
               <div className="bg-[#13110F] rounded-2xl sm:rounded-3xl border border-[#26221E] overflow-hidden shadow-md">
