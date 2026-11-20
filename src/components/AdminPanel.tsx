@@ -27,6 +27,8 @@ import {
   guardarOrdenCategorias,
   guardarOrdenProductos,
   marcarDestacado,
+  ponerPromocion,
+  quitarPromocion,
   getMasVendidos,
   compararOrdenProducto,
   actualizarStockRapido,
@@ -61,6 +63,7 @@ import {
   CAJA_SYNC_BROADCAST,
 } from '../lib/supabase';
 import { isArregloFutbol } from '../lib/arregloFutbol';
+import { enPromocion, textoVencimiento } from '../lib/promociones';
 import { firmarComprobantes } from '../lib/comprobantes';
 import {
   ROLE_PERMISSIONS,
@@ -300,6 +303,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [ventaManualNotas, setVentaManualNotas] = useState('');
   // Modo de Venta: Catálogo regular o Pedido Especial (Prendas que no existen en la tienda pública)
   const [ventaManualModo, setVentaManualModo] = useState<'catalogo' | 'especial'>('catalogo');
+  // Buscador de productos al registrar una venta: por categoría y por nombre
+  const [ventaBuscarCategoria, setVentaBuscarCategoria] = useState<string>('todas');
+  const [ventaBuscarTexto, setVentaBuscarTexto] = useState('');
   const [pedidoEspecialNombre, setPedidoEspecialNombre] = useState('');
   const [pedidoEspecialPrecio, setPedidoEspecialPrecio] = useState('');
   const [pedidoEspecialCantidad, setPedidoEspecialCantidad] = useState('1');
@@ -1048,6 +1054,53 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setProductos(productos.map((p) => (p.id === prod.id ? { ...p, destacado: !nuevo } : p)));
       alert('No se pudo guardar: ' + (res.error || 'error de Supabase'));
     }
+  };
+
+  // Promociones: el precio baja al de oferta y la tienda lo muestra en la sección roja "Promociones".
+  const finDeSemanaPanama = () => {
+    // Domingo de esta semana a las 11:59 p. m. (hora de Panamá, UTC-5)
+    const ahoraPa = new Date(Date.now() - 5 * 3600000);
+    const dia = ahoraPa.getUTCDay(); // 0 = domingo
+    const faltan = (7 - dia) % 7;
+    const fin = Date.UTC(ahoraPa.getUTCFullYear(), ahoraPa.getUTCMonth(), ahoraPa.getUTCDate() + faltan, 23, 59, 59);
+    return new Date(fin + 5 * 3600000).toISOString();
+  };
+  const handlePonerPromocion = async (prod: Producto) => {
+    const normal = prod.precio_antes && prod.precio_antes > prod.precio ? prod.precio_antes : prod.precio;
+    const txt = window.prompt(
+      `Promoción para "${prod.nombre}"\nPrecio normal: $${Number(normal).toFixed(2)}\n\n¿A qué precio queda en promoción? (ej: 20)`,
+      enPromocion(prod) ? String(prod.precio) : ''
+    );
+    if (txt === null) return;
+    const precioOferta = parseFloat(txt.replace(',', '.'));
+    if (!(precioOferta > 0)) {
+      alert('Escribe un precio válido, por ejemplo 20.');
+      return;
+    }
+    const dias = window.prompt(
+      '¿Hasta cuándo dura?\n• Escribe 0 = hasta este domingo\n• o el número de días (ej: 3, 7)\n• o deja vacío = sin fecha (la quitas tú)',
+      '0'
+    );
+    if (dias === null) return;
+    let hasta: string | null = null;
+    const n = parseInt(dias);
+    if (dias.trim() === '0') hasta = finDeSemanaPanama();
+    else if (n > 0) hasta = new Date(Date.now() + n * 86400000).toISOString();
+    const res = await ponerPromocion(prod, precioOferta, hasta);
+    if (!res.success) {
+      alert('No se pudo poner la promoción: ' + (res.error || 'error de Supabase'));
+      return;
+    }
+    await reloadAllData();
+  };
+  const handleQuitarPromocion = async (prod: Producto) => {
+    if (!confirm(`¿Quitar la promoción de "${prod.nombre}"? Vuelve a $${Number(prod.precio_antes || prod.precio).toFixed(2)}.`)) return;
+    const res = await quitarPromocion(prod);
+    if (!res.success) {
+      alert('No se pudo quitar la promoción: ' + (res.error || 'error de Supabase'));
+      return;
+    }
+    await reloadAllData();
   };
 
   const handleDeleteCategoria = async (id: string, nombre: string) => {
@@ -6820,6 +6873,60 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </button>
               </div>
 
+              {/* Promociones activas (se ven en la sección roja de la tienda) */}
+              {(() => {
+                const enOferta = productos.filter((p) => enPromocion(p));
+                return (
+                  <div className="rounded-2xl sm:rounded-3xl border border-red-500/40 bg-gradient-to-br from-red-950/60 to-[#13110F] shadow-md overflow-hidden">
+                    <div className="px-4 sm:px-5 py-3.5">
+                      <p className="text-sm font-extrabold text-white">🏷️ Promociones activas ({enOferta.length})</p>
+                      <p className="text-[11px] text-red-200/80 mt-0.5">
+                        Salen arriba en la tienda en una sección roja, con el precio anterior tachado. Al vencer la fecha, el precio normal vuelve solo.
+                        Para poner una: elige una categoría abajo y toca 🏷️ Promo en el producto.
+                      </p>
+                    </div>
+                    {enOferta.length > 0 && (
+                      <div className="divide-y divide-red-900/30 border-t border-red-900/40 max-h-[300px] overflow-y-auto">
+                        {enOferta.map((prod) => {
+                          const img = getProductThumbnailUrl(prod);
+                          const vence = textoVencimiento(prod.oferta_hasta);
+                          return (
+                            <div key={'promo-' + prod.id} className="flex items-center gap-2.5 sm:gap-3 px-3 sm:px-5 py-2">
+                              {img ? (
+                                <img src={img} alt="" className="w-9 h-9 rounded-lg object-cover bg-[#1A1816] shrink-0" loading="lazy" />
+                              ) : (
+                                <div className="w-9 h-9 rounded-lg bg-[#1A1816] shrink-0" />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold truncate text-white">{prod.nombre}</p>
+                                <p className="text-[10px] text-red-200/80">
+                                  <span className="line-through">${Number(prod.precio_antes).toFixed(2)}</span>{' '}
+                                  <strong className="text-red-300">${Number(prod.precio).toFixed(2)}</strong>
+                                  {' · '}
+                                  {vence || 'sin fecha de fin'}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => handlePonerPromocion(prod)}
+                                className="px-2 py-1 rounded-lg text-[11px] font-bold border border-[#38332B] text-[#A69F93] hover:text-white cursor-pointer"
+                              >
+                                Cambiar
+                              </button>
+                              <button
+                                onClick={() => handleQuitarPromocion(prod)}
+                                className="px-2 py-1 rounded-lg text-[11px] font-bold bg-red-600 hover:bg-red-500 text-white cursor-pointer"
+                              >
+                                Quitar
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Orden en la tienda y "Lo más vendido" de la categoría elegida */}
               {categoriaFilter === 'todas' ? (
                 <div className="bg-[#13110F] rounded-2xl border border-dashed border-[#38332B] px-4 py-3 text-xs text-[#A69F93]">
@@ -6832,9 +6939,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     className="w-full flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 text-left cursor-pointer hover:bg-[#181614]"
                   >
                     <div>
-                      <p className="text-sm font-extrabold text-white">🔥 Orden en la tienda y “Lo más vendido”</p>
+                      <p className="text-sm font-extrabold text-white">🔥 Orden, “Lo más vendido” y 🏷️ Promociones</p>
                       <p className="text-[11px] text-[#A69F93] mt-0.5">
-                        Usa las flechas para elegir en qué orden salen. La ⭐ fija el producto en “Lo más vendido”; si no fijas ninguno, la tienda pone sola los que más se venden.
+                        Usa las flechas para elegir en qué orden salen. La ⭐ fija el producto en “Lo más vendido”; si no fijas ninguno, la tienda pone sola los que más se venden. 🏷️ Promo baja el precio y lo pone en la sección roja de Promociones.
                       </p>
                     </div>
                     {verOrdenTienda ? <ChevronUp className="w-4 h-4 text-[#E6C687] shrink-0" /> : <ChevronDown className="w-4 h-4 text-[#E6C687] shrink-0" />}
@@ -6861,6 +6968,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 {prod.activo === false ? 'Oculto en la tienda' : puesto ? `N.º ${puesto} en ventas de esta categoría` : 'Sin ventas todavía'}
                               </p>
                             </div>
+                            <button
+                              onClick={() => (enPromocion(prod) ? handleQuitarPromocion(prod) : handlePonerPromocion(prod))}
+                              className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${enPromocion(prod) ? 'bg-red-600 text-white border-red-500' : 'text-[#A69F93] border-[#38332B] hover:text-red-300'}`}
+                              title={enPromocion(prod) ? 'Quitar la promoción' : 'Poner en promoción'}
+                            >
+                              🏷️<span className="hidden sm:inline"> {enPromocion(prod) ? `$${Number(prod.precio).toFixed(0)}` : 'Promo'}</span>
+                            </button>
                             <button
                               onClick={() => handleDestacado(prod)}
                               className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${prod.destacado ? 'bg-[#C59A4D] text-black border-[#C59A4D]' : 'text-[#A69F93] border-[#38332B] hover:text-[#E6C687]'}`}
@@ -9218,35 +9332,137 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </span>
                     </div>
 
-                    {/* Selector de Producto */}
-                    <div>
-                      <label className="text-[11px] font-bold text-[#A69F93] block mb-1">
-                        Seleccionar Producto del Catálogo:
-                      </label>
-                      <select
-                        value={ventaManualProductoId}
-                        onChange={(e) => {
-                          const id = e.target.value;
-                          setVentaManualProductoId(id);
-                          setVentaManualVarianteId('');
-                          setVentaManualTalla('');
-                          setVentaManualColor('');
-                          const prod = productos.find((p) => p.id === id);
-                          if (prod && ventaManualItems.length === 0) {
-                            const qty = Math.max(1, parseInt(ventaManualCantidad) || 1);
-                            setVentaManualMonto((prod.precio * qty).toFixed(2));
-                          }
-                        }}
-                        className="w-full bg-[#13110F] text-white px-3.5 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D]"
-                      >
-                        <option value="" className="bg-[#13110F] text-white">-- Escoger un producto para agregar --</option>
-                        {productos.map((p) => (
-                          <option key={p.id} value={p.id} className="bg-[#13110F] text-white">
-                            {p.nombre} (${Number(p.precio).toFixed(2)}) — Stock: {p.stock ?? 0}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    {/* Selector de Producto: primero la categoría, luego buscar por nombre y tocar el producto */}
+                    {(() => {
+                      const elegirProducto = (id: string) => {
+                        setVentaManualProductoId(id);
+                        setVentaManualVarianteId('');
+                        setVentaManualTalla('');
+                        setVentaManualColor('');
+                        const prod = productos.find((p) => p.id === id);
+                        if (prod && ventaManualItems.length === 0) {
+                          const qty = Math.max(1, parseInt(ventaManualCantidad) || 1);
+                          setVentaManualMonto((prod.precio * qty).toFixed(2));
+                        }
+                      };
+                      const normalizar = (t: string) =>
+                        t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+                      const palabras = normalizar(ventaBuscarTexto).split(/\s+/).filter(Boolean);
+                      const conteo: Record<string, number> = {};
+                      productos.forEach((p) => {
+                        if (p.categoria_id) conteo[p.categoria_id] = (conteo[p.categoria_id] || 0) + 1;
+                      });
+                      const lista = productos
+                        .filter((p) => ventaBuscarCategoria === 'todas' || p.categoria_id === ventaBuscarCategoria)
+                        .filter((p) => {
+                          if (palabras.length === 0) return true;
+                          const texto = normalizar(`${p.nombre} ${p.sku || ''} ${(p.tallas || []).join(' ')}`);
+                          return palabras.every((w) => texto.includes(w));
+                        })
+                        .sort((a, b) => {
+                          if ((a.activo !== false) !== (b.activo !== false)) return a.activo !== false ? -1 : 1;
+                          if (((a.stock ?? 0) > 0) !== ((b.stock ?? 0) > 0)) return (a.stock ?? 0) > 0 ? -1 : 1;
+                          return a.nombre.localeCompare(b.nombre);
+                        });
+                      const chip = (activo: boolean) =>
+                        `shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-colors cursor-pointer whitespace-nowrap ${
+                          activo
+                            ? 'bg-[#C59A4D] text-black border-[#C59A4D]'
+                            : 'bg-[#13110F] text-[#A69F93] border-[#38332B] hover:text-white'
+                        }`;
+                      return (
+                        <div className="space-y-2">
+                          <label className="text-[11px] font-bold text-[#A69F93] block">
+                            1. Elige la categoría:
+                          </label>
+                          <div className="flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:thin]">
+                            <button type="button" onClick={() => setVentaBuscarCategoria('todas')} className={chip(ventaBuscarCategoria === 'todas')}>
+                              Todas ({productos.length})
+                            </button>
+                            {categorias
+                              .filter((c) => conteo[c.id])
+                              .map((c) => (
+                                <button
+                                  type="button"
+                                  key={'vc-' + c.id}
+                                  onClick={() => setVentaBuscarCategoria(c.id)}
+                                  className={chip(ventaBuscarCategoria === c.id)}
+                                >
+                                  {c.nombre} ({conteo[c.id]})
+                                </button>
+                              ))}
+                          </div>
+                          <label className="text-[11px] font-bold text-[#A69F93] block">
+                            2. Busca por nombre y toca el producto:
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={ventaBuscarTexto}
+                              onChange={(e) => setVentaBuscarTexto(e.target.value)}
+                              placeholder="Ej: real azul, barsa yamal, panama rojo, taco 41..."
+                              className="w-full bg-[#13110F] text-white placeholder-[#6A6358] pl-3.5 pr-9 py-2.5 rounded-xl border border-[#38332B] focus:outline-none focus:border-[#C59A4D] text-xs"
+                            />
+                            {ventaBuscarTexto && (
+                              <button
+                                type="button"
+                                onClick={() => setVentaBuscarTexto('')}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 px-2 text-[#A69F93] hover:text-white cursor-pointer"
+                                title="Borrar búsqueda"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                          <div className="max-h-64 overflow-y-auto rounded-xl border border-[#26221E] divide-y divide-[#221F1C] bg-[#13110F]">
+                            {lista.length === 0 && (
+                              <p className="px-3.5 py-4 text-xs text-[#A69F93] text-center">
+                                No hay productos con ese nombre en esta categoría.
+                              </p>
+                            )}
+                            {lista.map((p) => {
+                              const img = getProductThumbnailUrl(p);
+                              const elegido = p.id === ventaManualProductoId;
+                              const stock = p.stock ?? 0;
+                              const promo = enPromocion(p);
+                              return (
+                                <button
+                                  type="button"
+                                  key={'vp-' + p.id}
+                                  onClick={() => elegirProducto(p.id)}
+                                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 text-left transition-colors cursor-pointer ${
+                                    elegido ? 'bg-[#C59A4D]/20 ring-1 ring-inset ring-[#C59A4D]' : 'hover:bg-[#1A1816]'
+                                  }`}
+                                >
+                                  {img ? (
+                                    <img src={img} alt="" className="w-10 h-10 rounded-lg object-cover bg-[#1A1816] shrink-0" loading="lazy" />
+                                  ) : (
+                                    <div className="w-10 h-10 rounded-lg bg-[#1A1816] shrink-0" />
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <p className={`text-xs font-bold truncate ${p.activo === false ? 'text-[#8C8375]' : 'text-white'}`}>{p.nombre}</p>
+                                    <p className="text-[10px] text-[#8C8375] truncate">
+                                      {(p.tallas || []).length > 0 ? `Tallas: ${(p.tallas || []).join(', ')}` : 'Sin tallas'}
+                                      {p.activo === false ? ' · oculto en la tienda' : ''}
+                                    </p>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    {promo && (
+                                      <span className="block text-[9px] font-black text-red-400 line-through">${Number(p.precio_antes).toFixed(2)}</span>
+                                    )}
+                                    <span className={`block text-xs font-black ${promo ? 'text-red-400' : 'text-[#E6C687]'}`}>${Number(p.precio).toFixed(2)}</span>
+                                    <span className={`block text-[10px] font-bold ${stock > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                      {stock > 0 ? `${stock} en stock` : 'Agotado'}
+                                    </span>
+                                  </div>
+                                  {elegido && <span className="text-[#C59A4D] font-black shrink-0">✓</span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Previsualización del Producto Seleccionado con Foto, Talla, Color y Botón Agregar */}
                     {(() => {

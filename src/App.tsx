@@ -17,6 +17,7 @@ import { LegalModal } from './components/LegalModal';
 import { CATEGORIAS_INICIALES } from './data/initialData';
 import { Check, X, ArrowUpDown, PackageOpen } from 'lucide-react';
 import { isArregloFutbol } from './lib/arregloFutbol';
+import { enPromocion, textoVencimiento } from './lib/promociones';
 
 export default function App() {
   const [isAdminMode, setIsAdminMode] = useState(false);
@@ -159,6 +160,21 @@ export default function App() {
         return 0;
       });
   }, [productosVisibles, categorias, categoriaSeleccionada, searchQuery, orden, masVendidos]);
+
+  // Promociones: productos con precio rebajado y oferta vigente (de la categoría elegida, si hay una)
+  const seccionPromociones = useMemo(() => {
+    if (searchQuery.trim()) return [];
+    const pos: Record<string, number> = {};
+    categorias.forEach((c, i) => (pos[c.id] = i));
+    return productosVisibles
+      .filter((p) => enPromocion(p) && (!categoriaSeleccionada || p.categoria_id === categoriaSeleccionada))
+      .sort((a, b) => (pos[a.categoria_id || ''] ?? 9999) - (pos[b.categoria_id || ''] ?? 9999) || compararOrdenProducto(a, b));
+  }, [productosVisibles, categorias, categoriaSeleccionada, searchQuery]);
+  const finPromociones = useMemo(() => {
+    const fechas = seccionPromociones.map((p) => p.oferta_hasta).filter(Boolean) as string[];
+    if (fechas.length === 0) return null;
+    return textoVencimiento(fechas.sort()[0]);
+  }, [seccionPromociones]);
 
   // "Lo más vendido": primero los que el dueño fijó en el panel y luego los que más se venden.
   const topDeCategoria = (catId: string) =>
@@ -418,6 +434,51 @@ export default function App() {
                 </select>
               </div>
             </div>
+
+            {/* PROMOCIONES: sección llamativa con color propio */}
+            {!isLoading && seccionPromociones.length > 0 && (
+              <section
+                className="relative mx-3 sm:mx-6 lg:mx-8 mb-6 sm:mb-8 rounded-3xl overflow-hidden p-3.5 sm:p-5 shadow-xl shadow-red-900/25 bg-gradient-to-br from-red-600 via-red-500 to-orange-500"
+                aria-label="Promociones"
+              >
+                <div className="pointer-events-none absolute -top-16 -right-16 w-56 h-56 rounded-full bg-yellow-300/25 blur-2xl" />
+                <div className="pointer-events-none absolute -bottom-20 -left-10 w-56 h-56 rounded-full bg-black/10 blur-2xl" />
+                <div className="relative flex flex-wrap items-end justify-between gap-2 mb-3 sm:mb-4 px-0.5">
+                  <div>
+                    <p className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-yellow-300 text-red-700 text-[10px] sm:text-xs font-black uppercase tracking-[0.15em] shadow-sm">
+                      <span className="animate-bounce">🏷️</span> Promociones
+                    </p>
+                    <h2 className="mt-1.5 text-xl sm:text-3xl font-black text-white leading-tight drop-shadow-sm">
+                      ¡Precios rebajados por tiempo limitado!
+                    </h2>
+                    <p className="text-[11px] sm:text-sm font-semibold text-white/90">
+                      {seccionPromociones.length} {seccionPromociones.length === 1 ? 'producto' : 'productos'} en oferta
+                      {categoriaSeleccionada ? ' en esta categoría' : ''} · pocas unidades
+                    </p>
+                  </div>
+                  {finPromociones && (
+                    <span className="shrink-0 px-3 py-1.5 rounded-xl bg-black/25 text-yellow-200 text-[11px] sm:text-xs font-black backdrop-blur-sm">
+                      ⏰ {finPromociones}
+                    </span>
+                  )}
+                </div>
+                <div className="relative -mx-3.5 sm:mx-0 px-3.5 sm:px-0 flex sm:grid sm:grid-cols-3 md:grid-cols-4 gap-2.5 sm:gap-4 overflow-x-auto sm:overflow-visible snap-x snap-mandatory pb-1 [scrollbar-width:none]">
+                  {seccionPromociones.map((producto) => (
+                    <div key={'promo-' + producto.id} className="w-[46%] sm:w-auto shrink-0 snap-start">
+                      <ProductCard
+                        producto={producto}
+                        onAddToCart={(p) => handleAddToCart(p, 1)}
+                        onOpenDetail={setSelectedProduct}
+                        categorias={categorias}
+                      />
+                    </div>
+                  ))}
+                </div>
+                {seccionPromociones.length > 2 && (
+                  <p className="relative sm:hidden mt-2 text-center text-[10px] font-bold text-white/85">Desliza para ver más →</p>
+                )}
+              </section>
+            )}
 
             {/* Lo más vendido (de la categoría elegida, o el n.º 1 de cada categoría) */}
             {!isLoading && seccionMasVendidos.length > 0 && (

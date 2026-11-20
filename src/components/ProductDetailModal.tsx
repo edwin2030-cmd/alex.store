@@ -13,6 +13,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { isArregloFutbol, generarWhatsAppReciboArreglo } from '../lib/arregloFutbol';
+import { enPromocion } from '../lib/promociones';
 
 interface ProductDetailModalProps {
   producto: Producto | null;
@@ -299,8 +300,18 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                     </p>
                   </div>
                 ) : (
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-2xl sm:text-3xl font-black text-[#C59A4D]">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    {enPromocion(producto) && precioUnitario === producto.precio && (
+                      <span className="px-2 py-0.5 rounded-full bg-gradient-to-r from-red-600 to-orange-500 text-white text-[10px] font-black uppercase tracking-wider self-center">
+                        🏷️ Promoción
+                      </span>
+                    )}
+                    {enPromocion(producto) && precioUnitario === producto.precio && (
+                      <span className="text-base font-bold text-[#9C9488] line-through">
+                        ${Number(producto.precio_antes).toFixed(2)}
+                      </span>
+                    )}
+                    <span className={`text-2xl sm:text-3xl font-black ${enPromocion(producto) && precioUnitario === producto.precio ? 'text-red-600' : 'text-[#C59A4D]'}`}>
                       ${precioUnitario.toFixed(2)}
                     </span>
                     <span className="text-xs text-[#7A7368] font-semibold">USD</span>

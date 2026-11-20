@@ -56,6 +56,9 @@ export interface Producto {
   // Orden dentro de su categoría elegido por el dueño (menor = primero) y fijado en "Lo más vendido"
   orden?: number | null;
   destacado?: boolean;
+  // Promoción: precio normal antes de la oferta (precio = precio de promoción) y hasta cuándo dura
+  precio_antes?: number | null;
+  oferta_hasta?: string | null;
 }
 
 export interface DetallesProducto {

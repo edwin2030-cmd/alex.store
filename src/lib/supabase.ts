@@ -107,6 +107,50 @@ export async function marcarDestacado(id: string, destacado: boolean): Promise<{
   }
 }
 
+// Pone un producto en promoción: el precio pasa a ser el de oferta y se guarda el normal en precio_antes.
+// Al llegar oferta_hasta, Supabase (tarea programada) devuelve solo el precio normal.
+export async function ponerPromocion(
+  prod: { id: string; precio: number; precio_antes?: number | null },
+  precioOferta: number,
+  hasta: string | null
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const normal = prod.precio_antes && prod.precio_antes > 0 ? prod.precio_antes : prod.precio;
+    if (!(precioOferta > 0) || precioOferta >= normal) {
+      return { success: false, error: `El precio de promoción debe ser menor que el normal ($${Number(normal).toFixed(2)}).` };
+    }
+    const { data, error } = await supabase
+      .from('productos')
+      .update({ precio: precioOferta, precio_antes: normal, oferta_hasta: hasta })
+      .eq('id', prod.id)
+      .select('id');
+    if (error || !data || data.length === 0) {
+      return { success: false, error: error?.message || 'Supabase no guardó la promoción (revisa tu sesión).' };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Error al guardar la promoción' };
+  }
+}
+
+// Quita la promoción y devuelve el precio normal.
+export async function quitarPromocion(prod: { id: string; precio: number; precio_antes?: number | null }): Promise<{ success: boolean; error?: string }> {
+  try {
+    const normal = prod.precio_antes && prod.precio_antes > 0 ? prod.precio_antes : prod.precio;
+    const { data, error } = await supabase
+      .from('productos')
+      .update({ precio: normal, precio_antes: null, oferta_hasta: null })
+      .eq('id', prod.id)
+      .select('id');
+    if (error || !data || data.length === 0) {
+      return { success: false, error: error?.message || 'Supabase no quitó la promoción (revisa tu sesión).' };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Error al quitar la promoción' };
+  }
+}
+
 // Orden de los productos dentro de una categoría: primero el orden del panel, luego los más nuevos.
 export function compararOrdenProducto(a: { orden?: number | null; creado_en?: string }, b: { orden?: number | null; creado_en?: string }): number {
   const oa = typeof a.orden === 'number' ? a.orden : 1e9;
@@ -384,6 +428,8 @@ export async function getProductos(): Promise<Producto[]> {
         costo: p.costo || 0,
         stock: sumTallas !== undefined ? sumTallas : (stockMap[p.id]?.cantidad ?? (p.stock || 0)),
         stock_minimo: stockMap[p.id]?.stock_minimo ?? (p.stock_minimo || 5),
+        precio_antes: p.precio_antes != null ? Number(p.precio_antes) : null,
+        oferta_hasta: p.oferta_hasta || null,
       };
     });
   } catch (err) {

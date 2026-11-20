@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Producto, Categoria } from '../types';
 import { ShoppingBag, Check, ChevronLeft, ChevronRight, Eye, MessageCircle } from 'lucide-react';
 import { isArregloFutbol } from '../lib/arregloFutbol';
+import { enPromocion, ahorro } from '../lib/promociones';
 
 interface ProductCardProps {
   producto: Producto;
@@ -20,6 +21,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   masVendido = null,
 }) => {
   const isArreglo = isArregloFutbol(undefined, producto, categorias);
+  const promo = !isArreglo && enPromocion(producto);
   const rawImages = (producto.imagenes && producto.imagenes.length > 0)
     ? producto.imagenes
     : [producto.imagen_url];
@@ -67,7 +69,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     >
       {/* Image container */}
       <div className="relative aspect-[4/5] bg-[#F7F5F0] overflow-hidden">
-        {masVendido ? (
+        {promo ? (
+          <div className="absolute top-2.5 left-2.5 z-10 pointer-events-none">
+            <span className="px-2.5 py-1 rounded-full bg-gradient-to-r from-red-600 to-orange-500 text-white text-[9px] sm:text-[10px] font-black uppercase tracking-wider shadow-md shadow-red-900/30 animate-pulse">
+              🏷️ Oferta −${ahorro(producto).toFixed(0)}
+            </span>
+          </div>
+        ) : masVendido ? (
           <div className={`absolute ${isArreglo ? 'top-10' : 'top-2.5'} left-2.5 z-10 pointer-events-none`}>
             <span className="px-2.5 py-1 rounded-full bg-[#1A1918] text-[#E6C687] text-[9px] font-black uppercase tracking-wider shadow-md">
               🔥 {masVendido === 1 ? 'El más vendido' : 'Más vendido'}
@@ -204,10 +212,23 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           ) : (
             <>
               <div className="min-w-0 flex-1">
-                <span className="text-[8px] sm:text-[10px] uppercase font-bold text-[#9C9488] block leading-none">Precio</span>
-                <span className="text-xs sm:text-base md:text-lg font-black text-[#C59A4D] block leading-tight truncate">
-                  ${producto.precio.toFixed(2)}
-                </span>
+                {promo ? (
+                  <>
+                    <span className="text-[9px] sm:text-[11px] font-bold text-[#9C9488] line-through block leading-none">
+                      ${Number(producto.precio_antes).toFixed(2)}
+                    </span>
+                    <span className="text-sm sm:text-lg md:text-xl font-black text-red-600 block leading-tight truncate">
+                      ${producto.precio.toFixed(2)}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-[8px] sm:text-[10px] uppercase font-bold text-[#9C9488] block leading-none">Precio</span>
+                    <span className="text-xs sm:text-base md:text-lg font-black text-[#C59A4D] block leading-tight truncate">
+                      ${producto.precio.toFixed(2)}
+                    </span>
+                  </>
+                )}
               </div>
 
               <button
