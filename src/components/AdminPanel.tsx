@@ -314,6 +314,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [pedidoEspecialTipoCobro, setPedidoEspecialTipoCobro] = useState<'completo' | 'abono'>('completo');
   // 'pedido_especial' = encargo al proveedor; 'fuera_catalogo' = prenda que no está en la tienda pero se entrega pronto (abono o pago)
   const [especialTipo, setEspecialTipo] = useState<'pedido_especial' | 'fuera_catalogo'>('pedido_especial');
+  // Venta de Sublimación (personalizados): sus ingresos se cuentan aparte de la tienda normal
+  const [especialEsSublimacion, setEspecialEsSublimacion] = useState(false);
   const [submittingVentaManual, setSubmittingVentaManual] = useState(false);
   const [liquidandoVentaId, setLiquidandoVentaId] = useState<string | null>(null);
 
@@ -368,7 +370,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Filtros de fecha y período para Ventas
   const [ventasFiltroPeriodo, setVentasFiltroPeriodo] = useState<'todos' | 'hoy' | 'semana' | 'mes' | 'ano' | 'rango'>('todos');
   // Filtro por tipo: todas, solo abonos con saldo por cobrar, o solo pedidos especiales
-  const [ventasFiltroTipo, setVentasFiltroTipo] = useState<'todas' | 'abonos' | 'especiales' | 'fuera'>('todas');
+  const [ventasFiltroTipo, setVentasFiltroTipo] = useState<'todas' | 'abonos' | 'especiales' | 'fuera' | 'sublimacion'>('todas');
   const [ventasFechaExacta, setVentasFechaExacta] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [ventasSemanaRef, setVentasSemanaRef] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [ventasMesExacto, setVentasMesExacto] = useState<string>(() => {
@@ -714,22 +716,61 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const claveMesActual = `${hoyMes.getFullYear()}-${String(hoyMes.getMonth() + 1).padStart(2, '0')}`;
   const nombreMesActual = NOMBRES_MES[hoyMes.getMonth()];
   const cobradoDeVenta = (v: Venta) => Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0;
+  // SUBLIMACIÓN: lo vendido de la categoría "Sublimación" (o marcado como sublimación al registrarlo)
+  // se cuenta aparte y NO se suma a los ingresos de la tienda normal.
+  const idsCategoriaSublimacion = useMemo(() => {
+    const norm = (s: string) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    return new Set(categorias.filter((c: any) => norm(c.nombre).includes('sublimacion')).map((c: any) => String(c.id)));
+  }, [categorias]);
+  const categoriaDeProducto = useMemo(() => {
+    const m = new Map<string, string>();
+    productos.forEach((p: any) => { if (p.id && p.categoria_id) m.set(String(p.id), String(p.categoria_id)); });
+    return m;
+  }, [productos]);
+  // Fracción (0 a 1) de la venta que es de Sublimación, según el valor de sus artículos
+  const fraccionSublimacion = (v: Venta) => {
+    const items = Array.isArray(v.items) ? v.items : [];
+    if (items.length === 0) return 0;
+    let total = 0;
+    let sub = 0;
+    items.forEach((it: any) => {
+      const valor = Number(it.subtotal ?? (Number(it.precio) || 0) * (Number(it.cantidad) || 1)) || 0;
+      const cat = categoriaDeProducto.get(String(it.producto_id ?? it.id ?? ''));
+      const esSub = it.es_sublimacion === true || (cat ? idsCategoriaSublimacion.has(cat) : false);
+      total += valor;
+      if (esSub) sub += valor;
+    });
+    if (total <= 0) return items.every((it: any) => it.es_sublimacion === true) ? 1 : 0;
+    return sub / total;
+  };
+  const esVentaSublimacion = (v: Venta) => fraccionSublimacion(v) > 0;
+  const cobradoSublimacion = (v: Venta) => cobradoDeVenta(v) * fraccionSublimacion(v);
+  const cobradoTienda = (v: Venta) => cobradoDeVenta(v) - cobradoSublimacion(v);
+
   const ventasDelMes = useMemo(() => ventas.filter((v) => claveMes(v.creado_en) === claveMesActual), [ventas, claveMesActual]);
-  const ingresosMes = ventasDelMes.reduce((acc, v) => acc + cobradoDeVenta(v), 0);
+  const ventasTiendaDelMes = ventasDelMes.filter((v) => fraccionSublimacion(v) < 1);
+  const ventasSublimacionDelMes = ventasDelMes.filter((v) => esVentaSublimacion(v));
+  const ingresosMes = ventasDelMes.reduce((acc, v) => acc + cobradoTienda(v), 0);
+  const ingresosSublimacionMes = ventasDelMes.reduce((acc, v) => acc + cobradoSublimacion(v), 0);
   const resumenPorMes = useMemo(() => {
-    const mapa = new Map<string, { total: number; cantidad: number }>();
+    const mapa = new Map<string, { total: number; cantidad: number; sublimacion: number; cantidadSub: number }>();
     ventas.forEach((v) => {
       const k = claveMes(v.creado_en);
       if (!k) return;
-      const r = mapa.get(k) || { total: 0, cantidad: 0 };
-      r.total += cobradoDeVenta(v);
-      r.cantidad += 1;
+      const r = mapa.get(k) || { total: 0, cantidad: 0, sublimacion: 0, cantidadSub: 0 };
+      const f = fraccionSublimacion(v);
+      r.total += cobradoTienda(v);
+      r.sublimacion += cobradoSublimacion(v);
+      if (f < 1) r.cantidad += 1;
+      if (f > 0) r.cantidadSub += 1;
       mapa.set(k, r);
     });
     return Array.from(mapa.entries())
       .sort((a, b) => (a[0] < b[0] ? 1 : -1))
       .map(([k, r]) => ({ clave: k, nombre: `${NOMBRES_MES[Number(k.slice(5, 7)) - 1]} ${k.slice(0, 4)}`, ...r }));
-  }, [ventas]);
+  }, [ventas, categoriaDeProducto, idsCategoriaSublimacion]);
+  const ingresosTotalesSublimacion = ventas.reduce((acc, v) => acc + cobradoSublimacion(v), 0);
+  const ingresosTotalesTienda = ingresosTotales - ingresosTotalesSublimacion;
   const totalVentasGanado = useMemo(() => {
     return ventas.reduce(
       (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
@@ -1882,13 +1923,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           is_especial: true,
           es_pedido_especial: !esFuera,
           es_fuera_catalogo: esFuera,
+          es_sublimacion: especialEsSublimacion || undefined,
         },
       ];
 
       setSubmittingVentaManual(true);
       try {
         const descCompleta =
-          `${esFuera ? '📦 Fuera de catálogo' : '⭐ Pedido Especial'}: ${nombreEspecial} (x${cantEspecial})` +
+          `${especialEsSublimacion ? '🎨 Sublimación · ' : ''}${esFuera ? '📦 Fuera de catálogo' : '⭐ Pedido Especial'}: ${nombreEspecial} (x${cantEspecial})` +
           (pedidoEspecialDetalle.trim() ? ` • Detalle/Talla: ${pedidoEspecialDetalle.trim()}` : '') +
           (pedidoEspecialColor.trim() ? ` • Color: ${pedidoEspecialColor.trim()}` : '') +
           (ventaManualNotas.trim() ? ` • Notas: ${ventaManualNotas.trim()}` : '');
@@ -1931,6 +1973,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           setPedidoEspecialCantidad('1');
           setPedidoEspecialDetalle('');
           setPedidoEspecialColor('');
+          setEspecialEsSublimacion(false);
           setPedidoEspecialTipoCobro('completo');
 
           reloadAllData();
@@ -3386,19 +3429,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
                     <span className="text-[10px] font-black uppercase text-[#A69F93] block">INGRESOS DE {nombreMesActual.toUpperCase()}</span>
                     <span className="text-2xl sm:text-3xl font-black text-white block my-1.5">${ingresosMes.toFixed(2)}</span>
-                    <span className="text-[11px] font-bold text-[#E6C687]">Empieza en $0 cada mes</span>
+                    <span className="text-[11px] font-bold text-[#E6C687]">Tienda normal · sin Sublimación</span>
+                  </div>
+
+                  <div className="bg-[#13110F] rounded-3xl p-5 border border-fuchsia-900/60 shadow-md">
+                    <span className="text-[10px] font-black uppercase text-fuchsia-300 block">🎨 SUBLIMACIÓN DE {nombreMesActual.toUpperCase()}</span>
+                    <span className="text-2xl sm:text-3xl font-black text-white block my-1.5">${ingresosSublimacionMes.toFixed(2)}</span>
+                    <span className="text-[11px] font-bold text-fuchsia-300">{ventasSublimacionDelMes.length} venta(s) · aparte de la tienda</span>
                   </div>
 
                   <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
                     <span className="text-[10px] font-black uppercase text-[#A69F93] block">VENTAS DEL MES</span>
-                    <span className="text-2xl sm:text-3xl font-black text-white block my-1.5">{ventasDelMes.length}</span>
-                    <span className="text-[11px] text-[#A69F93]">Web + Mostrador</span>
+                    <span className="text-2xl sm:text-3xl font-black text-white block my-1.5">{ventasTiendaDelMes.length}</span>
+                    <span className="text-[11px] text-[#A69F93]">Tienda (web + mostrador)</span>
                   </div>
 
                   <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
                     <span className="text-[10px] font-black uppercase text-[#A69F93] block">TICKET PROMEDIO</span>
                     <span className="text-2xl sm:text-3xl font-black text-[#E6C687] block my-1.5">
-                      ${ventasDelMes.length > 0 ? (ingresosMes / ventasDelMes.length).toFixed(2) : '0.00'}
+                      ${ventasTiendaDelMes.length > 0 ? (ingresosMes / ventasTiendaDelMes.length).toFixed(2) : '0.00'}
                     </span>
                     <span className="text-[11px] text-[#A69F93]">Por cada venta del mes</span>
                   </div>
@@ -3424,15 +3473,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           {m.nombre}
                           {m.clave === claveMesActual && <span className="ml-2 text-[10px] text-emerald-400 font-black uppercase">En curso</span>}
                         </span>
-                        <span className="text-right">
-                          <span className="font-black text-white block">${m.total.toFixed(2)}</span>
-                          <span className="text-[10px] text-[#A69F93]">{m.cantidad} venta(s)</span>
+                        <span className="flex items-start gap-4">
+                          <span className="text-right">
+                            <span className="text-[9px] font-black uppercase text-[#A69F93] block">Tienda</span>
+                            <span className="font-black text-white block">${m.total.toFixed(2)}</span>
+                            <span className="text-[10px] text-[#A69F93]">{m.cantidad} venta(s)</span>
+                          </span>
+                          <span className="text-right">
+                            <span className="text-[9px] font-black uppercase text-fuchsia-300 block">🎨 Sublimación</span>
+                            <span className="font-black text-fuchsia-200 block">${m.sublimacion.toFixed(2)}</span>
+                            <span className="text-[10px] text-[#A69F93]">{m.cantidadSub} venta(s)</span>
+                          </span>
                         </span>
                       </div>
                     ))}
                     <div className="flex items-center justify-between gap-3 px-3.5 pt-2 text-[11px] text-[#A69F93]">
                       <span>Total de todos los meses</span>
-                      <span className="font-black text-[#E6C687]">${ingresosTotales.toFixed(2)}</span>
+                      <span className="text-right">
+                        <span className="font-black text-[#E6C687] block">Tienda: ${ingresosTotalesTienda.toFixed(2)}</span>
+                        <span className="font-black text-fuchsia-300 block">🎨 Sublimación: ${ingresosTotalesSublimacion.toFixed(2)}</span>
+                      </span>
                     </div>
                   </div>
                 </details>
@@ -3444,10 +3504,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 const totalAbonosPendientes = ventas.filter(tieneSaldo).length;
                 const totalPedidosEspeciales = ventas.filter((v) => v.tipo === 'pedido_especial').length;
                 const totalFueraCatalogo = ventas.filter((v) => v.tipo === 'fuera_catalogo').length;
+                const totalSublimacion = ventas.filter((v) => esVentaSublimacion(v)).length;
                 const ventasFiltradasPorPeriodo = ventas.filter((v) => {
                   if (ventasFiltroTipo === 'abonos' && !tieneSaldo(v)) return false;
                   if (ventasFiltroTipo === 'especiales' && v.tipo !== 'pedido_especial') return false;
                   if (ventasFiltroTipo === 'fuera' && v.tipo !== 'fuera_catalogo') return false;
+                  if (ventasFiltroTipo === 'sublimacion' && !esVentaSublimacion(v)) return false;
                   if (searchQuery.trim()) {
                     const q = searchQuery.toLowerCase();
                     const match =
@@ -3541,6 +3603,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             setPedidoEspecialCantidad('1');
                             setPedidoEspecialDetalle('');
                             setPedidoEspecialColor('');
+          setEspecialEsSublimacion(false);
                             setPedidoEspecialTipoCobro('completo');
                             setIsModalVentaManualOpen(true);
                           }}
@@ -3584,6 +3647,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             setPedidoEspecialCantidad('1');
                             setPedidoEspecialDetalle('');
                             setPedidoEspecialColor('');
+          setEspecialEsSublimacion(false);
                             setPedidoEspecialTipoCobro('completo');
                             setIsModalVentaManualOpen(true);
                           }}
@@ -3627,6 +3691,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             setPedidoEspecialCantidad('1');
                             setPedidoEspecialDetalle('');
                             setPedidoEspecialColor('');
+          setEspecialEsSublimacion(false);
                             setPedidoEspecialTipoCobro('completo');
                             setIsModalVentaManualOpen(true);
                           }}
@@ -3708,6 +3773,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               { id: 'abonos', label: `🤝 Abonos por cobrar (${totalAbonosPendientes})` },
                               { id: 'especiales', label: `⭐ Pedidos especiales (${totalPedidosEspeciales})` },
                               { id: 'fuera', label: `📦 Fuera de catálogo (${totalFueraCatalogo})` },
+                              { id: 'sublimacion', label: `🎨 Sublimación (${totalSublimacion})` },
                             ] as const
                           ).map((tab) => (
                             <button
@@ -8965,6 +9031,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </p>
                     </div>
                   </div>
+
+                  {/* Sublimación: se cuenta aparte */}
+                  <label className="flex items-center gap-2.5 p-3 rounded-2xl bg-fuchsia-950/30 border border-fuchsia-800/60 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={especialEsSublimacion}
+                      onChange={(e) => setEspecialEsSublimacion(e.target.checked)}
+                      className="w-4 h-4 accent-fuchsia-500"
+                    />
+                    <span className="text-xs">
+                      <strong className="text-white font-black block">🎨 Es de Sublimación (personalizado)</strong>
+                      <span className="text-[11px] text-fuchsia-200/90">Sus ingresos se cuentan aparte y no se suman a la tienda normal.</span>
+                    </span>
+                  </label>
 
                   {/* Nombre y Precio del Producto Especial */}
                   <div className="p-3.5 sm:p-4 rounded-2xl bg-[#181614] border border-purple-900/50 space-y-3">
