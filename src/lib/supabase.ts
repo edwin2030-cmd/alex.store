@@ -457,6 +457,7 @@ export async function crearProducto(
     tiene_variantes?: boolean;
     atributos?: any[];
     variantes?: any[];
+    entrega?: 'inmediata' | 'pedido' | null;
   },
   cantidadInicial = 10,
   stockMinimo = 5
@@ -516,10 +517,11 @@ export async function crearProducto(
       tiene_variantes: tipo === 'arreglo' ? false : Boolean(producto.tiene_variantes || tallas.length > 0 || (producto.colores && producto.colores.length > 0)),
       atributos: tipo === 'arreglo' ? [] : (producto.atributos || []),
       variantes: tipo === 'arreglo' ? [] : variantesToSave,
+      entrega: producto.entrega || null,
     };
 
     // Resilient insert con eliminación automática de columnas no existentes en la BD
-    const optionalCols = ['tipo', 'costo', 'sku', 'tallas', 'colores', 'tallas_stock', 'atributos', 'variantes', 'tiene_variantes', 'imagenes', 'stock'];
+    const optionalCols = ['tipo', 'costo', 'sku', 'tallas', 'colores', 'tallas_stock', 'atributos', 'variantes', 'tiene_variantes', 'imagenes', 'stock', 'entrega'];
     let res = await supabase.from('productos').insert([insertPayload]).select();
     
     // Si la BD reporta que alguna columna opcional no existe, eliminarla y reintentar
@@ -607,6 +609,7 @@ export async function actualizarProducto(
     tiene_variantes?: boolean;
     atributos?: any[];
     variantes?: any[];
+    entrega?: 'inmediata' | 'pedido' | null;
   },
   stock?: number,
   stockMinimo?: number
@@ -678,6 +681,7 @@ export async function actualizarProducto(
       tiene_variantes: tipo === 'arreglo' ? false : Boolean(producto.tiene_variantes || tallas.length > 0 || (producto.colores && producto.colores.length > 0)),
       atributos: tipo === 'arreglo' ? [] : (producto.atributos || []),
       variantes: tipo === 'arreglo' ? [] : variantesToSave,
+      entrega: producto.entrega || null,
     };
 
     const updateRes = await safeUpdateProducto(id, updatePayload);
@@ -744,6 +748,7 @@ export async function safeUpdateProducto(
     'stock',
     'imagenes',
     'categoria_id',
+    'entrega',
   ];
 
   let res = await supabase.from('productos').update(currentPayload).eq('id', productoId);
@@ -1757,7 +1762,7 @@ export async function crearVentaManual(venta: {
   cajero_nombre?: string;
   registrado_por?: string;
   items: any[];
-  tipo?: 'web' | 'manual' | 'pedido_especial';
+  tipo?: 'web' | 'manual' | 'pedido_especial' | 'fuera_catalogo';
   notas?: string;
   descripcion?: string;
 }): Promise<{ success: boolean; data?: Venta; error?: string }> {
@@ -1916,7 +1921,7 @@ export async function crearVentaManual(venta: {
     } catch {}
 
     // 5. Descontar automáticamente el stock del inventario y producto por cada artículo vendido (solo productos regulares del catálogo)
-    if (venta.tipo !== 'pedido_especial' && venta.items && Array.isArray(venta.items) && venta.items.length > 0) {
+    if (venta.tipo !== 'pedido_especial' && venta.tipo !== 'fuera_catalogo' && venta.items && Array.isArray(venta.items) && venta.items.length > 0) {
       for (const item of venta.items) {
         if (item.is_especial || item.es_pedido_especial) continue;
         const prodId = item.producto_id || item.id;

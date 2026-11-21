@@ -56,6 +56,8 @@ export interface Producto {
   // Orden dentro de su categoría elegido por el dueño (menor = primero) y fijado en "Lo más vendido"
   orden?: number | null;
   destacado?: boolean;
+  // Cómo se entrega: 'inmediata' (lo tienen) o 'pedido' (por pedido especial); null = sin indicar
+  entrega?: 'inmediata' | 'pedido' | null;
   // Promoción: precio normal antes de la oferta (precio = precio de promoción) y hasta cuándo dura
   precio_antes?: number | null;
   oferta_hasta?: string | null;
@@ -170,7 +172,7 @@ export interface Venta {
   cajero_nombre?: string | null;
   registrado_por?: string | null;
   items: any[];
-  tipo: 'web' | 'manual' | 'pedido_especial';
+  tipo: 'web' | 'manual' | 'pedido_especial' | 'fuera_catalogo';
   notas?: string | null;
   descripcion?: string | null;
   creado_en?: string;

@@ -5,6 +5,7 @@ import { ArrowRight, Folder } from 'lucide-react';
 interface ColeccionesViewProps {
   categorias: Categoria[];
   countsPorCategoria: Record<string, number>;
+  fotoPorCategoria?: Record<string, string>;
   onSelectCollection: (categoriaId: string) => void;
   onGoToCatalogo: () => void;
 }
@@ -12,6 +13,7 @@ interface ColeccionesViewProps {
 export const ColeccionesView: React.FC<ColeccionesViewProps> = ({
   categorias,
   countsPorCategoria,
+  fotoPorCategoria = {},
   onSelectCollection,
   onGoToCatalogo,
 }) => {
@@ -41,6 +43,7 @@ export const ColeccionesView: React.FC<ColeccionesViewProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         {categorias.map((cat) => {
           const count = countsPorCategoria[cat.id] ?? 0;
+          const foto = fotoPorCategoria[cat.id];
 
           return (
             <div
@@ -57,9 +60,18 @@ export const ColeccionesView: React.FC<ColeccionesViewProps> = ({
 
               {/* Card Center: Icon & Tag */}
               <div className="flex flex-col items-center justify-center py-4 sm:py-6">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl bg-[#FAF8F5] border border-[#EFEAE2] flex items-center justify-center text-[#C9BFB0] group-hover:text-[#C59A4D] group-hover:scale-105 transition-all">
-                  <Folder className="w-6 h-6 sm:w-8 sm:h-8 stroke-[1.5]" />
-                </div>
+                {foto ? (
+                  <img
+                    src={foto}
+                    alt={cat.nombre}
+                    loading="lazy"
+                    className="w-28 h-28 sm:w-36 sm:h-36 rounded-2xl object-cover bg-[#FAF8F5] border border-[#EFEAE2] group-hover:scale-105 transition-transform"
+                  />
+                ) : (
+                  <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl bg-[#FAF8F5] border border-[#EFEAE2] flex items-center justify-center text-[#C9BFB0] group-hover:text-[#C59A4D] group-hover:scale-105 transition-all">
+                    <Folder className="w-6 h-6 sm:w-8 sm:h-8 stroke-[1.5]" />
+                  </div>
+                )}
                 <span className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-[0.2em] text-[#A69F93] mt-2 sm:mt-3">
                   COLECCIÓN
                 </span>

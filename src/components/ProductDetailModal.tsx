@@ -120,14 +120,18 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       }
     }
 
-    const tallasFinales = detected.length > 0 ? detected : ['S', 'M', 'L', 'XL', '2XL'];
+    // Calzado (tacos, taquillos, zapatillas): números en vez de S, M, L
+    const nombreCategoria = categorias.find((c) => c.id === producto.categoria_id)?.nombre || '';
+    const esCalzado = /tacos?\b|taquill|zapatill|calzado|guayo|tenis/i.test(`${nombreCategoria} ${producto.nombre}`);
+    const tallasCalzado = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45'];
+    const tallasFinales = detected.length > 0 ? detected : esCalzado ? tallasCalzado : ['S', 'M', 'L', 'XL', '2XL'];
     return [
       {
         nombre: 'Talla',
         valores: tallasFinales,
       },
     ];
-  }, [producto, isArreglo]);
+  }, [producto, isArreglo, categorias]);
 
   // Buscar variante que coincide exactamente con las opciones seleccionadas
   const matchingVariant = useMemo<VarianteProducto | undefined>(() => {
@@ -288,6 +292,17 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 <h2 className="text-lg sm:text-2xl font-black text-[#1A1918] leading-snug font-heading">
                   {producto.nombre}
                 </h2>
+
+                {producto.entrega === 'inmediata' && (
+                  <span className="inline-flex w-fit items-center text-[11px] bg-emerald-50 border border-emerald-200 text-emerald-800 px-2.5 py-1 rounded-lg font-extrabold">
+                    ✅ Entrega inmediata
+                  </span>
+                )}
+                {producto.entrega === 'pedido' && (
+                  <span className="inline-flex w-fit items-center text-[11px] bg-violet-50 border border-violet-200 text-violet-800 px-2.5 py-1 rounded-lg font-extrabold">
+                    📦 Por pedido especial (se encarga al proveedor)
+                  </span>
+                )}
 
                 {isArreglo ? (
                   <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-50 to-[#F0FAF4] border border-emerald-300 text-emerald-950 space-y-1">

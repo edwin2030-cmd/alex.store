@@ -218,6 +218,26 @@ export default function App() {
     return counts;
   }, [categorias, productosVisibles]);
 
+  // En la barra y en Colecciones solo salen las categorías que ya tienen productos (ej. Sublimación aparece cuando le agreguen algo)
+  const categoriasConProductos = useMemo(
+    () => categoriasVisibles.filter((c) => (countsPorCategoria[c.id] ?? 0) > 0),
+    [categoriasVisibles, countsPorCategoria]
+  );
+
+  // Foto de cada categoría: la que se subió en el panel o, si no tiene, la del primer producto con foto
+  const fotoPorCategoria = useMemo(() => {
+    const fotos: Record<string, string> = {};
+    categorias.forEach((c) => {
+      if (c.imagen_url && c.imagen_url.trim()) fotos[c.id] = c.imagen_url.trim();
+    });
+    productosVisibles.forEach((p) => {
+      if (!p.categoria_id || fotos[p.categoria_id]) return;
+      const foto = (p.imagen_url && p.imagen_url.trim()) || (p.imagenes || []).find((u) => u && u.trim());
+      if (foto) fotos[p.categoria_id] = foto;
+    });
+    return fotos;
+  }, [categorias, productosVisibles]);
+
   // Cart operations con soporte para variantes y opciones
   const handleAddToCart = (
     producto: Producto,
@@ -389,8 +409,9 @@ export default function App() {
         {currentView === 'colecciones' ? (
           /* View 2: Colecciones AlexStore (Image 3) */
           <ColeccionesView
-            categorias={categoriasVisibles}
+            categorias={categoriasConProductos}
             countsPorCategoria={countsPorCategoria}
+            fotoPorCategoria={fotoPorCategoria}
             onSelectCollection={handleSelectCollection}
             onGoToCatalogo={() => {
               setCategoriaSeleccionada(null);
@@ -405,10 +426,11 @@ export default function App() {
 
             {/* Category Filter Pills (Image 1) */}
             <CategoryFilter
-              categorias={categoriasVisibles}
+              categorias={categoriasConProductos}
               categoriaSeleccionada={categoriaSeleccionada}
               onSelectCategoria={setCategoriaSeleccionada}
               countsPorCategoria={countsPorCategoria}
+              fotoPorCategoria={fotoPorCategoria}
               totalCount={productosVisibles.length}
             />
 

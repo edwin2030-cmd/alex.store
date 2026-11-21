@@ -159,6 +159,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
           {/* Tallas y Colores manuales disponibles */}
           <div className="flex flex-wrap gap-1 pt-1.5">
+            {producto.entrega === 'inmediata' && (
+              <span className="inline-flex items-center text-[9px] sm:text-[10px] bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-0.5 rounded-lg font-extrabold">
+                ✅ Entrega inmediata
+              </span>
+            )}
+            {producto.entrega === 'pedido' && (
+              <span className="inline-flex items-center text-[9px] sm:text-[10px] bg-violet-50 border border-violet-200 text-violet-800 px-2 py-0.5 rounded-lg font-extrabold">
+                📦 Por pedido especial
+              </span>
+            )}
             {producto.tallas && producto.tallas.length > 0 && (
               <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] bg-[#FAF8F5] border border-[#EAE5DC] text-[#5A554D] px-2 py-0.5 rounded-lg font-medium">
                 <strong className="font-extrabold text-[#1A1918]">Tallas:</strong>

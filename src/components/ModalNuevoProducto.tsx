@@ -72,6 +72,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
   const [costo, setCosto] = useState(productoToEdit?.costo ? String(productoToEdit.costo) : '0');
   const [skuGeneral, setSkuGeneral] = useState(productoToEdit?.sku || '');
   const [activo, setActivo] = useState(productoToEdit?.activo ?? true);
+  const [entrega, setEntrega] = useState<'inmediata' | 'pedido' | ''>(productoToEdit?.entrega || '');
   const [cantidad, setCantidad] = useState(productoToEdit?.stock !== undefined ? String(productoToEdit.stock) : '10');
   const [stockMinimo, setStockMinimo] = useState(productoToEdit?.stock_minimo !== undefined ? String(productoToEdit.stock_minimo) : '3');
   const [descripcion, setDescripcion] = useState(productoToEdit?.descripcion || '');
@@ -123,6 +124,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
       setCosto(String(productoToEdit.costo || 0));
       setSkuGeneral(productoToEdit.sku || '');
       setActivo(productoToEdit.activo ?? true);
+      setEntrega(productoToEdit.entrega || '');
       setCantidad(String(productoToEdit.stock ?? 10));
       setStockMinimo(String(productoToEdit.stock_minimo ?? 3));
       setDescripcion(productoToEdit.descripcion || '');
@@ -166,6 +168,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
       setCosto('0');
       setSkuGeneral('');
       setActivo(true);
+      setEntrega('');
       setCantidad('10');
       setStockMinimo('3');
       setDescripcion('');
@@ -538,6 +541,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
       tiene_variantes: isArreglo ? false : (tieneVariantes || cleanTallas.length > 0 || colores.length > 0),
       atributos: isArreglo ? [] : (tieneVariantes ? atributos : []),
       variantes: isArreglo ? [] : (tieneVariantes ? variantes : []),
+      entrega: entrega || null,
     };
 
     if (isEditing && productoToEdit) {
@@ -756,6 +760,35 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
               />
             </button>
           </div>
+
+          {/* Tipo de entrega: se muestra como etiqueta en la tienda */}
+          {tipo !== 'arreglo' && (
+            <div className="p-3.5 rounded-2xl bg-[#FAF8F5] border border-[#EBE6DD] space-y-2">
+              <span className="text-xs font-bold text-[#1A1918] block">Entrega (etiqueta en la tienda)</span>
+              <div className="grid grid-cols-3 gap-1.5">
+                {(
+                  [
+                    { v: '', label: 'Sin indicar' },
+                    { v: 'inmediata', label: '✅ Entrega inmediata' },
+                    { v: 'pedido', label: '📦 Por pedido especial' },
+                  ] as const
+                ).map((op) => (
+                  <button
+                    key={op.v || 'nada'}
+                    type="button"
+                    onClick={() => setEntrega(op.v)}
+                    className={`py-2 px-2 rounded-xl text-[11px] font-bold border transition-colors cursor-pointer ${
+                      entrega === op.v
+                        ? 'bg-[#1A1918] text-white border-[#1A1918]'
+                        : 'bg-white text-[#5A554D] border-[#E2DCD1] hover:border-[#C59A4D]'
+                    }`}
+                  >
+                    {op.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Nombre del Producto o Arreglo */}
           <div>

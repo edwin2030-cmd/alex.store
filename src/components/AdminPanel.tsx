@@ -312,6 +312,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [pedidoEspecialDetalle, setPedidoEspecialDetalle] = useState('');
   const [pedidoEspecialColor, setPedidoEspecialColor] = useState('');
   const [pedidoEspecialTipoCobro, setPedidoEspecialTipoCobro] = useState<'completo' | 'abono'>('completo');
+  // 'pedido_especial' = encargo al proveedor; 'fuera_catalogo' = prenda que no está en la tienda pero se entrega pronto (abono o pago)
+  const [especialTipo, setEspecialTipo] = useState<'pedido_especial' | 'fuera_catalogo'>('pedido_especial');
   const [submittingVentaManual, setSubmittingVentaManual] = useState(false);
   const [liquidandoVentaId, setLiquidandoVentaId] = useState<string | null>(null);
 
@@ -366,7 +368,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Filtros de fecha y período para Ventas
   const [ventasFiltroPeriodo, setVentasFiltroPeriodo] = useState<'todos' | 'hoy' | 'semana' | 'mes' | 'ano' | 'rango'>('todos');
   // Filtro por tipo: todas, solo abonos con saldo por cobrar, o solo pedidos especiales
-  const [ventasFiltroTipo, setVentasFiltroTipo] = useState<'todas' | 'abonos' | 'especiales'>('todas');
+  const [ventasFiltroTipo, setVentasFiltroTipo] = useState<'todas' | 'abonos' | 'especiales' | 'fuera'>('todas');
   const [ventasFechaExacta, setVentasFechaExacta] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [ventasSemanaRef, setVentasSemanaRef] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [ventasMesExacto, setVentasMesExacto] = useState<string>(() => {
@@ -699,6 +701,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
     0
   );
+
+  // Ingresos por mes: cada mes empieza en $0 (no se borra nada; los meses anteriores quedan en el historial)
+  const NOMBRES_MES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+  const claveMes = (fecha?: string) => {
+    if (!fecha) return '';
+    const d = new Date(fecha);
+    if (isNaN(d.getTime())) return '';
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+  const hoyMes = new Date();
+  const claveMesActual = `${hoyMes.getFullYear()}-${String(hoyMes.getMonth() + 1).padStart(2, '0')}`;
+  const nombreMesActual = NOMBRES_MES[hoyMes.getMonth()];
+  const cobradoDeVenta = (v: Venta) => Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0;
+  const ventasDelMes = useMemo(() => ventas.filter((v) => claveMes(v.creado_en) === claveMesActual), [ventas, claveMesActual]);
+  const ingresosMes = ventasDelMes.reduce((acc, v) => acc + cobradoDeVenta(v), 0);
+  const resumenPorMes = useMemo(() => {
+    const mapa = new Map<string, { total: number; cantidad: number }>();
+    ventas.forEach((v) => {
+      const k = claveMes(v.creado_en);
+      if (!k) return;
+      const r = mapa.get(k) || { total: 0, cantidad: 0 };
+      r.total += cobradoDeVenta(v);
+      r.cantidad += 1;
+      mapa.set(k, r);
+    });
+    return Array.from(mapa.entries())
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .map(([k, r]) => ({ clave: k, nombre: `${NOMBRES_MES[Number(k.slice(5, 7)) - 1]} ${k.slice(0, 4)}`, ...r }));
+  }, [ventas]);
   const totalVentasGanado = useMemo(() => {
     return ventas.reduce(
       (acc, v) => acc + (Number(v.monto_abonado !== undefined ? v.monto_abonado : v.total) || 0),
@@ -1810,6 +1841,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         return;
       }
 
+      const esFuera = especialTipo === 'fuera_catalogo';
       const totalEspecial = Math.round(precioEspecial * cantEspecial * 100) / 100;
       let montoAbonado = totalEspecial;
       let metodoReal: string = (ventaManualMetodo === 'abono_contraentrega' || !ventaManualMetodo) ? 'efectivo' : ventaManualMetodo;
@@ -1841,21 +1873,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         {
           id: `esp_${Date.now()}`,
           producto_id: `esp_${Date.now()}`,
-          nombre: `⭐ [PEDIDO ESPECIAL] ${nombreEspecial}`,
+          nombre: esFuera ? `📦 [FUERA DE CATÁLOGO] ${nombreEspecial}` : `⭐ [PEDIDO ESPECIAL] ${nombreEspecial}`,
           precio: precioEspecial,
           cantidad: cantEspecial,
           subtotal: totalEspecial,
           talla: pedidoEspecialDetalle.trim() || undefined,
           color: pedidoEspecialColor.trim() || undefined,
           is_especial: true,
-          es_pedido_especial: true,
+          es_pedido_especial: !esFuera,
+          es_fuera_catalogo: esFuera,
         },
       ];
 
       setSubmittingVentaManual(true);
       try {
         const descCompleta =
-          `⭐ Pedido Especial: ${nombreEspecial} (x${cantEspecial})` +
+          `${esFuera ? '📦 Fuera de catálogo' : '⭐ Pedido Especial'}: ${nombreEspecial} (x${cantEspecial})` +
           (pedidoEspecialDetalle.trim() ? ` • Detalle/Talla: ${pedidoEspecialDetalle.trim()}` : '') +
           (pedidoEspecialColor.trim() ? ` • Color: ${pedidoEspecialColor.trim()}` : '') +
           (ventaManualNotas.trim() ? ` • Notas: ${ventaManualNotas.trim()}` : '');
@@ -1871,7 +1904,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           cajero_nombre: cajeroActual,
           registrado_por: cajeroActual,
           items: itemsEspeciales,
-          tipo: 'pedido_especial',
+          tipo: esFuera ? 'fuera_catalogo' : 'pedido_especial',
           descripcion: descCompleta,
           notas:
             descCompleta +
@@ -3351,25 +3384,58 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
 
                   <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
-                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">INGRESOS TOTALES</span>
-                    <span className="text-2xl sm:text-3xl font-black text-white block my-1.5">${ingresosTotales.toFixed(2)}</span>
-                    <span className="text-[11px] font-bold text-[#E6C687]">Acumulado en caja</span>
+                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">INGRESOS DE {nombreMesActual.toUpperCase()}</span>
+                    <span className="text-2xl sm:text-3xl font-black text-white block my-1.5">${ingresosMes.toFixed(2)}</span>
+                    <span className="text-[11px] font-bold text-[#E6C687]">Empieza en $0 cada mes</span>
                   </div>
 
                   <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
-                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">TOTAL TRANSACCIONES</span>
-                    <span className="text-2xl sm:text-3xl font-black text-white block my-1.5">{ventas.length}</span>
+                    <span className="text-[10px] font-black uppercase text-[#A69F93] block">VENTAS DEL MES</span>
+                    <span className="text-2xl sm:text-3xl font-black text-white block my-1.5">{ventasDelMes.length}</span>
                     <span className="text-[11px] text-[#A69F93]">Web + Mostrador</span>
                   </div>
 
                   <div className="bg-[#13110F] rounded-3xl p-5 border border-[#26221E] shadow-md">
                     <span className="text-[10px] font-black uppercase text-[#A69F93] block">TICKET PROMEDIO</span>
                     <span className="text-2xl sm:text-3xl font-black text-[#E6C687] block my-1.5">
-                      ${ventas.length > 0 ? (ingresosTotales / ventas.length).toFixed(2) : '0.00'}
+                      ${ventasDelMes.length > 0 ? (ingresosMes / ventasDelMes.length).toFixed(2) : '0.00'}
                     </span>
-                    <span className="text-[11px] text-[#A69F93]">Por cada venta</span>
+                    <span className="text-[11px] text-[#A69F93]">Por cada venta del mes</span>
                   </div>
                 </div>
+              )}
+
+              {userRole !== 'cajero' && resumenPorMes.length > 0 && (
+                <details className="bg-[#13110F] rounded-3xl border border-[#26221E] shadow-md group">
+                  <summary className="cursor-pointer list-none px-5 py-3.5 flex items-center justify-between gap-3 text-xs font-black uppercase tracking-wider text-[#E6C687]">
+                    <span>📅 Ingresos por mes (historial)</span>
+                    <span className="text-[#A69F93] font-bold normal-case tracking-normal group-open:hidden">Ver meses ▾</span>
+                    <span className="text-[#A69F93] font-bold normal-case tracking-normal hidden group-open:inline">Ocultar ▴</span>
+                  </summary>
+                  <div className="px-5 pb-4 space-y-1.5">
+                    {resumenPorMes.map((m) => (
+                      <div
+                        key={m.clave}
+                        className={`flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border text-xs ${
+                          m.clave === claveMesActual ? 'bg-emerald-950/30 border-emerald-800/60' : 'bg-[#1A1816] border-[#2D2822]'
+                        }`}
+                      >
+                        <span className="font-bold text-white">
+                          {m.nombre}
+                          {m.clave === claveMesActual && <span className="ml-2 text-[10px] text-emerald-400 font-black uppercase">En curso</span>}
+                        </span>
+                        <span className="text-right">
+                          <span className="font-black text-white block">${m.total.toFixed(2)}</span>
+                          <span className="text-[10px] text-[#A69F93]">{m.cantidad} venta(s)</span>
+                        </span>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between gap-3 px-3.5 pt-2 text-[11px] text-[#A69F93]">
+                      <span>Total de todos los meses</span>
+                      <span className="font-black text-[#E6C687]">${ingresosTotales.toFixed(2)}</span>
+                    </div>
+                  </div>
+                </details>
               )}
 
               {/* Filters bar & Period Selector */}
@@ -3377,9 +3443,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 const tieneSaldo = (v: Venta) => Boolean(v.saldo_pendiente && v.saldo_pendiente > 0 && v.estado_pago !== 'completo');
                 const totalAbonosPendientes = ventas.filter(tieneSaldo).length;
                 const totalPedidosEspeciales = ventas.filter((v) => v.tipo === 'pedido_especial').length;
+                const totalFueraCatalogo = ventas.filter((v) => v.tipo === 'fuera_catalogo').length;
                 const ventasFiltradasPorPeriodo = ventas.filter((v) => {
                   if (ventasFiltroTipo === 'abonos' && !tieneSaldo(v)) return false;
                   if (ventasFiltroTipo === 'especiales' && v.tipo !== 'pedido_especial') return false;
+                  if (ventasFiltroTipo === 'fuera' && v.tipo !== 'fuera_catalogo') return false;
                   if (searchQuery.trim()) {
                     const q = searchQuery.toLowerCase();
                     const match =
@@ -3510,6 +3578,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             setVentaManualNotas('');
                             setVentaManualMetodo('efectivo');
                             setVentaManualModo('especial');
+                            setEspecialTipo('pedido_especial');
                             setPedidoEspecialNombre('');
                             setPedidoEspecialPrecio('');
                             setPedidoEspecialCantidad('1');
@@ -3534,6 +3603,49 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             {userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')
                               ? '🔒 CAJA CERRADA'
                               : '⭐ PEDIDO ESPECIAL / ABONO'}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')) {
+                              alert('⚠️ LA CAJA ESTÁ CERRADA: Como trabajador, no puedes registrar ventas manuales mientras la caja esté cerrada. Pide al Dueño o Administrador que abra el turno de caja.');
+                              return;
+                            }
+                            setVentaManualCliente('');
+                            setVentaManualTelefono('');
+                            setVentaManualMonto('');
+                            setVentaManualMontoAbonado('');
+                            setVentaManualTipoAbono('mitad');
+                            setVentaManualProductoId('');
+                            setVentaManualNotas('');
+                            setVentaManualMetodo('efectivo');
+                            setVentaManualModo('especial');
+                            setEspecialTipo('fuera_catalogo');
+                            setPedidoEspecialNombre('');
+                            setPedidoEspecialPrecio('');
+                            setPedidoEspecialCantidad('1');
+                            setPedidoEspecialDetalle('');
+                            setPedidoEspecialColor('');
+                            setPedidoEspecialTipoCobro('completo');
+                            setIsModalVentaManualOpen(true);
+                          }}
+                          className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all ${
+                            userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')
+                              ? 'bg-[#26221E] text-rose-300 border border-rose-800/60 hover:bg-[#2F2924]'
+                              : 'bg-teal-600 hover:bg-teal-500 text-white'
+                          }`}
+                          title={
+                            userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')
+                              ? 'Caja cerrada: el trabajador no puede ingresar ventas hasta que se abra el turno'
+                              : 'Prenda que no está en el catálogo pero se entrega pronto (ej. suéter personalizado), con abono o pago completo'
+                          }
+                        >
+                          <Package className="w-4 h-4" />
+                          <span>
+                            {userRole === 'cajero' && (!sesionCaja || sesionCaja.estado !== 'abierta')
+                              ? '🔒 CAJA CERRADA'
+                              : '📦 FUERA DE CATÁLOGO / ABONO'}
                           </span>
                         </button>
                       </div>
@@ -3589,12 +3701,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           ))}
                         </div>
 
-                        <div className="flex items-center bg-[#1A1816] p-1 rounded-xl border border-[#2D2822] gap-1">
+                        <div className="flex items-center flex-wrap bg-[#1A1816] p-1 rounded-xl border border-[#2D2822] gap-1">
                           {(
                             [
                               { id: 'todas', label: 'Todo tipo' },
                               { id: 'abonos', label: `🤝 Abonos por cobrar (${totalAbonosPendientes})` },
                               { id: 'especiales', label: `⭐ Pedidos especiales (${totalPedidosEspeciales})` },
+                              { id: 'fuera', label: `📦 Fuera de catálogo (${totalFueraCatalogo})` },
                             ] as const
                           ).map((tab) => (
                             <button
@@ -3856,9 +3969,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                         ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60'
                                         : v.tipo === 'pedido_especial'
                                         ? 'bg-purple-950/80 text-purple-300 border border-purple-800 font-extrabold'
+                                        : v.tipo === 'fuera_catalogo'
+                                        ? 'bg-teal-950/80 text-teal-300 border border-teal-800 font-extrabold'
                                         : 'bg-[#25221F] text-slate-300 border border-[#332E27]'
                                     }`}>
-                                      {v.tipo === 'pedido_especial' ? '⭐ Especial' : v.tipo || 'web'}
+                                      {v.tipo === 'pedido_especial' ? '⭐ Especial' : v.tipo === 'fuera_catalogo' ? '📦 Fuera catálogo' : v.tipo || 'web'}
                                     </span>
                                   </div>
                                   <span className="text-[10px] text-[#A69F93] font-mono">
@@ -4029,10 +4144,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                         ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60'
                                         : v.tipo === 'pedido_especial'
                                         ? 'bg-purple-950/80 text-purple-300 border border-purple-800 font-extrabold'
+                                        : v.tipo === 'fuera_catalogo'
+                                        ? 'bg-teal-950/80 text-teal-300 border border-teal-800 font-extrabold'
                                         : 'bg-[#25221F] text-slate-300 border border-[#332E27]'
                                     }`}
                                   >
-                                    {v.tipo === 'pedido_especial' ? '⭐ Pedido Especial' : v.tipo || 'web'}
+                                    {v.tipo === 'pedido_especial' ? '⭐ Pedido Especial' : v.tipo === 'fuera_catalogo' ? '📦 Fuera de catálogo' : v.tipo || 'web'}
                                   </span>
                                 </td>
 
@@ -4560,6 +4677,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                         {v.tipo === 'pedido_especial' && (
                                           <span className="px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 text-[9px] font-bold uppercase">
                                             ⭐ Especial
+                                          </span>
+                                        )}
+                                        {v.tipo === 'fuera_catalogo' && (
+                                          <span className="px-1.5 py-0.2 rounded bg-teal-950 text-teal-300 border border-teal-800 text-[9px] font-bold uppercase">
+                                            📦 Fuera catálogo
                                           </span>
                                         )}
                                         <span className={`px-1.5 py-0.2 rounded border text-[9px] uppercase font-mono font-bold ${tagColor}`}>
@@ -5386,6 +5508,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     {v.tipo === 'pedido_especial' && (
                                       <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-purple-950/80 text-purple-300 border border-purple-800">
                                         ⭐ Pedido Especial
+                                      </span>
+                                    )}
+                                    {v.tipo === 'fuera_catalogo' && (
+                                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-teal-950/80 text-teal-300 border border-teal-800">
+                                        📦 Fuera de catálogo
                                       </span>
                                     )}
                                     <span className="text-[11px] text-[#A69F93]">
@@ -8730,12 +8857,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div>
                   <h3 className="font-black text-sm text-white">
                     {ventaManualModo === 'especial'
-                      ? '⭐ Registrar Pedido Especial (Prenda Externa / Encargo)'
+                      ? especialTipo === 'fuera_catalogo'
+                        ? '📦 Registrar Venta Fuera de Catálogo (Entrega pronto / Abono)'
+                        : '⭐ Registrar Pedido Especial (Prenda Externa / Encargo)'
                       : 'Registrar Venta Manual (Tienda Física / Caja)'}
                   </h3>
                   <p className="text-[11px] text-[#A69F93]">
                     {ventaManualModo === 'especial'
-                      ? 'Artículos que NO existen en la tienda pública • Se guarda en ventas y caja'
+                      ? especialTipo === 'fuera_catalogo'
+                        ? 'Prenda que no está en el catálogo pero ya la tienes o llega pronto • Se ve aparte de los pedidos especiales'
+                        : 'Encargo al proveedor que NO existe en la tienda pública • Se guarda en ventas y caja'
                       : 'Opción del panel para cobros directos de productos del catálogo'}
                   </p>
                 </div>
@@ -8749,7 +8880,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
 
             {/* Pestañas de Selector de Modo: Catálogo Regular vs Pedido Especial */}
-            <div className="grid grid-cols-2 gap-2 p-1 bg-[#1A1816] rounded-2xl border border-[#2D2822]">
+            <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#1A1816] rounded-2xl border border-[#2D2822]">
               <button
                 type="button"
                 onClick={() => setVentaManualModo('catalogo')}
@@ -8760,19 +8891,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 }`}
               >
                 <ShoppingBag className="w-3.5 h-3.5" />
-                <span>🛍️ Venta de Catálogo</span>
+                <span>🛍️ Catálogo</span>
               </button>
               <button
                 type="button"
-                onClick={() => setVentaManualModo('especial')}
-                className={`py-2 px-3 rounded-xl font-extrabold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                  ventaManualModo === 'especial'
+                onClick={() => { setVentaManualModo('especial'); setEspecialTipo('pedido_especial'); }}
+                className={`py-2 px-2 rounded-xl font-extrabold text-[11px] transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  ventaManualModo === 'especial' && especialTipo === 'pedido_especial'
                     ? 'bg-purple-600 text-white shadow-md font-black ring-1 ring-purple-400/80'
                     : 'text-[#A69F93] hover:text-white hover:bg-[#25221F]'
                 }`}
               >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>⭐ Pedido Especial (No en Tienda)</span>
+                <span>⭐ Pedido Especial</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setVentaManualModo('especial'); setEspecialTipo('fuera_catalogo'); }}
+                className={`py-2 px-2 rounded-xl font-extrabold text-[11px] transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  ventaManualModo === 'especial' && especialTipo === 'fuera_catalogo'
+                    ? 'bg-teal-600 text-white shadow-md font-black ring-1 ring-teal-400/80'
+                    : 'text-[#A69F93] hover:text-white hover:bg-[#25221F]'
+                }`}
+              >
+                <span>📦 Fuera de catálogo</span>
               </button>
             </div>
 
@@ -8818,9 +8959,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <div className="p-3 rounded-2xl bg-purple-950/40 border border-purple-800/60 text-purple-200 text-xs flex items-start gap-2.5">
                     <Sparkles className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
                     <div className="space-y-0.5">
-                      <strong className="text-white block font-black text-xs">Prenda / Encargo No Existente en Tienda</strong>
+                      <strong className="text-white block font-black text-xs">{especialTipo === 'fuera_catalogo' ? 'Prenda que no está en el catálogo (entrega pronto)' : 'Encargo al proveedor (no existe en la tienda)'}</strong>
                       <p className="text-[11px] text-purple-200/90 leading-relaxed">
-                        Escribe el producto y su valor. Se registrará en <strong>Ventas</strong> y en la <strong>Caja activa</strong> sin alterar el inventario contado de la tienda.
+                        {especialTipo === 'fuera_catalogo' ? 'Ej.: suéter personalizado que se entrega el 30. Queda en "📦 Fuera de catálogo", aparte de los pedidos especiales. ' : ''}Escribe el producto y su valor. Se registrará en <strong>Ventas</strong> y en la <strong>Caja activa</strong> sin alterar el inventario contado de la tienda.
                       </p>
                     </div>
                   </div>
