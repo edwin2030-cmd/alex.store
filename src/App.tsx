@@ -113,11 +113,14 @@ export default function App() {
     };
   }, []);
 
-  // La tienda solo muestra categorías activas y productos que no estén ocultos en el panel.
+  // La tienda solo muestra categorías activas y productos que no estén ocultos en el panel
+  // y que tengan foto (los que no tienen foto aparecen solos cuando se les sube una).
   const categoriasVisibles = useMemo(() => categorias.filter((c) => c.activa !== false), [categorias]);
   const productosVisibles = useMemo(() => {
     const inactivas = new Set(categorias.filter((c) => c.activa === false).map((c) => c.id));
-    return productos.filter((p) => p.activo !== false && !(p.categoria_id && inactivas.has(p.categoria_id)));
+    const tieneFoto = (p: Producto) =>
+      !!(p.imagen_url && p.imagen_url.trim()) || !!(p.imagenes && p.imagenes.some((u) => u && u.trim()));
+    return productos.filter((p) => p.activo !== false && tieneFoto(p) && !(p.categoria_id && inactivas.has(p.categoria_id)));
   }, [productos, categorias]);
 
   // Filtered & Sorted products
