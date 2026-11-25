@@ -57,7 +57,7 @@ export interface Producto {
   orden?: number | null;
   destacado?: boolean;
   // Cómo se entrega: 'inmediata' (lo tienen) o 'pedido' (por pedido especial); null = sin indicar
-  entrega?: 'inmediata' | 'pedido' | null;
+  entrega?: 'inmediata' | 'pedido' | 'agotado' | null;
   // Promoción: precio normal antes de la oferta (precio = precio de promoción) y hasta cuándo dura
   precio_antes?: number | null;
   oferta_hasta?: string | null;

@@ -457,7 +457,7 @@ export async function crearProducto(
     tiene_variantes?: boolean;
     atributos?: any[];
     variantes?: any[];
-    entrega?: 'inmediata' | 'pedido' | null;
+    entrega?: 'inmediata' | 'pedido' | 'agotado' | null;
   },
   cantidadInicial = 10,
   stockMinimo = 5
@@ -609,7 +609,7 @@ export async function actualizarProducto(
     tiene_variantes?: boolean;
     atributos?: any[];
     variantes?: any[];
-    entrega?: 'inmediata' | 'pedido' | null;
+    entrega?: 'inmediata' | 'pedido' | 'agotado' | null;
   },
   stock?: number,
   stockMinimo?: number

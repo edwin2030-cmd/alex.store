@@ -72,7 +72,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
   const [costo, setCosto] = useState(productoToEdit?.costo ? String(productoToEdit.costo) : '0');
   const [skuGeneral, setSkuGeneral] = useState(productoToEdit?.sku || '');
   const [activo, setActivo] = useState(productoToEdit?.activo ?? true);
-  const [entrega, setEntrega] = useState<'inmediata' | 'pedido' | ''>(productoToEdit?.entrega || '');
+  const [entrega, setEntrega] = useState<'inmediata' | 'pedido' | 'agotado' | ''>(productoToEdit?.entrega || '');
   const [cantidad, setCantidad] = useState(productoToEdit?.stock !== undefined ? String(productoToEdit.stock) : '10');
   const [stockMinimo, setStockMinimo] = useState(productoToEdit?.stock_minimo !== undefined ? String(productoToEdit.stock_minimo) : '3');
   const [descripcion, setDescripcion] = useState(productoToEdit?.descripcion || '');
@@ -765,12 +765,13 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
           {tipo !== 'arreglo' && (
             <div className="p-3.5 rounded-2xl bg-[#FAF8F5] border border-[#EBE6DD] space-y-2">
               <span className="text-xs font-bold text-[#1A1918] block">Entrega (etiqueta en la tienda)</span>
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                 {(
                   [
                     { v: '', label: 'Sin indicar' },
                     { v: 'inmediata', label: '✅ Entrega inmediata' },
                     { v: 'pedido', label: '📦 Por pedido especial' },
+                    { v: 'agotado', label: '❌ Agotado' },
                   ] as const
                 ).map((op) => (
                   <button

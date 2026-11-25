@@ -43,7 +43,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
   const handleAdd = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (hasVariants) {
+    if (hasVariants || producto.entrega === 'agotado') {
       onOpenDetail(producto);
       return;
     }
@@ -169,6 +169,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 📦 Por pedido especial
               </span>
             )}
+            {producto.entrega === 'agotado' && (
+              <span className="inline-flex items-center text-[9px] sm:text-[10px] bg-red-50 border border-red-200 text-red-700 px-2 py-0.5 rounded-lg font-extrabold">
+                ❌ Agotado
+              </span>
+            )}
             {producto.tallas && producto.tallas.length > 0 && (
               <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] bg-[#FAF8F5] border border-[#EAE5DC] text-[#5A554D] px-2 py-0.5 rounded-lg font-medium">
                 <strong className="font-extrabold text-[#1A1918]">Tallas:</strong>
@@ -253,6 +258,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                   <>
                     <Check className="w-3 h-3 sm:w-3.5 sm:h-3.5 stroke-[3] shrink-0" />
                     <span className="whitespace-nowrap">Listo</span>
+                  </>
+                ) : producto.entrega === 'agotado' ? (
+                  <>
+                    <span className="whitespace-nowrap">Agotado</span>
                   </>
                 ) : hasVariants ? (
                   <>

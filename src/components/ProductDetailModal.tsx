@@ -165,6 +165,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
   const handleAdd = () => {
     if (!producto) return;
+    if (producto.entrega === 'agotado') return;
     // Validar que todas las opciones obligatorias estén seleccionadas
     for (const attr of atributos) {
       if (!selectedOptions[attr.nombre]) {
@@ -301,6 +302,11 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 {producto.entrega === 'pedido' && (
                   <span className="inline-flex w-fit items-center text-[11px] bg-violet-50 border border-violet-200 text-violet-800 px-2.5 py-1 rounded-lg font-extrabold">
                     📦 Por pedido especial (se encarga al proveedor)
+                  </span>
+                )}
+                {producto.entrega === 'agotado' && (
+                  <span className="inline-flex w-fit items-center text-[11px] bg-red-50 border border-red-200 text-red-700 px-2.5 py-1 rounded-lg font-extrabold">
+                    ❌ Agotado (pregunta por WhatsApp si vuelve a llegar)
                   </span>
                 )}
 
@@ -463,6 +469,11 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 </div>
               ) : (
                 <div className="space-y-2.5 pt-1">
+                  {producto.entrega === 'agotado' ? (
+                    <div className="w-full min-h-[46px] py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 bg-red-50 border border-red-200 text-red-700">
+                      ❌ AGOTADO
+                    </div>
+                  ) : (
                   <button
                     onClick={handleAdd}
                     className={`w-full min-h-[46px] py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all active:scale-98 cursor-pointer touch-manipulation ${
@@ -483,6 +494,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                       </>
                     )}
                   </button>
+                  )}
 
                   <button
                     onClick={handleWhatsAppDirect}
