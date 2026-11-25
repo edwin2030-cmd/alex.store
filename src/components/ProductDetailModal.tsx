@@ -295,17 +295,17 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 </h2>
 
                 {producto.entrega === 'inmediata' && (
-                  <span className="inline-flex w-fit items-center text-[11px] bg-emerald-50 border border-emerald-200 text-emerald-800 px-2.5 py-1 rounded-lg font-extrabold">
+                  <span className="flex w-full items-center justify-center text-sm sm:text-base bg-emerald-600 text-white px-4 py-2.5 rounded-xl font-black uppercase tracking-wide shadow-md">
                     ✅ Entrega inmediata
                   </span>
                 )}
                 {producto.entrega === 'pedido' && (
-                  <span className="inline-flex w-fit items-center text-[11px] bg-violet-50 border border-violet-200 text-violet-800 px-2.5 py-1 rounded-lg font-extrabold">
+                  <span className="flex w-full items-center justify-center text-center text-sm sm:text-base bg-violet-600 text-white px-4 py-2.5 rounded-xl font-black uppercase tracking-wide shadow-md">
                     📦 Por pedido especial (se encarga al proveedor)
                   </span>
                 )}
                 {producto.entrega === 'agotado' && (
-                  <span className="inline-flex w-fit items-center text-[11px] bg-red-50 border border-red-200 text-red-700 px-2.5 py-1 rounded-lg font-extrabold">
+                  <span className="flex w-full items-center justify-center text-center text-sm sm:text-base bg-red-600 text-white px-4 py-2.5 rounded-xl font-black uppercase tracking-wide shadow-md">
                     ❌ Agotado (pregunta por WhatsApp si vuelve a llegar)
                   </span>
                 )}

@@ -144,6 +144,23 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         </div>
       </div>
 
+      {/* Franja de entrega: bien visible debajo de la foto */}
+      {producto.entrega === 'inmediata' && (
+        <div className="w-full bg-emerald-600 text-white text-center text-[11px] sm:text-sm font-black uppercase tracking-wide py-1.5 sm:py-2">
+          ✅ Entrega inmediata
+        </div>
+      )}
+      {producto.entrega === 'pedido' && (
+        <div className="w-full bg-violet-600 text-white text-center text-[11px] sm:text-sm font-black uppercase tracking-wide py-1.5 sm:py-2">
+          📦 Por pedido especial
+        </div>
+      )}
+      {producto.entrega === 'agotado' && (
+        <div className="w-full bg-red-600 text-white text-center text-[11px] sm:text-sm font-black uppercase tracking-wide py-1.5 sm:py-2">
+          ❌ Agotado
+        </div>
+      )}
+
       {/* Content */}
       <div className="p-3 sm:p-4 md:p-5 flex-1 flex flex-col justify-between space-y-2 sm:space-y-3">
         <div>
@@ -159,21 +176,6 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
           {/* Tallas y Colores manuales disponibles */}
           <div className="flex flex-wrap gap-1 pt-1.5">
-            {producto.entrega === 'inmediata' && (
-              <span className="inline-flex items-center text-[9px] sm:text-[10px] bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-0.5 rounded-lg font-extrabold">
-                ✅ Entrega inmediata
-              </span>
-            )}
-            {producto.entrega === 'pedido' && (
-              <span className="inline-flex items-center text-[9px] sm:text-[10px] bg-violet-50 border border-violet-200 text-violet-800 px-2 py-0.5 rounded-lg font-extrabold">
-                📦 Por pedido especial
-              </span>
-            )}
-            {producto.entrega === 'agotado' && (
-              <span className="inline-flex items-center text-[9px] sm:text-[10px] bg-red-50 border border-red-200 text-red-700 px-2 py-0.5 rounded-lg font-extrabold">
-                ❌ Agotado
-              </span>
-            )}
             {producto.tallas && producto.tallas.length > 0 && (
               <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] bg-[#FAF8F5] border border-[#EAE5DC] text-[#5A554D] px-2 py-0.5 rounded-lg font-medium">
                 <strong className="font-extrabold text-[#1A1918]">Tallas:</strong>

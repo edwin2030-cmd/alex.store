@@ -152,7 +152,13 @@ export async function quitarPromocion(prod: { id: string; precio: number; precio
 }
 
 // Orden de los productos dentro de una categoría: primero el orden del panel, luego los más nuevos.
-export function compararOrdenProducto(a: { orden?: number | null; creado_en?: string }, b: { orden?: number | null; creado_en?: string }): number {
+// Entrega inmediata primero, luego por pedido / sin indicar, y los agotados al final
+const rangoEntrega = (e?: string | null) => (e === 'inmediata' ? 0 : e === 'agotado' ? 2 : 1);
+
+export function compararOrdenProducto(a: { orden?: number | null; creado_en?: string; entrega?: string | null }, b: { orden?: number | null; creado_en?: string; entrega?: string | null }): number {
+  const ea = rangoEntrega(a.entrega);
+  const eb = rangoEntrega(b.entrega);
+  if (ea !== eb) return ea - eb;
   const oa = typeof a.orden === 'number' ? a.orden : 1e9;
   const ob = typeof b.orden === 'number' ? b.orden : 1e9;
   if (oa !== ob) return oa - ob;
