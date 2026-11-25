@@ -152,7 +152,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       )}
       {producto.entrega === 'pedido' && (
         <div className="w-full bg-violet-600 text-white text-center text-[11px] sm:text-sm font-black uppercase tracking-wide py-1.5 sm:py-2">
-          📦 Por pedido especial
+          📦 Por pedido
         </div>
       )}
       {producto.entrega === 'agotado' && (

@@ -770,7 +770,7 @@ export const ModalNuevoProducto: React.FC<ModalNuevoProductoProps> = ({
                   [
                     { v: '', label: 'Sin indicar' },
                     { v: 'inmediata', label: '✅ Entrega inmediata' },
-                    { v: 'pedido', label: '📦 Por pedido especial' },
+                    { v: 'pedido', label: '📦 Por pedido' },
                     { v: 'agotado', label: '❌ Agotado' },
                   ] as const
                 ).map((op) => (

@@ -301,7 +301,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 )}
                 {producto.entrega === 'pedido' && (
                   <span className="flex w-full items-center justify-center text-center text-sm sm:text-base bg-violet-600 text-white px-4 py-2.5 rounded-xl font-black uppercase tracking-wide shadow-md">
-                    📦 Por pedido especial (se encarga al proveedor)
+                    📦 Por pedido
                   </span>
                 )}
                 {producto.entrega === 'agotado' && (
