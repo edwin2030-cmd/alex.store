@@ -92,7 +92,7 @@ export const Footer: React.FC<FooterProps> = ({ onWhatsAppContact, onOpenAdminLo
               Política de Privacidad
             </a>
             <span className="flex items-center gap-1">
-              Catálogo digital oficial • Conectado a Supabase
+              Catálogo digital oficial
             </span>
           </div>
         </div>
