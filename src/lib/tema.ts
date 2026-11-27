@@ -25,3 +25,39 @@ export function guardarTema(tema: Tema) {
   }
   aplicarTema(tema);
 }
+
+/**
+ * Cambia el tema con una transición suave: un círculo que se abre desde el botón
+ * (View Transitions); si el navegador no lo soporta, los colores se funden poco a poco.
+ */
+export function cambiarTemaSuave(tema: Tema, origen?: { x: number; y: number }) {
+  const reducir = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const doc = document as Document & { startViewTransition?: (cb: () => void) => { ready: Promise<void> } };
+
+  if (reducir) {
+    guardarTema(tema);
+    return;
+  }
+
+  if (typeof doc.startViewTransition === 'function') {
+    const x = origen?.x ?? window.innerWidth - 60;
+    const y = origen?.y ?? 40;
+    const radio = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    const transicion = doc.startViewTransition(() => guardarTema(tema));
+    transicion.ready
+      .then(() => {
+        document.documentElement.animate(
+          { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radio}px at ${x}px ${y}px)`] },
+          { duration: 750, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', pseudoElement: '::view-transition-new(root)' }
+        );
+      })
+      .catch(() => {});
+    return;
+  }
+
+  // Otros navegadores: fundido de colores
+  const html = document.documentElement;
+  html.classList.add('tema-cambiando');
+  guardarTema(tema);
+  window.setTimeout(() => html.classList.remove('tema-cambiando'), 650);
+}

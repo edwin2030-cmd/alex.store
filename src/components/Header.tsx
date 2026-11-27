@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Search, ShoppingBag, SlidersHorizontal, Sun, Moon } from 'lucide-react';
-import { leerTema, guardarTema, Tema } from '../lib/tema';
+import { leerTema, cambiarTemaSuave, Tema } from '../lib/tema';
 import { AlexStoreLogo } from './AlexStoreLogo';
 import { LucesNavidad } from './Decoracion';
 import { esTemporadaNavidad } from '../lib/navidad';
@@ -28,10 +28,11 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
 
   const [tema, setTema] = useState<Tema>(leerTema);
-  const cambiarTema = () => {
+  const cambiarTema = (e: React.MouseEvent<HTMLButtonElement>) => {
     const nuevo: Tema = tema === 'oscuro' ? 'claro' : 'oscuro';
     setTema(nuevo);
-    guardarTema(nuevo);
+    const caja = e.currentTarget.getBoundingClientRect();
+    cambiarTemaSuave(nuevo, { x: caja.left + caja.width / 2, y: caja.top + caja.height / 2 });
   };
 
   const handleBrandTextTap = () => {

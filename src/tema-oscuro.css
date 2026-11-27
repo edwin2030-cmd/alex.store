@@ -199,3 +199,20 @@ html.tema-oscuro .tienda-publica .border-amber-50,
 html.tema-oscuro .tienda-publica .border-amber-300 {
   border-color: rgba(245,158,11,.35) !important;
 }
+
+/* ---------- Transición suave al cambiar de tema ---------- */
+/* el círculo nuevo se dibuja encima del anterior, sin el fundido por defecto */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-new(root) { z-index: 2; }
+::view-transition-old(root) { z-index: 1; }
+/* navegadores sin View Transitions: los colores se funden */
+html.tema-cambiando,
+html.tema-cambiando *,
+html.tema-cambiando *::before,
+html.tema-cambiando *::after {
+  transition: background-color 0.6s ease, color 0.6s ease, border-color 0.6s ease, fill 0.6s ease !important;
+}
