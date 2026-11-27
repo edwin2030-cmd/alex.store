@@ -73,3 +73,40 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #C3BCB0;
 }
+
+/* ===== Navidad: nieve ===== */
+.nieve-capa {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 40;
+}
+.nieve-copo {
+  position: absolute;
+  top: -12px;
+  border-radius: 9999px;
+  filter: blur(0.5px);
+  will-change: transform;
+  animation-name: nieve-caer;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@keyframes nieve-caer {
+  from { transform: translate3d(0, -12px, 0); }
+  to { transform: translate3d(var(--deriva, 0px), 105vh, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nieve-capa { display: none; }
+}
+.nieve-dentro {
+  position: absolute;
+  z-index: 1;
+}
+.nieve-dentro .nieve-copo {
+  animation-name: nieve-caer-dentro;
+}
+@keyframes nieve-caer-dentro {
+  from { transform: translate3d(0, -12px, 0); }
+  to { transform: translate3d(var(--deriva, 0px), var(--caida, 520px), 0); }
+}
