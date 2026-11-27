@@ -14,7 +14,6 @@
   position: absolute;
   top: -12px;
   border-radius: 9999px;
-  filter: blur(0.4px);
   will-change: transform;
   animation-name: nieve-caer;
   animation-timing-function: linear;
@@ -92,7 +91,7 @@
 }
 @keyframes luz-brillo {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; box-shadow: 0 0 3px 0 var(--luz); }
+  50% { opacity: 0.55; }
 }
 @media (max-width: 640px) {
   .luz-solo-grande { display: none; }
@@ -109,7 +108,6 @@
   min-height: 26px;
   pointer-events: none;
   z-index: 5;
-  filter: drop-shadow(0 -3px 4px rgba(90, 120, 160, 0.35));
 }
 .nieve-foto-svg {
   width: 100%;
@@ -126,8 +124,8 @@
   animation: brillo-nieve 2.4s ease-in-out infinite;
 }
 @keyframes brillo-nieve {
-  0%, 100% { opacity: 0.25; transform: scale(0.7); }
-  50% { opacity: 1; transform: scale(1.25); }
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
 }
 .nieve-foto-copo {
   position: absolute;
@@ -186,7 +184,7 @@
     inset 0 -2px 0 rgba(0, 0, 0, 0.18),
     0 6px 18px -6px rgba(0, 0, 0, 0.45) !important;
   background-size: 260% 100%, 100% 100% !important;
-  animation: brillo-boton 6s ease-in-out infinite;
+  background-position: 130% 0, 0 0;
   transition: filter 0.2s ease, transform 0.15s ease;
 }
 .navidad button[class~="bg-[#141312]"] {
@@ -205,9 +203,16 @@
 .navidad a[class~="bg-emerald-600"]:hover {
   filter: brightness(1.1) saturate(1.05);
 }
+@media (hover: hover) {
+  .navidad button[class~="bg-[#141312]"]:hover,
+  .navidad button[class~="bg-emerald-600"]:hover,
+  .navidad a[class~="bg-emerald-600"]:hover {
+    animation: brillo-boton 0.9s ease-out;
+  }
+}
 @keyframes brillo-boton {
-  0%, 60% { background-position: 130% 0, 0 0; }
-  100% { background-position: -130% 0, 0 0; }
+  from { background-position: 130% 0, 0 0; }
+  to { background-position: -130% 0, 0 0; }
 }
 .navidad button[class~="bg-[#141312]"]::after,
 .navidad button[class~="bg-emerald-600"]::after,

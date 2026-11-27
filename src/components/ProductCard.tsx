@@ -1,3 +1,4 @@
+import { miniatura } from '../lib/miniatura';
 import React, { useState } from 'react';
 import { Producto, Categoria } from '../types';
 import { ShoppingBag, Check, ChevronLeft, ChevronRight, Eye, MessageCircle } from 'lucide-react';
@@ -93,13 +94,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           </div>
         )}
         <img
-          src={images[activeImageIndex]}
+          src={miniatura(images[activeImageIndex])}
           alt={producto.nombre}
           loading="lazy"
+          decoding="async"
           className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
           onError={(e) => {
             const target = e.target as HTMLImageElement;
-            if (!target.src.includes('unsplash')) {
+            if (target.src.includes('/mini/')) {
+              target.src = images[activeImageIndex];
+            } else if (!target.src.includes('unsplash')) {
               target.src = 'https://images.unsplash.com/photo-1577212017184-80cc0da11082?auto=format&fit=crop&w=600&q=80';
             }
           }}

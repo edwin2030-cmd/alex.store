@@ -36,7 +36,7 @@ export const Copo: React.FC<{ size?: number; className?: string; style?: React.C
 );
 
 // ---------- Nieve acumulada al pie de cada foto ----------
-const BRILLOS = [8, 21, 33, 46, 58, 71, 84, 93];
+const BRILLOS = [12, 39, 66, 90];
 const BORDE =
   'M0 24 C 8 16, 20 15, 28 21 C 34 14, 46 13, 52 20 C 60 25, 70 26, 78 19 C 86 12, 100 13, 106 20 C 114 26, 126 24, 132 18 C 140 12, 152 14, 158 21 C 166 26, 178 25, 186 18 C 192 14, 198 16, 200 18';
 
@@ -51,6 +51,8 @@ export const NieveEnFoto: React.FC = () => {
             <stop offset="1" stopColor="#dfeaf4" />
           </linearGradient>
         </defs>
+        {/* sombrita debajo del borde (en vez de un filtro, más liviano) */}
+        <path d={BORDE} transform="translate(0 -2.5)" fill="none" stroke="#9db8d2" strokeOpacity="0.45" strokeWidth="3" />
         {/* capa de atrás, azul hielo */}
         <path
           d="M0 17 C 15 8, 28 10, 40 15 S 62 21, 76 12 S 100 5, 114 13 S 138 21, 152 12 S 178 5, 200 13 L200 40 L0 40 Z"

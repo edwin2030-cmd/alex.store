@@ -5,7 +5,7 @@ import React, { useMemo } from 'react';
 export const Nieve: React.FC<{ cantidad?: number; color?: string; dentro?: boolean; caida?: number; sombra?: boolean }> = ({ cantidad = 22, color = '#ffffff', dentro = false, caida = 520, sombra = false }) => {
   const copos = useMemo(
     () =>
-      Array.from({ length: cantidad }, (_, i) => ({
+      Array.from({ length: typeof window !== 'undefined' && window.innerWidth < 640 ? Math.ceil(cantidad * 0.55) : cantidad }, (_, i) => ({
         id: i,
         left: Math.round(Math.random() * 100),
         size: 4 + Math.round(Math.random() * 6),

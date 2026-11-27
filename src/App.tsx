@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import { Categoria, Producto, ItemCarrito, UsuarioPanel } from './types';
 import { supabase, getCategorias, getProductos, getMasVendidos, compararOrdenProducto } from './lib/supabase';
 import { getSavedUserProfile, getPerfilUsuario, cerrarSesion } from './lib/auth';
@@ -11,9 +11,14 @@ import { ColeccionesView } from './components/ColeccionesView';
 import { ProductCard } from './components/ProductCard';
 import { ProductDetailModal } from './components/ProductDetailModal';
 import { CartDrawer } from './components/CartDrawer';
-import { CheckoutModal } from './components/CheckoutModal';
-import { AdminLoginModal } from './components/AdminLoginModal';
-import { AdminPanel } from './components/AdminPanel';
+// Se descargan solo cuando alguien los abre (la tienda carga más rápido)
+const cargarCheckout = () => import('./components/CheckoutModal');
+const CheckoutModal = lazy(() => cargarCheckout().then((m) => ({ default: m.CheckoutModal })));
+const AdminLoginModal = lazy(() => import('./components/AdminLoginModal').then((m) => ({ default: m.AdminLoginModal })));
+const AdminPanel = lazy(() => import('./components/AdminPanel').then((m) => ({ default: m.AdminPanel })));
+
+// Cuántas tarjetas se dibujan al inicio y cuántas más al acercarse al final
+const TARJETAS_POR_TANDA = 24;
 import { Footer } from './components/Footer';
 import { LegalModal } from './components/LegalModal';
 import { CATEGORIAS_INICIALES } from './data/initialData';
@@ -369,19 +374,56 @@ export default function App() {
     loadData();
   };
 
+  // Dibujar los productos por tandas: primero 24 y luego más al bajar
+  const [limiteTarjetas, setLimiteTarjetas] = useState(TARJETAS_POR_TANDA);
+  const finDeLista = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    setLimiteTarjetas(TARJETAS_POR_TANDA);
+  }, [filteredProductos]);
+  useEffect(() => {
+    const el = finDeLista.current;
+    if (!el || limiteTarjetas >= filteredProductos.length) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setLimiteTarjetas(filteredProductos.length);
+      return;
+    }
+    const obs = new IntersectionObserver(
+      (entradas) => {
+        if (entradas.some((e) => e.isIntersecting)) {
+          setLimiteTarjetas((n) => n + TARJETAS_POR_TANDA);
+        }
+      },
+      { rootMargin: '1200px 0px' }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [limiteTarjetas, filteredProductos.length, currentView]);
+  // Adelantar la descarga del pago cuando se abre la bolsa
+  useEffect(() => {
+    if (isCartOpen) cargarCheckout().catch(() => {});
+  }, [isCartOpen]);
+
   const totalCartCount = cartItems.reduce((acc, curr) => acc + curr.cantidad, 0);
 
   // If Admin Mode is active, render full AdminPanel with dynamic role protection
   if (isAdminMode) {
     return (
-      <AdminPanel
-        currentUser={currentUser}
-        onExitAdmin={() => {
-          setIsAdminMode(false);
-          loadData();
-        }}
-        onLogout={handleLogout}
-      />
+      <Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center bg-[#FAF8F5] text-[#7A7368] text-sm font-bold">
+            Cargando panel…
+          </div>
+        }
+      >
+        <AdminPanel
+          currentUser={currentUser}
+          onExitAdmin={() => {
+            setIsAdminMode(false);
+            loadData();
+          }}
+          onLogout={handleLogout}
+        />
+      </Suspense>
     );
   }
 
@@ -563,7 +605,7 @@ export default function App() {
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6">
-                  {filteredProductos.map((producto) => (
+                  {filteredProductos.slice(0, limiteTarjetas).map((producto) => (
                     <ProductCard
                       key={producto.id}
                       producto={producto}
@@ -573,6 +615,9 @@ export default function App() {
                       masVendido={puestoVisible(producto)}
                     />
                   ))}
+                  {limiteTarjetas < filteredProductos.length && (
+                    <div ref={finDeLista} className="col-span-full h-10" aria-hidden="true" />
+                  )}
                 </div>
               )}
             </div>
@@ -609,6 +654,7 @@ export default function App() {
 
       {/* Checkout Modal */}
       {isCheckoutOpen && (
+        <Suspense fallback={null}>
         <CheckoutModal
           isOpen={isCheckoutOpen}
           onClose={() => setIsCheckoutOpen(false)}
@@ -616,15 +662,18 @@ export default function App() {
           onOrderCompleted={handleClearCart}
           initialMethod={checkoutMethod}
         />
+        </Suspense>
       )}
 
       {/* Admin Login Modal (Triggered by 10 fast clicks on logo) */}
       {isAdminLoginOpen && (
+        <Suspense fallback={null}>
         <AdminLoginModal
           isOpen={isAdminLoginOpen}
           onClose={() => setIsAdminLoginOpen(false)}
           onLoginSuccess={handleLoginSuccess}
         />
+        </Suspense>
       )}
 
       {/* Toast Notification (Image 4 bottom) */}
