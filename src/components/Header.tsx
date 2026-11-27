@@ -1,5 +1,6 @@
-import React from 'react';
-import { Search, ShoppingBag, SlidersHorizontal } from 'lucide-react';
+import React, { useState } from 'react';
+import { Search, ShoppingBag, SlidersHorizontal, Sun, Moon } from 'lucide-react';
+import { leerTema, guardarTema, Tema } from '../lib/tema';
 import { AlexStoreLogo } from './AlexStoreLogo';
 import { LucesNavidad } from './Decoracion';
 import { esTemporadaNavidad } from '../lib/navidad';
@@ -25,6 +26,13 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAdminLogin,
   onToggleFilters,
 }) => {
+
+  const [tema, setTema] = useState<Tema>(leerTema);
+  const cambiarTema = () => {
+    const nuevo: Tema = tema === 'oscuro' ? 'claro' : 'oscuro';
+    setTema(nuevo);
+    guardarTema(nuevo);
+  };
 
   const handleBrandTextTap = () => {
     onViewChange('catalogo');
@@ -97,14 +105,25 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="sm:hidden">COLEC.</span>
           </button>
 
+          {/* Modo claro / oscuro */}
+          <button
+            type="button"
+            onClick={cambiarTema}
+            aria-label={tema === 'oscuro' ? 'Cambiar a página clara' : 'Cambiar a página oscura'}
+            title={tema === 'oscuro' ? 'Página clara' : 'Página oscura'}
+            className="tema-boton w-8 h-8 sm:w-10 sm:h-10 shrink-0 rounded-full border border-[#E5DFD5] bg-white text-[#1A1918] hover:border-[#C59A4D] flex items-center justify-center shadow-xs transition-colors active:scale-95 cursor-pointer touch-manipulation"
+          >
+            {tema === 'oscuro' ? <Sun className="w-4 h-4 text-[#E6C687]" /> : <Moon className="w-4 h-4" />}
+          </button>
+
           {/* BOLSA Button */}
           <button
             onClick={onOpenCart}
             className="flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-full bg-[#141312] hover:bg-black text-white text-[10px] sm:text-xs font-black tracking-wider uppercase transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
             aria-label="Abrir bolsa de pedidos"
           >
-            <ShoppingBag className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#E6C687]" />
-            <span>BOLSA</span>
+            <ShoppingBag className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-[#E6C687]" />
+            <span className="hidden sm:inline">BOLSA</span>
             {cartCount > 0 && (
               <span className="min-w-4 h-4 px-1 rounded-full bg-[#E6C687] text-[#141312] text-[9px] sm:text-[10px] font-black flex items-center justify-center">
                 {cartCount}

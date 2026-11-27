@@ -1,0 +1,201 @@
+/* =====================================================================
+   MODO OSCURO de la tienda pública (botón sol/luna del encabezado).
+   Se activa con la clase "tema-oscuro" en <html>; el panel no cambia.
+   Archivo generado por gen_tema_oscuro.py (lista de colores de la tienda).
+   ===================================================================== */
+html.tema-oscuro { color-scheme: dark; }
+html.tema-oscuro body { background-color: #0f0e0d; color: #F3EEE6; }
+html.tema-oscuro .tienda-publica { background-color: #0f0e0d !important; color: #F3EEE6 !important; }
+html.tema-oscuro .tienda-publica input,
+html.tema-oscuro .tienda-publica textarea,
+html.tema-oscuro .tienda-publica select { color: #F3EEE6; }
+html.tema-oscuro .tienda-publica.navidad-claro { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cg fill='none' stroke='%23E6C687' stroke-opacity='.09' stroke-width='1.1' stroke-linecap='round'%3E%3Cg transform='translate(40 44)'%3E%3Cpath d='M0-9V9M-7.8-4.5 7.8 4.5M-7.8 4.5 7.8-4.5'/%3E%3C/g%3E%3Cg transform='translate(130 120) scale(.65)'%3E%3Cpath d='M0-9V9M-7.8-4.5 7.8 4.5M-7.8 4.5 7.8-4.5'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E"); }
+html.tema-oscuro .tienda-publica .nieve-sombra .nieve-copo { box-shadow: none; }
+html.tema-oscuro .luz-tramo::before { border-bottom-color: #6b5f4a; }
+html.tema-oscuro ::-webkit-scrollbar-track { background: #151311; }
+html.tema-oscuro ::-webkit-scrollbar-thumb { background: #3a342e; }
+
+html.tema-oscuro .tienda-publica .bg-\[\#FAF8F5\] {
+  background-color: #0f0e0d !important;
+}
+
+html.tema-oscuro .tienda-publica .bg-\[\#FAF8F5\]\/95 {
+  background-color: rgba(15,14,13,.95) !important;
+}
+
+html.tema-oscuro .tienda-publica .bg-\[\#FAF8F5\]\/80 {
+  background-color: rgba(15,14,13,.8) !important;
+}
+
+html.tema-oscuro .tienda-publica .bg-white,
+html.tema-oscuro .tienda-publica .focus\:bg-white:focus,
+html.tema-oscuro .tienda-publica .hover\:bg-white:hover {
+  background-color: #1a1816 !important;
+}
+
+html.tema-oscuro .tienda-publica .bg-white\/95 {
+  background-color: rgba(26,24,22,.95) !important;
+}
+
+html.tema-oscuro .tienda-publica .bg-white\/50 {
+  background-color: rgba(26,24,22,.5) !important;
+}
+
+html.tema-oscuro .tienda-publica .bg-\[\#F7F5F0\],
+html.tema-oscuro .tienda-publica .bg-\[\#FCFAF7\],
+html.tema-oscuro .tienda-publica .bg-\[\#FCFBF8\],
+html.tema-oscuro .tienda-publica .bg-\[\#FCFAF5\],
+html.tema-oscuro .tienda-publica .bg-\[\#FAF6EE\],
+html.tema-oscuro .tienda-publica .bg-\[\#F7F4EF\],
+html.tema-oscuro .tienda-publica .bg-\[\#EFEAE2\] {
+  background-color: #221f1c !important;
+}
+
+html.tema-oscuro .tienda-publica .hover\:bg-\[\#FAF8F5\]:hover,
+html.tema-oscuro .tienda-publica .hover\:bg-\[\#F7F4EF\]:hover,
+html.tema-oscuro .tienda-publica .hover\:bg-\[\#F2ECE1\]:hover,
+html.tema-oscuro .tienda-publica .hover\:bg-\[\#E7E0D6\]:hover,
+html.tema-oscuro .tienda-publica .hover\:bg-\[\#EAE5DC\]\/60:hover,
+html.tema-oscuro .tienda-publica .hover\:bg-\[\#FFFDF9\]:hover {
+  background-color: #2b2723 !important;
+}
+
+html.tema-oscuro .tienda-publica .bg-\[\#E0F2FE\],
+html.tema-oscuro .tienda-publica .bg-\[\#F0F8FF\],
+html.tema-oscuro .tienda-publica .hover\:bg-\[\#F0F8FF\]:hover,
+html.tema-oscuro .tienda-publica .hover\:bg-\[\#E0F2FE\]:hover,
+html.tema-oscuro .tienda-publica .bg-blue-50 {
+  background-color: rgba(2,132,199,.16) !important;
+}
+
+html.tema-oscuro .tienda-publica .bg-emerald-50,
+html.tema-oscuro .tienda-publica .bg-emerald-50\/80,
+html.tema-oscuro .tienda-publica .bg-emerald-50\/70,
+html.tema-oscuro .tienda-publica .bg-emerald-100,
+html.tema-oscuro .tienda-publica .hover\:bg-emerald-100:hover {
+  background-color: rgba(16,185,129,.13) !important;
+}
+
+html.tema-oscuro .tienda-publica .bg-amber-50 {
+  background-color: rgba(245,158,11,.13) !important;
+}
+
+html.tema-oscuro .tienda-publica .bg-rose-50,
+html.tema-oscuro .tienda-publica .bg-rose-50\/40,
+html.tema-oscuro .tienda-publica .bg-red-50,
+html.tema-oscuro .tienda-publica .hover\:bg-rose-100:hover {
+  background-color: rgba(244,63,94,.13) !important;
+}
+
+html.tema-oscuro .tienda-publica .from-emerald-50 {
+  --tw-gradient-from: rgba(16,185,129,.13) !important;
+}
+
+html.tema-oscuro .tienda-publica .to-orange-50,
+html.tema-oscuro .tienda-publica .to-\[\#F0FAF4\] {
+  --tw-gradient-to: rgba(26,24,22,1) !important;
+}
+
+html.tema-oscuro .tienda-publica .text-\[\#1A1918\],
+html.tema-oscuro .tienda-publica .hover\:text-\[\#1A1918\]:hover,
+html.tema-oscuro .tienda-publica .text-\[\#0F172A\],
+html.tema-oscuro .tienda-publica .text-\[\#2A2724\],
+html.tema-oscuro .tienda-publica .text-\[\#141312\],
+html.tema-oscuro .tienda-publica .text-slate-950 {
+  color: #F3EEE6 !important;
+}
+
+html.tema-oscuro .tienda-publica .text-\[\#7A7368\],
+html.tema-oscuro .tienda-publica .text-\[\#8C8375\],
+html.tema-oscuro .tienda-publica .text-\[\#5A554D\],
+html.tema-oscuro .tienda-publica .text-\[\#6B655C\],
+html.tema-oscuro .tienda-publica .text-\[\#5C564D\],
+html.tema-oscuro .tienda-publica .text-\[\#475569\] {
+  color: #B8AFA2 !important;
+}
+
+html.tema-oscuro .tienda-publica .text-\[\#9C9488\],
+html.tema-oscuro .tienda-publica .text-\[\#A69F93\] {
+  color: #8E8578 !important;
+}
+
+html.tema-oscuro .tienda-publica .placeholder-\[\#9C9488\]::placeholder {
+  color: #7d7569 !important;
+}
+
+html.tema-oscuro .tienda-publica .text-\[\#0369A1\],
+html.tema-oscuro .tienda-publica .text-blue-700 {
+  color: #7cc7f0 !important;
+}
+
+html.tema-oscuro .tienda-publica .text-emerald-700,
+html.tema-oscuro .tienda-publica .text-emerald-800,
+html.tema-oscuro .tienda-publica .text-emerald-900,
+html.tema-oscuro .tienda-publica .text-emerald-950,
+html.tema-oscuro .tienda-publica .hover\:text-emerald-900:hover {
+  color: #6ee7b7 !important;
+}
+
+html.tema-oscuro .tienda-publica .text-amber-700,
+html.tema-oscuro .tienda-publica .text-amber-800,
+html.tema-oscuro .tienda-publica .text-amber-900 {
+  color: #fcd34d !important;
+}
+
+html.tema-oscuro .tienda-publica .text-red-700,
+html.tema-oscuro .tienda-publica .text-rose-700,
+html.tema-oscuro .tienda-publica .text-rose-800 {
+  color: #fda4af !important;
+}
+
+html.tema-oscuro .tienda-publica .border-\[\#EAE5DC\],
+html.tema-oscuro .tienda-publica .border-\[\#E5DFD5\],
+html.tema-oscuro .tienda-publica .border-\[\#EAE3D5\],
+html.tema-oscuro .tienda-publica .border-\[\#F0EAE1\],
+html.tema-oscuro .tienda-publica .border-\[\#EFEAE2\],
+html.tema-oscuro .tienda-publica .border-\[\#EFE5D3\],
+html.tema-oscuro .tienda-publica .border-\[\#EAE6DF\],
+html.tema-oscuro .tienda-publica .border-\[\#DDD7CC\],
+html.tema-oscuro .tienda-publica .border-\[\#F2ECE1\],
+html.tema-oscuro .tienda-publica .border-\[\#E5E0D8\],
+html.tema-oscuro .tienda-publica .border-\[\#DDD6C8\],
+html.tema-oscuro .tienda-publica .border-\[\#EBE7DF\],
+html.tema-oscuro .tienda-publica .border-\[\#EBE6DD\],
+html.tema-oscuro .tienda-publica .border-\[\#E8E2D8\],
+html.tema-oscuro .tienda-publica .border-\[\#D5CEC2\],
+html.tema-oscuro .tienda-publica .divide-\[\#F2EDE4\] {
+  border-color: #332e29 !important;
+}
+
+html.tema-oscuro .tienda-publica .border-\[\#1A1918\],
+html.tema-oscuro .tienda-publica .hover\:border-\[\#1A1918\]:hover,
+html.tema-oscuro .tienda-publica .hover\:border-\[\#141312\]:hover,
+html.tema-oscuro .tienda-publica .border-\[\#141312\] {
+  border-color: #d9c39a !important;
+}
+
+html.tema-oscuro .tienda-publica .border-\[\#BAE6FD\],
+html.tema-oscuro .tienda-publica .border-\[\#E0F2FE\],
+html.tema-oscuro .tienda-publica .border-blue-200 {
+  border-color: rgba(2,132,199,.4) !important;
+}
+
+html.tema-oscuro .tienda-publica .border-emerald-200,
+html.tema-oscuro .tienda-publica .border-emerald-300,
+html.tema-oscuro .tienda-publica .border-emerald-50,
+html.tema-oscuro .tienda-publica .border-emerald-300\/80,
+html.tema-oscuro .tienda-publica .border-emerald-200\/80 {
+  border-color: rgba(16,185,129,.35) !important;
+}
+
+html.tema-oscuro .tienda-publica .border-rose-200,
+html.tema-oscuro .tienda-publica .border-rose-50,
+html.tema-oscuro .tienda-publica .border-red-200 {
+  border-color: rgba(244,63,94,.35) !important;
+}
+
+html.tema-oscuro .tienda-publica .border-amber-200,
+html.tema-oscuro .tienda-publica .border-amber-50,
+html.tema-oscuro .tienda-publica .border-amber-300 {
+  border-color: rgba(245,158,11,.35) !important;
+}
