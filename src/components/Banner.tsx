@@ -1,12 +1,14 @@
 import React from 'react';
 import { Sparkles, Gift } from 'lucide-react';
 import { esTemporadaNavidad, textoCuentaRegresiva } from '../lib/navidad';
+import { EsferasColgantes } from './Decoracion';
 
 const BannerNavidad: React.FC = () => {
   return (
     <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#0E2A1F] via-[#123524] to-[#3A0D12] text-white my-3 sm:my-6 mx-3 sm:mx-6 lg:mx-8 p-5 sm:p-10 lg:p-12 shadow-xl border border-[#C59A4D]/30">
       {/* Luces cálidas de fondo */}
       <div className="absolute -top-10 right-10 w-64 sm:w-96 h-64 sm:h-96 bg-[#B3202E]/30 rounded-full blur-3xl pointer-events-none" />
+      <EsferasColgantes />
       <div className="absolute -bottom-16 left-1/3 w-64 sm:w-80 h-64 sm:h-80 bg-[#C59A4D]/15 rounded-full blur-3xl pointer-events-none" />
 
       <div className="relative z-10 max-w-3xl space-y-3 sm:space-y-4">

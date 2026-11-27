@@ -1,0 +1,240 @@
+/* =====================================================================
+   NAVIDAD PREMIUM (se usa solo del 20 nov al 6 ene; ver src/lib/navidad.ts)
+   ===================================================================== */
+
+/* ---------- Nieve cayendo ---------- */
+.nieve-capa {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 45;
+}
+.nieve-copo {
+  position: absolute;
+  top: -12px;
+  border-radius: 9999px;
+  filter: blur(0.4px);
+  will-change: transform;
+  animation-name: nieve-caer;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@keyframes nieve-caer {
+  from { transform: translate3d(0, -12px, 0); }
+  to { transform: translate3d(var(--deriva, 0px), 105vh, 0); }
+}
+.nieve-dentro { position: absolute; z-index: 1; }
+.nieve-dentro .nieve-copo { animation-name: nieve-caer-dentro; }
+@keyframes nieve-caer-dentro {
+  from { transform: translate3d(0, -12px, 0); }
+  to { transform: translate3d(var(--deriva, 0px), var(--caida, 520px), 0); }
+}
+.nieve-sombra .nieve-copo {
+  box-shadow: 0 0 3px 1px rgba(110, 140, 175, 0.55);
+}
+
+/* ---------- Luces bajo el encabezado (focos inclinados en diagonal) ---------- */
+.luces-navidad {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 30px;
+  display: flex;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 41;
+}
+.luz-tramo {
+  position: relative;
+  flex: 1 1 0;
+  height: 100%;
+}
+.luz-tramo::before {
+  /* el cable, en curva entre foco y foco */
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -10px;
+  height: 18px;
+  border-bottom: 1.5px solid #3b3428;
+  border-radius: 0 0 50% 50%;
+}
+.luz-foco {
+  position: absolute;
+  left: 50%;
+  top: 7px;
+  width: 9px;
+  height: 14px;
+  margin-left: -4.5px;
+  border-radius: 50% 50% 50% 50% / 38% 38% 62% 62%;
+  background:
+    radial-gradient(circle at 38% 30%, rgba(255, 255, 255, 0.9) 0 16%, transparent 34%),
+    var(--luz);
+  box-shadow: 0 0 6px 1px var(--luz), 0 2px 16px 3px var(--luz);
+  transform-origin: 50% -3px;
+  animation: luz-brillo 2.6s ease-in-out infinite;
+}
+.luz-izq { transform: rotate(32deg); }
+.luz-der { transform: rotate(-32deg); }
+.luz-foco::before {
+  /* casquillo dorado */
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+  background: linear-gradient(#e9c46a, #9c7424);
+}
+@keyframes luz-brillo {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; box-shadow: 0 0 3px 0 var(--luz); }
+}
+@media (max-width: 640px) {
+  .luz-solo-grande { display: none; }
+}
+
+/* ---------- Nieve acumulada al pie de cada foto ---------- */
+.nieve-foto {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 19%;
+  max-height: 52px;
+  min-height: 26px;
+  pointer-events: none;
+  z-index: 5;
+  filter: drop-shadow(0 -3px 4px rgba(90, 120, 160, 0.35));
+}
+.nieve-foto-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.nieve-foto-brillo {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 9999px;
+  background: #ffffff;
+  box-shadow: 0 0 5px 1.5px rgba(180, 215, 255, 0.95);
+  animation: brillo-nieve 2.4s ease-in-out infinite;
+}
+@keyframes brillo-nieve {
+  0%, 100% { opacity: 0.25; transform: scale(0.7); }
+  50% { opacity: 1; transform: scale(1.25); }
+}
+.nieve-foto-copo {
+  position: absolute;
+  bottom: 22%;
+  color: #8fb6d8;
+  opacity: 0.9;
+}
+
+/* ---------- Esferas colgantes ---------- */
+.esferas {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 320px;
+  height: 150px;
+  pointer-events: none;
+  z-index: 2;
+}
+.esfera {
+  position: absolute;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform-origin: top center;
+  animation: esfera-vaiven 4.5s ease-in-out infinite;
+  filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.35));
+}
+.esfera-hilo {
+  width: 1px;
+  background: linear-gradient(#e9c46a, #b8862b);
+}
+@keyframes esfera-vaiven {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(4deg); }
+}
+@media (max-width: 640px) {
+  .esferas { transform: scale(0.65); transform-origin: top right; }
+}
+
+/* ---------- Encabezado con filo dorado ---------- */
+.navidad header {
+  border-bottom-color: rgba(201, 160, 72, 0.55) !important;
+  box-shadow: 0 1px 0 rgba(201, 160, 72, 0.25);
+}
+
+/* ---------- Botones: rojo vino / esmeralda, filo dorado, nieve encima ---------- */
+.navidad button[class~="bg-[#141312]"],
+.navidad button[class~="bg-emerald-600"],
+.navidad a[class~="bg-emerald-600"] {
+  position: relative;
+  color: #fffaf0 !important;
+  border: 1px solid rgba(233, 196, 106, 0.85) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.18),
+    0 6px 18px -6px rgba(0, 0, 0, 0.45) !important;
+  background-size: 260% 100%, 100% 100% !important;
+  animation: brillo-boton 6s ease-in-out infinite;
+  transition: filter 0.2s ease, transform 0.15s ease;
+}
+.navidad button[class~="bg-[#141312]"] {
+  background-image:
+    linear-gradient(110deg, transparent 42%, rgba(255, 236, 190, 0.32) 50%, transparent 58%),
+    linear-gradient(180deg, #c3192f 0%, #8c0d20 100%) !important;
+}
+.navidad button[class~="bg-emerald-600"],
+.navidad a[class~="bg-emerald-600"] {
+  background-image:
+    linear-gradient(110deg, transparent 42%, rgba(255, 236, 190, 0.28) 50%, transparent 58%),
+    linear-gradient(180deg, #17844f 0%, #0b5a35 100%) !important;
+}
+.navidad button[class~="bg-[#141312]"]:hover,
+.navidad button[class~="bg-emerald-600"]:hover,
+.navidad a[class~="bg-emerald-600"]:hover {
+  filter: brightness(1.1) saturate(1.05);
+}
+@keyframes brillo-boton {
+  0%, 60% { background-position: 130% 0, 0 0; }
+  100% { background-position: -130% 0, 0 0; }
+}
+.navidad button[class~="bg-[#141312]"]::after,
+.navidad button[class~="bg-emerald-600"]::after,
+.navidad a[class~="bg-emerald-600"]::after {
+  content: '';
+  position: absolute;
+  left: 7%;
+  right: 7%;
+  top: -5px;
+  height: 12px;
+  pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 14' preserveAspectRatio='none'%3E%3Cpath fill='%23fff' d='M0 7 C3 1 9 0 15 3 C21 0 29 1 35 3 C41 0 50 0 56 3 C62 0 72 1 78 3 C85 0 95 0 100 6 L100 8 C97 9 95 9 93 8 C92 12 89 13 88 8 C80 9 70 8 64 8 C63 12 59 14 58 8 C48 9 38 9 30 8 C29 12 26 13 25 8 C16 9 8 9 0 9 Z'/%3E%3C/svg%3E") 0 0 / 100% 100% no-repeat;
+  filter: drop-shadow(0 1px 1px rgba(40, 60, 90, 0.35));
+}
+
+/* ---------- Fondo de la página ---------- */
+.navidad.navidad-claro {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cg fill='none' stroke='%23B8862B' stroke-opacity='.16' stroke-width='1.1' stroke-linecap='round'%3E%3Cg transform='translate(40 44)'%3E%3Cpath d='M0-9V9M-7.8-4.5 7.8 4.5M-7.8 4.5 7.8-4.5'/%3E%3C/g%3E%3Cg transform='translate(130 120) scale(.65)'%3E%3Cpath d='M0-9V9M-7.8-4.5 7.8 4.5M-7.8 4.5 7.8-4.5'/%3E%3C/g%3E%3C/g%3E%3Cg fill='%23B8862B' fill-opacity='.14'%3E%3Ccircle cx='110' cy='30' r='1.3'/%3E%3Ccircle cx='20' cy='140' r='1.1'/%3E%3Ccircle cx='160' cy='70' r='1'/%3E%3C/g%3E%3C/svg%3E");
+}
+.navidad.navidad-oscuro {
+  background-image:
+    radial-gradient(ellipse 80% 40% at 50% 0%, rgba(150, 18, 40, 0.18), transparent 70%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cg fill='none' stroke='%23F2D589' stroke-opacity='.08' stroke-width='1.1' stroke-linecap='round'%3E%3Cg transform='translate(40 44)'%3E%3Cpath d='M0-9V9M-7.8-4.5 7.8 4.5M-7.8 4.5 7.8-4.5'/%3E%3C/g%3E%3Cg transform='translate(130 120) scale(.65)'%3E%3Cpath d='M0-9V9M-7.8-4.5 7.8 4.5M-7.8 4.5 7.8-4.5'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nieve-capa { display: none; }
+  .luz-foco, .nieve-foto-brillo, .esfera,
+  .navidad button, .navidad a { animation: none; }
+}

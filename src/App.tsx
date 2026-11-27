@@ -386,7 +386,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#FAF8F5] text-[#1A1918] flex flex-col font-sans">
+    <div className={`min-h-screen bg-[#FAF8F5] text-[#1A1918] flex flex-col font-sans${esTemporadaNavidad() ? ' navidad navidad-claro' : ''}`}>
       {esTemporadaNavidad() && <Nieve cantidad={45} sombra />}
       {/* Top Navigation */}
       <Header
