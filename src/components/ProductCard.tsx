@@ -3,6 +3,8 @@ import { Producto, Categoria } from '../types';
 import { ShoppingBag, Check, ChevronLeft, ChevronRight, Eye, MessageCircle } from 'lucide-react';
 import { isArregloFutbol } from '../lib/arregloFutbol';
 import { enPromocion, ahorro } from '../lib/promociones';
+import { NieveEnFoto } from './Decoracion';
+import { esTemporadaNavidad } from '../lib/navidad';
 
 interface ProductCardProps {
   producto: Producto;
@@ -134,6 +136,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             </div>
           </>
         )}
+
+        {esTemporadaNavidad() && <NieveEnFoto />}
 
         {/* Quick View Button overlay on hover */}
         <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:flex items-center justify-center pointer-events-none">

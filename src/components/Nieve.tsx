@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 
 // Copos de nieve suaves que caen sobre la página. No bloquean clics
 // y se apagan si el teléfono tiene activado "reducir movimiento".
-export const Nieve: React.FC<{ cantidad?: number; color?: string; dentro?: boolean; caida?: number }> = ({ cantidad = 22, color = '#ffffff', dentro = false, caida = 520 }) => {
+export const Nieve: React.FC<{ cantidad?: number; color?: string; dentro?: boolean; caida?: number; sombra?: boolean }> = ({ cantidad = 22, color = '#ffffff', dentro = false, caida = 520, sombra = false }) => {
   const copos = useMemo(
     () =>
       Array.from({ length: cantidad }, (_, i) => ({
@@ -19,7 +19,7 @@ export const Nieve: React.FC<{ cantidad?: number; color?: string; dentro?: boole
 
   return (
     <div
-      className={dentro ? 'nieve-capa nieve-dentro' : 'nieve-capa'}
+      className={`nieve-capa${dentro ? ' nieve-dentro' : ''}${sombra ? ' nieve-sombra' : ''}`}
       style={{ ['--caida' as string]: `${caida}px` } as React.CSSProperties}
       aria-hidden="true"
     >

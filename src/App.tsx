@@ -4,6 +4,8 @@ import { supabase, getCategorias, getProductos, getMasVendidos, compararOrdenPro
 import { getSavedUserProfile, getPerfilUsuario, cerrarSesion } from './lib/auth';
 import { Header } from './components/Header';
 import { Banner } from './components/Banner';
+import { Nieve } from './components/Nieve';
+import { esTemporadaNavidad } from './lib/navidad';
 import { CategoryFilter } from './components/CategoryFilter';
 import { ColeccionesView } from './components/ColeccionesView';
 import { ProductCard } from './components/ProductCard';
@@ -385,6 +387,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] text-[#1A1918] flex flex-col font-sans">
+      {esTemporadaNavidad() && <Nieve cantidad={45} sombra />}
       {/* Top Navigation */}
       <Header
         currentView={currentView}

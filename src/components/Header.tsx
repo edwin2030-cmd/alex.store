@@ -1,6 +1,8 @@
 import React from 'react';
 import { Search, ShoppingBag, SlidersHorizontal } from 'lucide-react';
 import { AlexStoreLogo } from './AlexStoreLogo';
+import { LucesNavidad } from './Decoracion';
+import { esTemporadaNavidad } from '../lib/navidad';
 
 interface HeaderProps {
   currentView: 'catalogo' | 'colecciones';
@@ -144,6 +146,7 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
       </div>
+      {esTemporadaNavidad() && <LucesNavidad />}
     </header>
   );
 };
